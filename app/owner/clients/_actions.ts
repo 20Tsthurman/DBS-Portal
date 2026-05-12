@@ -1,0 +1,145 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { auth, currentUser } from "@clerk/nextjs/server";
+import {
+  getSupabaseServiceClient,
+  type ProjectRecord,
+  type TimeLogCategory,
+  type TimeLogRecord,
+} from "@/lib/supabase";
+
+const VALID_CATEGORIES: TimeLogCategory[] = [
+  "editing",
+  "planning",
+  "filming",
+  "admin",
+  "communication",
+];
+
+async function ensureOwner(): Promise<{ ok: true; ownerLabel: string } | { ok: false; error: string }> {
+  const { userId } = await auth();
+  if (!userId) return { ok: false, error: "Unauthorized" };
+  const user = await currentUser();
+  if (user?.publicMetadata?.role !== "owner") {
+    return { ok: false, error: "Forbidden" };
+  }
+  const ownerLabel =
+    user?.fullName ||
+    user?.primaryEmailAddress?.emailAddress ||
+    "Owner";
+  return { ok: true, ownerLabel };
+}
+
+export interface AddTimeLogInput {
+  clientId: string;
+  date: string;
+  hours: number;
+  category: TimeLogCategory;
+  notes: string;
+}
+
+export interface ActionResult<T = null> {
+  ok: boolean;
+  error?: string;
+  data?: T;
+}
+
+export async function addTimeLogAction(
+  input: AddTimeLogInput
+): Promise<ActionResult<TimeLogRecord>> {
+  const guard = await ensureOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  if (!input.clientId) return { ok: false, error: "Missing client id" };
+  if (!input.date) return { ok: false, error: "Date is required" };
+  if (!Number.isFinite(input.hours) || input.hours <= 0) {
+    return { ok: false, error: "Hours must be greater than 0" };
+  }
+  if (!VALID_CATEGORIES.includes(input.category)) {
+    return { ok: false, error: "Invalid category" };
+  }
+
+  const supabase = getSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from("time_logs")
+    .insert({
+      client_id: input.clientId,
+      logged_by: guard.ownerLabel,
+      date: input.date,
+      hours: input.hours,
+      category: input.category,
+      notes: input.notes?.trim() || null,
+    })
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    return { ok: false, error: error?.message ?? "Failed to log time" };
+  }
+
+  revalidatePath(`/owner/clients/${input.clientId}`);
+  revalidatePath("/owner/clients");
+  return { ok: true, data: data as TimeLogRecord };
+}
+
+export async function deleteTimeLogAction(
+  logId: string,
+  clientId: string
+): Promise<ActionResult> {
+  const guard = await ensureOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const supabase = getSupabaseServiceClient();
+  const { error } = await supabase.from("time_logs").delete().eq("id", logId);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/owner/clients/${clientId}`);
+  revalidatePath("/owner/clients");
+  return { ok: true };
+}
+
+export interface UpdateNotesInput {
+  clientId: string;
+  notes: string;
+}
+
+export async function updateNotesAction(
+  input: UpdateNotesInput
+): Promise<ActionResult<{ savedAt: string }>> {
+  const guard = await ensureOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const supabase = getSupabaseServiceClient();
+
+  const { data: existingRow, error: lookupError } = await supabase
+    .from("projects")
+    .select("*")
+    .eq("client_id", input.clientId)
+    .order("start_date", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  if (lookupError) return { ok: false, error: lookupError.message };
+
+  const trimmed = input.notes.length > 0 ? input.notes : null;
+
+  if (!existingRow) {
+    const { error: insertError } = await supabase.from("projects").insert({
+      client_id: input.clientId,
+      current_phase: "onboarding",
+      status: "active",
+      notes: trimmed,
+    });
+    if (insertError) return { ok: false, error: insertError.message };
+  } else {
+    const project = existingRow as ProjectRecord;
+    const { error: updateError } = await supabase
+      .from("projects")
+      .update({ notes: trimmed })
+      .eq("id", project.id);
+    if (updateError) return { ok: false, error: updateError.message };
+  }
+
+  revalidatePath(`/owner/clients/${input.clientId}`);
+  return { ok: true, data: { savedAt: new Date().toISOString() } };
+}

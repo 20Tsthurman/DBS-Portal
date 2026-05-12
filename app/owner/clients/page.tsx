@@ -1,0 +1,121 @@
+import Link from "next/link";
+import { StatusPill } from "@/components/ui/StatusPill";
+import {
+  fetchActivePackages,
+  fetchClientsWithRelations,
+} from "./_lib/queries";
+import {
+  clientStatusLabel,
+  clientStatusTone,
+  formatCurrency,
+  formatDate,
+  formatHours,
+} from "./_lib/format";
+import { AddClientButton } from "./_components/AddClientButton";
+import { TypePill } from "./_components/TypePill";
+
+export const dynamic = "force-dynamic";
+
+export default async function OwnerClientsPage() {
+  const [rows, packages] = await Promise.all([
+    fetchClientsWithRelations(),
+    fetchActivePackages(),
+  ]);
+
+  return (
+    <section>
+      <header className="mb-8 flex items-start justify-between gap-6">
+        <div>
+          <p className="eyebrow mb-3">Owner — Clients</p>
+          <h1 className="page-title">Clients</h1>
+        </div>
+        <AddClientButton packages={packages} />
+      </header>
+
+      {rows.length === 0 ? (
+        <div
+          className="flex flex-col items-center justify-center border px-8 py-20 text-center"
+          style={{
+            borderColor: "var(--border)",
+            backgroundColor: "var(--surface-raised)",
+          }}
+        >
+          <p
+            style={{
+              color: "var(--text-body)",
+              fontSize: "15px",
+              marginBottom: 20,
+            }}
+          >
+            No clients yet. Add your first client.
+          </p>
+          <AddClientButton packages={packages} label="Add Your First Client" />
+        </div>
+      ) : (
+        <div
+          className="border"
+          style={{
+            borderColor: "var(--border)",
+            backgroundColor: "var(--surface-raised)",
+          }}
+        >
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Package</th>
+                <th>Status</th>
+                <th>Start Date</th>
+                <th>Monthly Value</th>
+                <th>Hours This Month</th>
+                <th style={{ textAlign: "right" }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ client, project, pkg, hoursThisMonth }) => (
+                <tr key={client.id} className="row-hover">
+                  <td style={{ color: "var(--text-primary)", fontWeight: 600 }}>
+                    {client.name}
+                  </td>
+                  <td>
+                    <TypePill type={client.type} />
+                  </td>
+                  <td>{pkg?.name ?? "—"}</td>
+                  <td>
+                    <StatusPill tone={clientStatusTone(client.status)}>
+                      {clientStatusLabel(client.status)}
+                    </StatusPill>
+                  </td>
+                  <td>{formatDate(project?.start_date)}</td>
+                  <td>{formatCurrency(pkg?.monthly_price)}</td>
+                  <td>{formatHours(hoursThisMonth)}</td>
+                  <td style={{ textAlign: "right" }}>
+                    <Link
+                      href={`/owner/clients/${client.id}`}
+                      style={{
+                        color: "var(--accent)",
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                      }}
+                    >
+                      View
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <style>{`
+        .row-hover:hover td {
+          background-color: var(--surface-base);
+        }
+      `}</style>
+    </section>
+  );
+}
