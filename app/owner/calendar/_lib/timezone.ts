@@ -76,6 +76,122 @@ function readWallClock(d: Date, tz: string): WallClockParts {
 }
 
 /**
+ * String math on YYYY-MM-DD date keys. Timezone-agnostic — we use UTC
+ * arithmetic only because calendar dates are calendrically consistent
+ * across zones (a day is a day). Never compute a wall-clock date by
+ * reading server-local Date fields.
+ */
+export function addDaysToDateKey(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+/** Day-of-week (0=Sun..6=Sat) for a YYYY-MM-DD wall-clock date. */
+export function weekdayForDateKey(dateKey: string): number {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+/**
+ * Sunday-of-the-week date key for the week containing the wall-clock date
+ * of `d` in `tz`. Returns YYYY-MM-DD.
+ */
+export function weekStartKeyForDate(
+  d: Date,
+  tz: string = PORTAL_TIMEZONE
+): string {
+  const key = dateKeyInTimezone(d, tz);
+  const dow = weekdayForDateKey(key);
+  return addDaysToDateKey(key, -dow);
+}
+
+/**
+ * "May 11 – 17, 2026"            (same month)
+ * "Apr 28 – May 4, 2026"         (cross month, same year)
+ * "Dec 30, 2025 – Jan 5, 2026"   (cross year)
+ */
+export function formatWeekRangeLabel(weekStartKey: string): string {
+  const endKey = addDaysToDateKey(weekStartKey, 6);
+  const [sy, sm, sd] = weekStartKey.split("-").map(Number);
+  const [ey, em, ed] = endKey.split("-").map(Number);
+  const startMonth = monthShort(sm);
+  const endMonth = monthShort(em);
+  if (sy !== ey) {
+    return `${startMonth} ${sd}, ${sy} – ${endMonth} ${ed}, ${ey}`;
+  }
+  if (sm !== em) {
+    return `${startMonth} ${sd} – ${endMonth} ${ed}, ${sy}`;
+  }
+  return `${startMonth} ${sd} – ${ed}, ${sy}`;
+}
+
+const MONTH_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+function monthShort(monthOneBased: number): string {
+  return MONTH_SHORT[monthOneBased - 1] ?? "";
+}
+
+/**
+ * Hour-of-day as a decimal fraction in `tz` (e.g., 14.5 for 2:30 PM).
+ *
+ * Use this for positioning a UTC `Date` on a wall-clock time grid (like the
+ * week view's vertical axis). The plain `d.getHours()` would return the
+ * server's local hour, which silently drifts on a UTC host — banned by the
+ * timezone convention documented in `./types.ts`.
+ */
+export function hourOfDayInTimezone(
+  d: Date,
+  tz: string = PORTAL_TIMEZONE
+): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hourCycle: "h23",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(d);
+  const map: Record<string, string> = {};
+  for (const p of parts) {
+    if (p.type !== "literal") map[p.type] = p.value;
+  }
+  const h = Number(map.hour);
+  const m = Number(map.minute);
+  const s = Number(map.second);
+  return h + m / 60 + s / 3600;
+}
+
+/**
+ * Format a UTC `Date` as a wall-clock time string in `tz`, like "9:00 AM".
+ */
+export function formatTimeInTimezone(
+  d: Date,
+  tz: string = PORTAL_TIMEZONE
+): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(d);
+}
+
+/**
  * Build a UTC `Date` representing the instant when `tz`'s wall clock reads
  * `dateStr` + `timeStr`. DST-aware.
  *
