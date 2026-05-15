@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import {
   getSupabaseServiceClient,
-  type AvailabilityBlockRecord,
+  type TimeBlockCategory,
+  type TimeBlockRecord,
 } from "@/lib/supabase";
 
 async function ensureOwner(): Promise<
@@ -25,22 +26,26 @@ export interface ActionResult<T = null> {
   data?: T;
 }
 
-export interface CreateBlockInput {
-  date?: string;
-  recurringWeekday?: number;
-  startTime?: string | null;
-  endTime?: string | null;
+const VALID_CATEGORIES: TimeBlockCategory[] = [
+  "sonography",
+  "work_block",
+  "blocked",
+];
+
+export interface CreateTimeBlockInput {
+  /** YYYY-MM-DD wall-clock in PORTAL_TIMEZONE. */
+  date: string;
+  /** HH:MM wall-clock in PORTAL_TIMEZONE. */
+  startTime: string;
+  endTime: string;
+  category: TimeBlockCategory;
+  /** Only allowed when category === "work_block". */
+  clientId?: string | null;
   label?: string | null;
-  /** Defaults to true (blocked time). Pass false for an "available time" window. */
-  isBlocked?: boolean;
+  notes?: string | null;
 }
 
-export interface UpdateBlockInput {
-  startTime?: string | null;
-  endTime?: string | null;
-  label?: string | null;
-  isBlocked?: boolean;
-}
+export type UpdateTimeBlockInput = Partial<CreateTimeBlockInput>;
 
 function isValidDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -52,79 +57,67 @@ function isValidTime(value: string): boolean {
 }
 
 type TimeCheck =
-  | { ok: true; start: string | null; end: string | null }
+  | { ok: true; start: string; end: string }
   | { ok: false; error: string };
 
 function validateTimes(
-  startTime: string | null | undefined,
-  endTime: string | null | undefined
+  startTime: string | undefined,
+  endTime: string | undefined
 ): TimeCheck {
-  const startProvided =
-    startTime !== null && startTime !== undefined && startTime !== "";
-  const endProvided =
-    endTime !== null && endTime !== undefined && endTime !== "";
-  if (startProvided !== endProvided) {
-    return {
-      ok: false,
-      error:
-        "Provide both start and end times, or neither (for an all-day block).",
-    };
+  if (!startTime || !endTime) {
+    return { ok: false, error: "Start and end times are required." };
   }
-  if (!startProvided) return { ok: true, start: null, end: null };
-  if (!isValidTime(startTime as string) || !isValidTime(endTime as string)) {
+  if (!isValidTime(startTime) || !isValidTime(endTime)) {
     return { ok: false, error: "Times must be HH:MM." };
   }
-  if ((endTime as string) <= (startTime as string)) {
+  if (endTime <= startTime) {
     return { ok: false, error: "End time must be after start time." };
   }
-  return { ok: true, start: startTime as string, end: endTime as string };
+  return { ok: true, start: startTime, end: endTime };
 }
 
-export async function createAvailabilityBlock(
-  input: CreateBlockInput
-): Promise<ActionResult<AvailabilityBlockRecord>> {
+function validateClientId(
+  category: TimeBlockCategory,
+  clientId: string | null | undefined
+): { ok: true } | { ok: false; error: string } {
+  const hasClient = clientId !== undefined && clientId !== null && clientId !== "";
+  if (hasClient && category !== "work_block") {
+    return {
+      ok: false,
+      error: "`clientId` is only allowed when category is 'work_block'.",
+    };
+  }
+  return { ok: true };
+}
+
+export async function createTimeBlock(
+  input: CreateTimeBlockInput
+): Promise<ActionResult<TimeBlockRecord>> {
   const guard = await ensureOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
 
-  const hasDate =
-    input.date !== undefined && input.date !== null && input.date !== "";
-  const hasRecurring =
-    input.recurringWeekday !== undefined && input.recurringWeekday !== null;
-  if (hasDate === hasRecurring) {
-    return {
-      ok: false,
-      error: "Provide exactly one of `date` or `recurringWeekday`.",
-    };
-  }
-
-  if (hasDate && !isValidDate(input.date as string)) {
+  if (!input.date || !isValidDate(input.date)) {
     return { ok: false, error: "`date` must be a valid YYYY-MM-DD." };
   }
-  if (hasRecurring) {
-    const w = input.recurringWeekday as number;
-    if (!Number.isInteger(w) || w < 0 || w > 6) {
-      return {
-        ok: false,
-        error: "`recurringWeekday` must be an integer 0–6.",
-      };
-    }
+  if (!VALID_CATEGORIES.includes(input.category)) {
+    return { ok: false, error: "Invalid category." };
   }
-
   const timeCheck = validateTimes(input.startTime, input.endTime);
   if (!timeCheck.ok) return { ok: false, error: timeCheck.error };
+  const clientCheck = validateClientId(input.category, input.clientId);
+  if (!clientCheck.ok) return { ok: false, error: clientCheck.error };
 
   const supabase = getSupabaseServiceClient();
   const { data, error } = await supabase
-    .from("availability_blocks")
+    .from("time_blocks")
     .insert({
-      date: hasDate ? (input.date as string) : null,
-      recurring_weekday: hasRecurring
-        ? (input.recurringWeekday as number)
-        : null,
+      date: input.date,
       start_time: timeCheck.start,
       end_time: timeCheck.end,
+      category: input.category,
+      client_id: input.clientId || null,
       label: input.label?.trim() || null,
-      is_blocked: input.isBlocked ?? true,
+      notes: input.notes?.trim() || null,
     })
     .select("*")
     .single();
@@ -132,24 +125,31 @@ export async function createAvailabilityBlock(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message ?? "Failed to create availability block.",
+      error: error?.message ?? "Failed to create time block.",
     };
   }
 
   revalidatePath("/owner/calendar");
-  return { ok: true, data: data as AvailabilityBlockRecord };
+  return { ok: true, data: data as TimeBlockRecord };
 }
 
-export async function updateAvailabilityBlock(
+export async function updateTimeBlock(
   blockId: string,
-  updates: UpdateBlockInput
-): Promise<ActionResult<AvailabilityBlockRecord>> {
+  updates: UpdateTimeBlockInput
+): Promise<ActionResult<TimeBlockRecord>> {
   const guard = await ensureOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
 
   if (!blockId) return { ok: false, error: "Missing block id." };
 
   const patch: Record<string, unknown> = {};
+
+  if (updates.date !== undefined) {
+    if (!isValidDate(updates.date)) {
+      return { ok: false, error: "`date` must be a valid YYYY-MM-DD." };
+    }
+    patch.date = updates.date;
+  }
 
   if (updates.startTime !== undefined || updates.endTime !== undefined) {
     const timeCheck = validateTimes(updates.startTime, updates.endTime);
@@ -158,17 +158,40 @@ export async function updateAvailabilityBlock(
     patch.end_time = timeCheck.end;
   }
 
+  if (updates.category !== undefined) {
+    if (!VALID_CATEGORIES.includes(updates.category)) {
+      return { ok: false, error: "Invalid category." };
+    }
+    patch.category = updates.category;
+  }
+
+  // The DB enforces (category = 'work_block') OR (client_id is null), but we
+  // still need to keep them coherent here: if the caller flips category to
+  // non-work and didn't also clear client_id, error out so we surface the
+  // mistake instead of hitting a constraint violation.
+  if (updates.clientId !== undefined || updates.category !== undefined) {
+    const effectiveCategory =
+      (updates.category as TimeBlockCategory | undefined) ??
+      (patch.category as TimeBlockCategory | undefined);
+    if (effectiveCategory !== undefined) {
+      const clientCheck = validateClientId(effectiveCategory, updates.clientId);
+      if (!clientCheck.ok) return { ok: false, error: clientCheck.error };
+    }
+    if (updates.clientId !== undefined) {
+      patch.client_id = updates.clientId || null;
+    }
+  }
+
   if (updates.label !== undefined) {
     patch.label = updates.label?.trim() || null;
   }
-
-  if (updates.isBlocked !== undefined) {
-    patch.is_blocked = updates.isBlocked;
+  if (updates.notes !== undefined) {
+    patch.notes = updates.notes?.trim() || null;
   }
 
   const supabase = getSupabaseServiceClient();
   const { data, error } = await supabase
-    .from("availability_blocks")
+    .from("time_blocks")
     .update(patch)
     .eq("id", blockId)
     .select("*")
@@ -177,25 +200,24 @@ export async function updateAvailabilityBlock(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message ?? "Failed to update availability block.",
+      error: error?.message ?? "Failed to update time block.",
     };
   }
 
   revalidatePath("/owner/calendar");
-  return { ok: true, data: data as AvailabilityBlockRecord };
+  return { ok: true, data: data as TimeBlockRecord };
 }
 
-export async function deleteAvailabilityBlock(
+export async function deleteTimeBlock(
   blockId: string
 ): Promise<ActionResult> {
   const guard = await ensureOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
-
   if (!blockId) return { ok: false, error: "Missing block id." };
 
   const supabase = getSupabaseServiceClient();
   const { error } = await supabase
-    .from("availability_blocks")
+    .from("time_blocks")
     .delete()
     .eq("id", blockId);
   if (error) return { ok: false, error: error.message };

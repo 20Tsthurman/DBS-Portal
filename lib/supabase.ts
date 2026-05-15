@@ -22,6 +22,7 @@ export type ExpenseCategory =
   | "other";
 export type FileType = "content" | "contract" | "invoice" | "other";
 export type SenderRole = "owner" | "client";
+export type TimeBlockCategory = "sonography" | "work_block" | "blocked";
 
 export interface ClientRecord {
   id: string;
@@ -119,14 +120,19 @@ export interface FileRecord {
   uploaded_by: string;
 }
 
-export interface AvailabilityBlockRecord {
+export interface TimeBlockRecord {
   id: string;
-  date: string | null;
-  recurring_weekday: number | null;
-  start_time: string | null;
-  end_time: string | null;
-  is_blocked: boolean;
+  /** YYYY-MM-DD — wall-clock date in PORTAL_TIMEZONE (America/Chicago). */
+  date: string;
+  /** HH:MM:SS — wall-clock start time in PORTAL_TIMEZONE. */
+  start_time: string;
+  /** HH:MM:SS — wall-clock end time in PORTAL_TIMEZONE. */
+  end_time: string;
+  category: TimeBlockCategory;
+  /** Only meaningful (and only allowed) when category === "work_block". */
+  client_id: string | null;
   label: string | null;
+  notes: string | null;
   created_at: string;
 }
 
@@ -158,9 +164,7 @@ export type Database = {
       expenses: TableShape<ExpenseRecord & Record<string, unknown>>;
       messages: TableShape<MessageRecord & Record<string, unknown>>;
       files: TableShape<FileRecord & Record<string, unknown>>;
-      availability_blocks: TableShape<
-        AvailabilityBlockRecord & Record<string, unknown>
-      >;
+      time_blocks: TableShape<TimeBlockRecord & Record<string, unknown>>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
