@@ -1,162 +1,177 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   getSupabaseServiceClient,
-  type AvailabilityBlockRecord,
+  type ClientRecord,
+  type ShootRecord,
+  type ShootStatus,
+  type TimeBlockCategory,
+  type TimeBlockRecord,
 } from "@/lib/supabase";
 import { dateKey } from "./dateMath";
+import {
+  combineDateAndTimeInTimezone,
+  dateKeyInTimezone,
+} from "./timezone";
+import type { CalendarEvent } from "./types";
+
+type ShootLite = Pick<
+  ShootRecord,
+  "id" | "client_id" | "scheduled_at" | "duration_hours" | "location" | "status"
+>;
+
+type TimeBlockLite = Pick<
+  TimeBlockRecord,
+  | "id"
+  | "date"
+  | "start_time"
+  | "end_time"
+  | "category"
+  | "client_id"
+  | "label"
+  | "notes"
+>;
 
 /**
- * Fetch all availability_blocks relevant to the given date range:
- *   - One-off blocks whose `date` falls in [start, end)
- *   - Every recurring block (recurring_weekday IS NOT NULL), regardless of range —
- *     callers expand them to specific dates per week via `blocksForDate`.
+ * Fetch every event (shoots + time_blocks) overlapping [start, end) and
+ * return them as a single sorted `CalendarEvent[]`. Used by the owner
+ * Week / Month / Agenda views.
+ *
+ * `start` and `end` are UTC `Date`s.
+ *
+ * The time_blocks query intersects on the local `date` column. We widen
+ * the date filter by one day on each side because a wall-clock date in
+ * PORTAL_TIMEZONE can sit on either side of UTC midnight (and DST shifts
+ * make the offset non-constant). The exact UTC-instant filter is then
+ * applied in code after assembling startsAt/endsAt.
  */
-export async function fetchAvailabilityBlocksInRange(
+export async function fetchEventsInRange(
   start: Date,
   end: Date
-): Promise<AvailabilityBlockRecord[]> {
+): Promise<CalendarEvent[]> {
   const supabase = getSupabaseServiceClient();
-  const [oneOffsRes, recurringRes] = await Promise.all([
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  const blocksDateLo = dateKey(new Date(start.getTime() - dayMs));
+  const blocksDateHi = dateKey(new Date(end.getTime() + dayMs));
+
+  const [shootsRes, blocksRes] = await Promise.all([
     supabase
-      .from("availability_blocks")
-      .select("*")
-      .gte("date", dateKey(start))
-      .lt("date", dateKey(end)),
+      .from("shoots")
+      .select(
+        "id, client_id, scheduled_at, duration_hours, location, status"
+      )
+      .gte("scheduled_at", start.toISOString())
+      .lt("scheduled_at", end.toISOString()),
     supabase
-      .from("availability_blocks")
-      .select("*")
-      .not("recurring_weekday", "is", null),
+      .from("time_blocks")
+      .select(
+        "id, date, start_time, end_time, category, client_id, label, notes"
+      )
+      .gte("date", blocksDateLo)
+      .lt("date", blocksDateHi),
   ]);
-  if (oneOffsRes.error) throw new Error(oneOffsRes.error.message);
-  if (recurringRes.error) throw new Error(recurringRes.error.message);
 
-  return [
-    ...((oneOffsRes.data ?? []) as AvailabilityBlockRecord[]),
-    ...((recurringRes.data ?? []) as AvailabilityBlockRecord[]),
-  ];
-}
+  if (shootsRes.error) throw new Error(shootsRes.error.message);
+  if (blocksRes.error) throw new Error(blocksRes.error.message);
 
-/** Fetch every recurring availability block (recurring_weekday IS NOT NULL). */
-export async function fetchRecurringAvailabilityBlocks(): Promise<
-  AvailabilityBlockRecord[]
-> {
-  const supabase = getSupabaseServiceClient();
-  const { data, error } = await supabase
-    .from("availability_blocks")
-    .select("*")
-    .not("recurring_weekday", "is", null);
-  if (error) throw new Error(error.message);
-  return (data ?? []) as AvailabilityBlockRecord[];
-}
+  const shoots = (shootsRes.data ?? []) as ShootLite[];
+  const blocks = (blocksRes.data ?? []) as TimeBlockLite[];
 
-/**
- * Given an array of blocks (one-off + recurring, as returned by
- * fetchAvailabilityBlocksInRange) and a target date, returns the subset that
- * applies to that date: one-offs whose `date` matches and recurring blocks
- * whose `recurring_weekday` matches the target's day-of-week.
- */
-export function blocksForDate(
-  blocks: AvailabilityBlockRecord[],
-  date: Date
-): AvailabilityBlockRecord[] {
-  const key = dateKey(date);
-  const dow = date.getDay();
-  return blocks.filter((b) => {
-    if (b.date !== null) return b.date === key;
-    if (b.recurring_weekday !== null) return b.recurring_weekday === dow;
-    return false;
-  });
-}
+  const clientIds = Array.from(
+    new Set<string>([
+      ...shoots.map((s) => s.client_id),
+      ...blocks
+        .map((b) => b.client_id)
+        .filter((id): id is string => id !== null),
+    ])
+  );
+  const nameById = await fetchClientNames(supabase, clientIds);
 
-export interface ClassifiedBlocks {
-  mode: "default" | "available";
-  blockedBlocks: AvailabilityBlockRecord[];
-  availableBlocks: AvailabilityBlockRecord[];
-}
-
-/**
- * Classifies the blocks that apply to a date into rendering groups.
- * Mode is "available" when at least one `is_blocked: false` block applies;
- * callers then render the inverse of those windows as unavailable.
- */
-export function classifyBlocksForDate(
-  blocks: AvailabilityBlockRecord[],
-  date: Date
-): ClassifiedBlocks {
-  const applicable = blocksForDate(blocks, date);
-  const blockedBlocks: AvailabilityBlockRecord[] = [];
-  const availableBlocks: AvailabilityBlockRecord[] = [];
-  for (const b of applicable) {
-    if (b.is_blocked) blockedBlocks.push(b);
-    else availableBlocks.push(b);
+  const events: CalendarEvent[] = [];
+  for (const s of shoots) {
+    events.push(shootToEvent(s, nameById));
   }
+  for (const b of blocks) {
+    const event = timeBlockToEvent(b, nameById);
+    if (event.endsAt <= start || event.startsAt >= end) continue;
+    events.push(event);
+  }
+  events.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+  return events;
+}
+
+function shootToEvent(
+  s: ShootLite,
+  nameById: Map<string, string>
+): CalendarEvent {
+  const startsAt = new Date(s.scheduled_at);
+  const endsAt = s.duration_hours
+    ? new Date(startsAt.getTime() + Number(s.duration_hours) * 60 * 60 * 1000)
+    : startsAt;
   return {
-    mode: availableBlocks.length > 0 ? "available" : "default",
-    blockedBlocks,
-    availableBlocks,
+    id: `shoot:${s.id}`,
+    category: "shoot",
+    dateKey: dateKeyInTimezone(startsAt),
+    startsAt,
+    endsAt,
+    title: nameById.get(s.client_id) ?? "",
+    subtitle: s.location,
+    status: s.status as ShootStatus,
+    source: { kind: "shoot", shootId: s.id, clientId: s.client_id },
   };
 }
 
-function timeStrToMinutes(t: string): number {
-  const [h, m] = t.split(":");
-  return Number(h) * 60 + Number(m);
+function timeBlockToEvent(
+  b: TimeBlockLite,
+  nameById: Map<string, string>
+): CalendarEvent {
+  const startsAt = combineDateAndTimeInTimezone(b.date, b.start_time);
+  const endsAt = combineDateAndTimeInTimezone(b.date, b.end_time);
+  const subtitle =
+    b.category === "work_block" && b.client_id
+      ? (nameById.get(b.client_id) ?? null)
+      : null;
+  return {
+    id: `time_block:${b.id}`,
+    category: b.category,
+    dateKey: b.date,
+    startsAt,
+    endsAt,
+    title: b.label?.trim() || defaultLabelForCategory(b.category),
+    subtitle,
+    status: "scheduled",
+    source: {
+      kind: "time_block",
+      timeBlockId: b.id,
+      clientId: b.client_id,
+    },
+  };
 }
 
-function minutesToTimeStr(min: number): string {
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+function defaultLabelForCategory(category: TimeBlockCategory): string {
+  switch (category) {
+    case "sonography":
+      return "Sonography";
+    case "work_block":
+      return "Work";
+    case "blocked":
+      return "Unavailable";
+  }
 }
 
-/**
- * Given a set of "available" time windows on a single day and the visible
- * time-grid bounds, returns the inverse intervals — the gaps that should
- * render as implicit unavailable striping in the week view.
- *
- * Windows are clamped to [gridStartHour, gridEndHour) and overlapping ones
- * are merged before walking the gaps.
- */
-export function inverseAvailabilityWindows(
-  windows: Array<{ start_time: string; end_time: string }>,
-  gridStartHour: number,
-  gridEndHour: number
-): Array<{ start_time: string; end_time: string }> {
-  const gridStartMin = gridStartHour * 60;
-  const gridEndMin = gridEndHour * 60;
-
-  const sorted = [...windows].sort(
-    (a, b) => timeStrToMinutes(a.start_time) - timeStrToMinutes(b.start_time)
-  );
-
-  const merged: Array<{ startMin: number; endMin: number }> = [];
-  for (const w of sorted) {
-    const startMin = Math.max(timeStrToMinutes(w.start_time), gridStartMin);
-    const endMin = Math.min(timeStrToMinutes(w.end_time), gridEndMin);
-    if (endMin <= startMin) continue;
-    const last = merged[merged.length - 1];
-    if (last && startMin <= last.endMin) {
-      last.endMin = Math.max(last.endMin, endMin);
-    } else {
-      merged.push({ startMin, endMin });
-    }
+async function fetchClientNames(
+  supabase: SupabaseClient,
+  clientIds: string[]
+): Promise<Map<string, string>> {
+  if (clientIds.length === 0) return new Map();
+  const { data, error } = await supabase
+    .from("clients")
+    .select("id, name")
+    .in("id", clientIds);
+  if (error) throw new Error(error.message);
+  const out = new Map<string, string>();
+  for (const row of (data ?? []) as Pick<ClientRecord, "id" | "name">[]) {
+    out.set(row.id, row.name);
   }
-
-  const gaps: Array<{ start_time: string; end_time: string }> = [];
-  let cursor = gridStartMin;
-  for (const w of merged) {
-    if (cursor < w.startMin) {
-      gaps.push({
-        start_time: minutesToTimeStr(cursor),
-        end_time: minutesToTimeStr(w.startMin),
-      });
-    }
-    cursor = Math.max(cursor, w.endMin);
-  }
-  if (cursor < gridEndMin) {
-    gaps.push({
-      start_time: minutesToTimeStr(cursor),
-      end_time: minutesToTimeStr(gridEndMin),
-    });
-  }
-
-  return gaps;
+  return out;
 }

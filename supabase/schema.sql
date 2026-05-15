@@ -149,36 +149,40 @@ create table if not exists files (
 create index if not exists files_client_id_idx on files (client_id);
 
 -- ---------------------------------------------------------------------------
--- availability_blocks
+-- time_blocks
+--
+-- One row = one fixed-time event on Kelsey's calendar that isn't a shoot:
+-- a sonography shift, a manually-placed work block (editing/planning), or
+-- a personal "blocked" window. All times are wall-clock in PORTAL_TIMEZONE
+-- (America/Chicago) — see app/owner/calendar/_lib/timezone.ts. There is no
+-- "all-day" mode: the form auto-fills 07:00–21:00 when the user wants one.
+--
+-- Note: working-hours (07:00–21:00) is deliberately NOT a CHECK constraint
+-- here. It is a client-booking rule, enforced in the week grid render and
+-- in the client-booking validator. Sonography shifts realistically span
+-- outside that window.
 -- ---------------------------------------------------------------------------
-create table if not exists availability_blocks (
-  id                  uuid primary key default gen_random_uuid(),
-  -- One-off:    date is set,   recurring_weekday is null.
-  -- Recurring:  date is null,  recurring_weekday is set (0=Sunday … 6=Saturday).
-  date                date,
-  recurring_weekday   smallint,
-  -- All-day:    start_time and end_time are both null.
-  -- Time-range: both set, end > start.
-  start_time          time,
-  end_time            time,
-  is_blocked          boolean not null default true,
-  label               text,
-  created_at          timestamptz not null default now(),
-  constraint availability_blocks_weekday_range
-    check (recurring_weekday is null or recurring_weekday between 0 and 6),
-  constraint availability_blocks_date_or_recurring
-    check (
-      (date is not null and recurring_weekday is null) or
-      (date is null and recurring_weekday is not null)
-    ),
-  constraint availability_blocks_times_consistent
-    check (
-      (start_time is null and end_time is null) or
-      (start_time is not null and end_time is not null and end_time > start_time)
-    )
+create table if not exists time_blocks (
+  id          uuid primary key default gen_random_uuid(),
+  date        date not null,
+  start_time  time not null,
+  end_time    time not null,
+  category    text not null check (category in ('sonography', 'work_block', 'blocked')),
+  -- Only set when category = 'work_block'. Optional — a general "editing
+  -- time" work block with no client attached is allowed.
+  client_id   uuid references clients(id) on delete set null,
+  label       text,
+  notes       text,
+  created_at  timestamptz not null default now(),
+  constraint time_blocks_times_consistent
+    check (end_time > start_time),
+  constraint time_blocks_client_only_for_work
+    check ((category = 'work_block') or (client_id is null))
 );
 
-create index if not exists availability_blocks_date_idx on availability_blocks (date);
+create index if not exists time_blocks_date_idx on time_blocks (date);
+create index if not exists time_blocks_client_id_idx
+  on time_blocks (client_id) where client_id is not null;
 
 -- ---------------------------------------------------------------------------
 -- Alignment block — idempotent ALTERs to bring an already-deployed instance
@@ -186,10 +190,9 @@ create index if not exists availability_blocks_date_idx on availability_blocks (
 -- ---------------------------------------------------------------------------
 
 -- 1. Backfill created_at on tables that originally shipped without it.
-alter table packages            add column if not exists created_at timestamptz not null default now();
-alter table projects            add column if not exists created_at timestamptz not null default now();
-alter table shoots              add column if not exists created_at timestamptz not null default now();
-alter table availability_blocks add column if not exists created_at timestamptz not null default now();
+alter table packages add column if not exists created_at timestamptz not null default now();
+alter table projects add column if not exists created_at timestamptz not null default now();
+alter table shoots   add column if not exists created_at timestamptz not null default now();
 
 -- 2. shoots.status: migrate old 3-state values to the new 4-state vocabulary
 --    BEFORE swapping the CHECK constraint, or the new constraint will fail.
@@ -209,34 +212,8 @@ alter table expenses drop constraint if exists expenses_category_check;
 alter table expenses add  constraint expenses_category_check
   check (category in ('equipment', 'software', 'travel', 'marketing', 'meals', 'other'));
 
--- 4. availability_blocks: extend to support recurring weekly blocks and
---    all-day blocks. Existing one-off, time-range rows satisfy the new
---    constraints unchanged, so no data backfill is needed.
-alter table availability_blocks add column if not exists recurring_weekday smallint;
-alter table availability_blocks alter column date       drop not null;
-alter table availability_blocks alter column start_time drop not null;
-alter table availability_blocks alter column end_time   drop not null;
-
-alter table availability_blocks
-  drop constraint if exists availability_blocks_weekday_range;
-alter table availability_blocks
-  add  constraint availability_blocks_weekday_range
-  check (recurring_weekday is null or recurring_weekday between 0 and 6);
-
-alter table availability_blocks
-  drop constraint if exists availability_blocks_date_or_recurring;
-alter table availability_blocks
-  add  constraint availability_blocks_date_or_recurring
-  check (
-    (date is not null and recurring_weekday is null) or
-    (date is null and recurring_weekday is not null)
-  );
-
-alter table availability_blocks
-  drop constraint if exists availability_blocks_times_consistent;
-alter table availability_blocks
-  add  constraint availability_blocks_times_consistent
-  check (
-    (start_time is null and end_time is null) or
-    (start_time is not null and end_time is not null and end_time > start_time)
-  );
+-- 4. Drop the legacy availability_blocks table. Replaced by time_blocks in
+--    the calendar rebuild. Pre-launch decision: existing rows are not
+--    migrated. Re-run-safe; if the table doesn't exist (fresh install),
+--    this is a no-op.
+drop table if exists availability_blocks;

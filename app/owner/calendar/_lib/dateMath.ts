@@ -225,9 +225,9 @@ export function parseWeekParam(s: string | undefined): Date {
   return startOfWeek(d);
 }
 
-/** Week-view time grid constants. 6 AM → 10 PM, 50px per hour. */
-export const WEEK_GRID_START_HOUR = 6;
-export const WEEK_GRID_END_HOUR = 22;
+/** Week-view time grid constants. 7 AM → 9 PM (portal working hours), 50px per hour. */
+export const WEEK_GRID_START_HOUR = 7;
+export const WEEK_GRID_END_HOUR = 21;
 export const WEEK_GRID_HOUR_PX = 50;
 export const WEEK_GRID_HEIGHT_PX =
   (WEEK_GRID_END_HOUR - WEEK_GRID_START_HOUR) * WEEK_GRID_HOUR_PX;
