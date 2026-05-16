@@ -29,6 +29,70 @@ interface MessageRow {
   sender_role: SenderRole;
 }
 
+export interface UnreadClient {
+  id: string;
+  name: string;
+  count: number;
+}
+
+export interface OwnerUnreadCounts {
+  /** Per-client unread bucket — useful for callers that need to look up by id. */
+  counts: Record<string, number>;
+  /** Total unread (client→owner) messages across all clients. */
+  total: number;
+  /** Clients with at least one unread message, sorted count desc then name asc. */
+  clients: UnreadClient[];
+}
+
+/**
+ * Aggregates unread client→owner messages for the dashboard widget and the
+ * `/api/messages/unread-counts` owner branch. Both call sites read the same
+ * shape so the route handler and the SSR widget stay in sync.
+ *
+ * Supabase JS doesn't expose GROUP BY directly, so we fetch the client_id of
+ * every unread message and bucket in JS. Volume is small (a few hundred rows
+ * across all clients in normal use).
+ */
+export async function fetchUnreadCountsForOwner(): Promise<OwnerUnreadCounts> {
+  const supabase = getSupabaseServiceClient();
+
+  const { data, error } = await supabase
+    .from("messages")
+    .select("client_id")
+    .eq("sender_role", "client")
+    .is("read_at", null);
+  if (error) throw new Error(error.message);
+
+  const counts: Record<string, number> = {};
+  let total = 0;
+  for (const row of (data ?? []) as { client_id: string }[]) {
+    counts[row.client_id] = (counts[row.client_id] ?? 0) + 1;
+    total += 1;
+  }
+
+  const clientIds = Object.keys(counts);
+  if (clientIds.length === 0) {
+    return { counts, total, clients: [] };
+  }
+
+  const { data: clientsData, error: clientsError } = await supabase
+    .from("clients")
+    .select("id, name")
+    .in("id", clientIds);
+  if (clientsError) throw new Error(clientsError.message);
+
+  const clients: UnreadClient[] = (
+    (clientsData ?? []) as Array<{ id: string; name: string }>
+  ).map((c) => ({ id: c.id, name: c.name, count: counts[c.id] ?? 0 }));
+
+  clients.sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+  });
+
+  return { counts, total, clients };
+}
+
 export async function fetchInboxClients(): Promise<InboxClient[]> {
   const supabase = getSupabaseServiceClient();
 

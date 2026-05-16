@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { auth, currentUser } from "@clerk/nextjs/server";
 import {
   getSupabaseServiceClient,
   type MeetingType,
@@ -9,6 +8,7 @@ import {
   type ShootRecord,
   type ShootStatus,
 } from "@/lib/supabase";
+import { requireOwner } from "@/lib/auth";
 
 const VALID_STATUSES: ShootStatus[] = [
   "requested",
@@ -19,18 +19,6 @@ const VALID_STATUSES: ShootStatus[] = [
 
 const VALID_KINDS: ShootKind[] = ["shoot", "meeting"];
 const VALID_MEETING_TYPES: MeetingType[] = ["zoom", "phone", "in_person"];
-
-async function ensureOwner(): Promise<
-  { ok: true } | { ok: false; error: string }
-> {
-  const { userId } = await auth();
-  if (!userId) return { ok: false, error: "Unauthorized" };
-  const user = await currentUser();
-  if (user?.publicMetadata?.role !== "owner") {
-    return { ok: false, error: "Forbidden" };
-  }
-  return { ok: true };
-}
 
 export interface ActionResult<T = null> {
   ok: boolean;
@@ -69,7 +57,7 @@ function revalidateShootPaths(clientId: string | null): void {
 export async function createShoot(
   input: CreateShootInput
 ): Promise<ActionResult<ShootRecord>> {
-  const guard = await ensureOwner();
+  const guard = await requireOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
 
   if (!input.clientId) return { ok: false, error: "Missing client id" };
@@ -133,7 +121,7 @@ export async function updateShoot(
   shootId: string,
   updates: UpdateShootInput
 ): Promise<ActionResult<ShootRecord>> {
-  const guard = await ensureOwner();
+  const guard = await requireOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
 
   if (!shootId) return { ok: false, error: "Missing shoot id" };
@@ -249,7 +237,7 @@ export async function completeShoot(
 }
 
 export async function deleteShoot(shootId: string): Promise<ActionResult> {
-  const guard = await ensureOwner();
+  const guard = await requireOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
 
   if (!shootId) return { ok: false, error: "Missing shoot id" };

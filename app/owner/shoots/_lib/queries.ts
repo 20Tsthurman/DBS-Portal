@@ -4,6 +4,10 @@ import {
   type ClientRecord,
   type ShootRecord,
 } from "@/lib/supabase";
+import {
+  addDaysToDateKey,
+  dateKeyInTimezone,
+} from "@/app/owner/calendar/_lib/timezone";
 
 export type ShootWithClientName = ShootRecord & { client_name: string };
 
@@ -65,6 +69,91 @@ export async function fetchShootsInRange(
     .order("scheduled_at", { ascending: true });
   if (error) throw new Error(error.message);
   return attachClientNames(supabase, (data ?? []) as ShootRecord[]);
+}
+
+/**
+ * Shoots whose wall-clock day in PORTAL_TIMEZONE equals the Central day that
+ * contains `referenceDate` (default: now). Filters to active statuses
+ * (`requested`, `confirmed`) and orders by `scheduled_at` ascending. Client
+ * names attached via `attachClientNames`.
+ *
+ * We can't filter `scheduled_at` directly to a Central day because UTC and
+ * Central disagree by 5-6 hours and DST shifts make it non-constant. Same
+ * trick as `fetchEventsInRange` in the calendar: widen the SQL range by one
+ * day on each side, then narrow precisely in JS by comparing
+ * `dateKeyInTimezone(scheduled_at)` to the target day key.
+ */
+export async function fetchShootsForDay(
+  referenceDate: Date = new Date()
+): Promise<ShootWithClientName[]> {
+  const supabase = getSupabaseServiceClient();
+  const targetKey = dateKeyInTimezone(referenceDate);
+
+  // Wide UTC bounds covering the Central day plus a 24h cushion on each side.
+  const [yStr, mStr, dStr] = targetKey.split("-");
+  const y = Number(yStr);
+  const m = Number(mStr);
+  const d = Number(dStr);
+  const dayMs = 24 * 60 * 60 * 1000;
+  const dayUtc = Date.UTC(y, m - 1, d);
+  const widenedStart = new Date(dayUtc - dayMs);
+  const widenedEnd = new Date(dayUtc + 2 * dayMs);
+
+  const { data, error } = await supabase
+    .from("shoots")
+    .select("*")
+    .in("status", ["requested", "confirmed"])
+    .gte("scheduled_at", widenedStart.toISOString())
+    .lt("scheduled_at", widenedEnd.toISOString())
+    .order("scheduled_at", { ascending: true });
+  if (error) throw new Error(error.message);
+
+  const rows = (data ?? []) as ShootRecord[];
+  const todays = rows.filter(
+    (s) => dateKeyInTimezone(new Date(s.scheduled_at)) === targetKey
+  );
+  return attachClientNames(supabase, todays);
+}
+
+/**
+ * Shoots scheduled in the next 7 days excluding today (Central time). Status
+ * filter and ordering match `fetchShootsForDay`. Used by the dashboard's
+ * "Upcoming This Week" widget — today is handled separately by Widget 1.
+ *
+ * Same widen-then-narrow approach: SQL pulls a UTC range that's a superset of
+ * the Central window, then JS filters by the Central day key.
+ */
+export async function fetchShootsForWeekAhead(
+  referenceDate: Date = new Date()
+): Promise<ShootWithClientName[]> {
+  const supabase = getSupabaseServiceClient();
+  const todayKey = dateKeyInTimezone(referenceDate);
+  const startKey = addDaysToDateKey(todayKey, 1); // tomorrow
+  const endKey = addDaysToDateKey(todayKey, 7); // inclusive end of window
+
+  // Wide UTC bounds: a calendar day in Central can straddle two UTC days, so
+  // pad each side by 24h and let the JS pass do the precise day-key filter.
+  const [sy, sm, sd] = startKey.split("-").map(Number);
+  const [ey, em, ed] = endKey.split("-").map(Number);
+  const dayMs = 24 * 60 * 60 * 1000;
+  const widenedStart = new Date(Date.UTC(sy, sm - 1, sd) - dayMs);
+  const widenedEnd = new Date(Date.UTC(ey, em - 1, ed) + 2 * dayMs);
+
+  const { data, error } = await supabase
+    .from("shoots")
+    .select("*")
+    .in("status", ["requested", "confirmed"])
+    .gte("scheduled_at", widenedStart.toISOString())
+    .lt("scheduled_at", widenedEnd.toISOString())
+    .order("scheduled_at", { ascending: true });
+  if (error) throw new Error(error.message);
+
+  const rows = (data ?? []) as ShootRecord[];
+  const filtered = rows.filter((s) => {
+    const k = dateKeyInTimezone(new Date(s.scheduled_at));
+    return k >= startKey && k <= endKey;
+  });
+  return attachClientNames(supabase, filtered);
 }
 
 async function attachClientNames(

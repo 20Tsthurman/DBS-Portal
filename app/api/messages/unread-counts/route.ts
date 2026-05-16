@@ -2,6 +2,26 @@ import { NextResponse } from "next/server";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { getSupabaseServiceClient } from "@/lib/supabase";
 import { getCurrentClient } from "@/lib/currentClient";
+import {
+  fetchUnreadCountsForOwner,
+  type OwnerUnreadCounts,
+  type UnreadClient,
+} from "@/app/owner/messages/_lib/queries";
+
+/**
+ * Response shape for GET /api/messages/unread-counts.
+ *
+ * Owners get the full owner payload (counts + total + sorted clients list).
+ * Clients get a single number — their own unread count from the owner.
+ *
+ * Re-exported types are sourced from `app/owner/messages/_lib/queries.ts` so
+ * the dashboard SSR widget and the polled API call share one source of truth.
+ */
+export type UnreadCountsResponse =
+  | OwnerUnreadCounts
+  | { count: number };
+
+export type { UnreadClient };
 
 export async function GET() {
   const { userId } = await auth();
@@ -17,26 +37,13 @@ export async function GET() {
   const supabase = getSupabaseServiceClient();
 
   if (role === "owner") {
-    // Supabase JS doesn't expose GROUP BY directly. Fetch the client_id of
-    // every unread client→owner message and bucket in JS. Expected volume
-    // is small (a few hundred rows max across all clients).
-    const { data, error } = await supabase
-      .from("messages")
-      .select("client_id")
-      .eq("sender_role", "client")
-      .is("read_at", null);
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    try {
+      const payload = await fetchUnreadCountsForOwner();
+      return NextResponse.json(payload satisfies UnreadCountsResponse);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      return NextResponse.json({ error: message }, { status: 500 });
     }
-
-    const counts: Record<string, number> = {};
-    let total = 0;
-    for (const row of (data ?? []) as { client_id: string }[]) {
-      counts[row.client_id] = (counts[row.client_id] ?? 0) + 1;
-      total += 1;
-    }
-
-    return NextResponse.json({ counts, total });
   }
 
   const clientRecord = await getCurrentClient();

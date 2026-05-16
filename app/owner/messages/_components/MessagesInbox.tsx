@@ -10,9 +10,11 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { MessageThread } from "@/components/messages/MessageThread";
 import { formatInboxTimestamp } from "@/lib/formatRelativeTime";
+import {
+  DEFAULT_POLL_INTERVAL_MS,
+  useVisibilityPolling,
+} from "@/lib/hooks/useVisibilityPolling";
 import type { InboxClient } from "../_lib/queries";
-
-const POLL_INTERVAL_MS = 30_000;
 
 interface MessagesInboxProps {
   initialClients: InboxClient[];
@@ -49,9 +51,12 @@ export function MessagesInbox({
     }
   }, [searchParams, selectedClientId]);
 
-  const refetch = useCallback(async () => {
+  const refetch = useCallback(async (signal: AbortSignal) => {
     try {
-      const res = await fetch("/api/messages/inbox", { cache: "no-store" });
+      const res = await fetch("/api/messages/inbox", {
+        cache: "no-store",
+        signal,
+      });
       if (!res.ok) {
         console.error("[MessagesInbox] fetch failed", res.status);
         return;
@@ -59,66 +64,21 @@ export function MessagesInbox({
       const json = (await res.json()) as { clients?: InboxClient[] };
       if (json.clients) setClients(json.clients);
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       console.error("[MessagesInbox] fetch error", err);
     }
   }, []);
 
-  // Polling — same visibility-aware pattern as MessageThread.
-  useEffect(() => {
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-
-    const start = () => {
-      if (intervalId === null) {
-        intervalId = setInterval(() => {
-          void refetch();
-        }, POLL_INTERVAL_MS);
-      }
-    };
-    const stop = () => {
-      if (intervalId !== null) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
-    };
-
-    const onVisibility = () => {
-      if (document.visibilityState === "hidden") {
-        void refetch();
-        stop();
-      } else if (document.visibilityState === "visible") {
-        void refetch();
-        start();
-      }
-    };
-
-    if (typeof document !== "undefined") {
-      if (document.visibilityState === "visible") {
-        start();
-      }
-      document.addEventListener("visibilitychange", onVisibility);
-    }
-
-    return () => {
-      stop();
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onVisibility);
-      }
-    };
-  }, [refetch]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handleInvalidate = () => {
-      void refetch();
-    };
-    window.addEventListener("messages:invalidate-counts", handleInvalidate);
-    return () => {
-      window.removeEventListener(
-        "messages:invalidate-counts",
-        handleInvalidate
-      );
-    };
-  }, [refetch]);
+  // Polling — visibility-aware. Same contract as MessageThread + sidebar.
+  // Note: this is the only one of the three call sites that previously did
+  // NOT fire an immediate fetch on mount (initialClients arrives from the
+  // server). After the hook migration it WILL fetch once on mount; that's a
+  // negligible extra request right after SSR but the data shape is identical
+  // so no visible UI change is expected.
+  useVisibilityPolling(refetch, {
+    intervalMs: DEFAULT_POLL_INTERVAL_MS,
+    invalidationEvent: "messages:invalidate-counts",
+  });
 
   const handleSelect = useCallback(
     (id: string) => {

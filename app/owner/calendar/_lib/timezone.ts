@@ -21,6 +21,36 @@ const dateKeyFmt = new Intl.DateTimeFormat("en-CA", {
 });
 
 /**
+ * First and last day of the current month — interpreted in PORTAL_TIMEZONE,
+ * not in UTC or server-local time. Returns YYYY-MM-DD strings suitable for
+ * Supabase `date` column filters (`time_logs.date`, etc.).
+ *
+ * Around a UTC month boundary, the Central month and the UTC month disagree
+ * for several hours; this helper keeps "this month" aligned with the rest of
+ * the portal's calendar surface.
+ *
+ * Implementation: same trick as `dateKeyInTimezone` — read the wall-clock
+ * year/month via `Intl.DateTimeFormat` keyed on PORTAL_TIMEZONE, then build
+ * the date strings purely from those integers (no Date-field arithmetic on
+ * server-local time).
+ */
+export function currentMonthRange(
+  now: Date = new Date()
+): { start: string; end: string } {
+  const dateKey = dateKeyInTimezone(now);
+  const year = Number(dateKey.slice(0, 4));
+  const month = Number(dateKey.slice(5, 7));
+  // Day 0 of (month+1) === last day of month, calendrically. The Date here
+  // is only used to extract the last day-of-month integer — no wall-clock
+  // semantics — so UTC math is safe.
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const mm = String(month).padStart(2, "0");
+  const start = `${year}-${mm}-01`;
+  const end = `${year}-${mm}-${String(lastDay).padStart(2, "0")}`;
+  return { start, end };
+}
+
+/**
  * Local YYYY-MM-DD for a UTC `Date` as observed in PORTAL_TIMEZONE.
  *
  * Use this when bucketing UTC timestamps (e.g. `shoots.scheduled_at`) into

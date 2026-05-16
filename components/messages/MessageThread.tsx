@@ -11,8 +11,11 @@ import {
 } from "react";
 import type { MessageRecord, SenderRole } from "@/lib/supabase";
 import { formatMessageTimestamp } from "@/lib/formatRelativeTime";
+import {
+  DEFAULT_POLL_INTERVAL_MS,
+  useVisibilityPolling,
+} from "@/lib/hooks/useVisibilityPolling";
 
-const POLL_INTERVAL_MS = 30_000;
 const CLUSTER_GAP_MS = 5 * 60 * 1000;
 const NEAR_BOTTOM_PX = 80;
 const COMPOSER_MAX_PX = 150;
@@ -188,11 +191,6 @@ export function MessageThread({
     [clientId, otherRole]
   );
 
-  const refetchRef = useRef(refetch);
-  useEffect(() => {
-    refetchRef.current = refetch;
-  }, [refetch]);
-
   // Mount: if initialMessages already includes unread from the other party,
   // mark as read once. New arrivals via poll are handled inside refetch.
   useEffect(() => {
@@ -209,54 +207,10 @@ export function MessageThread({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Polling. Visibility-aware:
-  // - visible on mount → fire immediate poll, then setInterval(30s)
-  // - hidden          → fire one final poll, then clearInterval
-  // - visible again   → fire immediate poll, then setInterval(30s)
-  useEffect(() => {
-    const controller = new AbortController();
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-
-    const start = () => {
-      if (intervalId === null) {
-        intervalId = setInterval(() => {
-          void refetchRef.current(controller.signal);
-        }, POLL_INTERVAL_MS);
-      }
-    };
-    const stop = () => {
-      if (intervalId !== null) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
-    };
-
-    const onVisibility = () => {
-      if (document.visibilityState === "hidden") {
-        void refetchRef.current(controller.signal);
-        stop();
-      } else if (document.visibilityState === "visible") {
-        void refetchRef.current(controller.signal);
-        start();
-      }
-    };
-
-    if (typeof document !== "undefined") {
-      if (document.visibilityState === "visible") {
-        void refetchRef.current(controller.signal);
-        start();
-      }
-      document.addEventListener("visibilitychange", onVisibility);
-    }
-
-    return () => {
-      stop();
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onVisibility);
-      }
-      controller.abort();
-    };
-  }, [clientId]);
+  // Polling. Visibility-aware: see `useVisibilityPolling` for the contract —
+  // immediate fetch on mount, pause on hidden, resume + immediate fetch on
+  // visible, single abort-controller per fetch.
+  useVisibilityPolling(refetch, { intervalMs: DEFAULT_POLL_INTERVAL_MS });
 
   // Combined, sorted display list.
   const displayList = useMemo<DisplayItem[]>(() => {
@@ -595,6 +549,28 @@ function MessageBubble({
   const isFailed = item.kind === "failed";
   const isPending = item.kind === "pending";
 
+  // Captured once on first render. If the bubble first mounted as pending
+  // (i.e. the viewer just sent it), it gets the entrance animation. Bubbles
+  // that first render as confirmed (poll results, SSR, other party's
+  // messages) start at their final position with no animation.
+  const wasInitiallyPendingRef = useRef(item.kind === "pending");
+  const [entered, setEntered] = useState(!wasInitiallyPendingRef.current);
+
+  useEffect(() => {
+    if (!wasInitiallyPendingRef.current) return;
+    // Double rAF: commit the initial transform/opacity in one paint, then
+    // flip to the target on the next frame so the transition actually runs.
+    let id2 = 0;
+    const id1 = requestAnimationFrame(() => {
+      id2 = requestAnimationFrame(() => setEntered(true));
+    });
+    return () => {
+      cancelAnimationFrame(id1);
+      if (id2) cancelAnimationFrame(id2);
+    };
+  }, []);
+
+  const targetOpacity = isPending ? 0.6 : 1;
   const baseBubble: CSSProperties = {
     display: "inline-block",
     maxWidth: "70%",
@@ -607,8 +583,14 @@ function MessageBubble({
       ? "var(--sidebar-bg)"
       : "var(--surface-raised)",
     color: alignRight ? "var(--surface-base)" : "var(--text-primary)",
-    opacity: isPending ? 0.6 : 1,
-    transition: "opacity 220ms ease-out",
+    opacity: entered ? targetOpacity : 0,
+    transform: entered
+      ? "translateY(0) scale(1)"
+      : "translateY(28px) scale(0.92)",
+    transformOrigin: alignRight ? "bottom right" : "bottom left",
+    transition:
+      "transform 350ms cubic-bezier(0.16, 1, 0.3, 1), " +
+      "opacity 350ms cubic-bezier(0.16, 1, 0.3, 1)",
     borderLeft: isFailed ? "3px solid var(--status-danger)" : undefined,
   };
 

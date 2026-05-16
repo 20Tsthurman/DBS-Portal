@@ -5,8 +5,8 @@ import type {
   TimeLogRecord,
 } from "@/lib/supabase";
 import { formatDateTime, formatHours } from "../../_lib/format";
+import { StatCard } from "@/components/ui/StatCard";
 import { PhaseTracker } from "./PhaseTracker";
-import { StatCard } from "./StatCard";
 
 interface OverviewTabProps {
   project: ProjectRecord | null;

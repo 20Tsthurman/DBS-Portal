@@ -6,21 +6,13 @@ import {
   type ShootRecord,
   type TimeLogRecord,
 } from "@/lib/supabase";
+import { currentMonthRange } from "@/app/owner/calendar/_lib/timezone";
 
 export interface ClientWithRelations {
   client: ClientRecord;
   project: ProjectRecord | null;
   pkg: PackageRecord | null;
   hoursThisMonth: number;
-}
-
-function currentMonthRange(now = new Date()): { start: string; end: string } {
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth();
-  const start = new Date(Date.UTC(year, month, 1));
-  const end = new Date(Date.UTC(year, month + 1, 0));
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
-  return { start: fmt(start), end: fmt(end) };
 }
 
 export async function fetchClientsWithRelations(): Promise<
