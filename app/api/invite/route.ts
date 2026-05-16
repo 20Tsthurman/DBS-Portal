@@ -7,6 +7,7 @@ import {
   type ClientStatus,
   type ClientType,
 } from "@/lib/supabase";
+import { escapeHtml } from "@/lib/escapeHtml";
 
 interface InviteBody {
   name?: unknown;
@@ -31,15 +32,6 @@ function formatExpiryDate(date: Date): string {
     day: "numeric",
     year: "numeric",
   }).format(date);
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 interface InviteEmailOpts {

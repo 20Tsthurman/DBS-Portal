@@ -1,13 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { auth, currentUser } from "@clerk/nextjs/server";
 import {
   getSupabaseServiceClient,
   type ProjectRecord,
   type TimeLogCategory,
   type TimeLogRecord,
 } from "@/lib/supabase";
+import { requireOwner } from "@/lib/auth";
 
 const VALID_CATEGORIES: TimeLogCategory[] = [
   "editing",
@@ -16,20 +16,6 @@ const VALID_CATEGORIES: TimeLogCategory[] = [
   "admin",
   "communication",
 ];
-
-async function ensureOwner(): Promise<{ ok: true; ownerLabel: string } | { ok: false; error: string }> {
-  const { userId } = await auth();
-  if (!userId) return { ok: false, error: "Unauthorized" };
-  const user = await currentUser();
-  if (user?.publicMetadata?.role !== "owner") {
-    return { ok: false, error: "Forbidden" };
-  }
-  const ownerLabel =
-    user?.fullName ||
-    user?.primaryEmailAddress?.emailAddress ||
-    "Owner";
-  return { ok: true, ownerLabel };
-}
 
 export interface AddTimeLogInput {
   clientId: string;
@@ -48,7 +34,7 @@ export interface ActionResult<T = null> {
 export async function addTimeLogAction(
   input: AddTimeLogInput
 ): Promise<ActionResult<TimeLogRecord>> {
-  const guard = await ensureOwner();
+  const guard = await requireOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
 
   if (!input.clientId) return { ok: false, error: "Missing client id" };
@@ -87,7 +73,7 @@ export async function deleteTimeLogAction(
   logId: string,
   clientId: string
 ): Promise<ActionResult> {
-  const guard = await ensureOwner();
+  const guard = await requireOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
 
   const supabase = getSupabaseServiceClient();
@@ -107,7 +93,7 @@ export interface UpdateNotesInput {
 export async function updateNotesAction(
   input: UpdateNotesInput
 ): Promise<ActionResult<{ savedAt: string }>> {
-  const guard = await ensureOwner();
+  const guard = await requireOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
 
   const supabase = getSupabaseServiceClient();

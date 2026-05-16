@@ -14,6 +14,7 @@ import { OverviewTab } from "./_components/OverviewTab";
 import { TabNav, type TabDefinition } from "./_components/TabNav";
 import { TimeTab } from "./_components/TimeTab";
 import { NotesTab } from "./_components/NotesTab";
+import { MessageThread } from "@/components/messages/MessageThread";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +76,11 @@ export default async function OwnerClientDetailPage({ params }: PageProps) {
     {
       key: "messages",
       label: "Messages",
-      content: <PlaceholderPanel message="Messages coming in Phase 2c" />,
+      content: (
+        <div style={{ height: 600, display: "flex", flexDirection: "column" }}>
+          <MessageThread clientId={client.id} viewerRole="owner" />
+        </div>
+      ),
     },
     {
       key: "files",

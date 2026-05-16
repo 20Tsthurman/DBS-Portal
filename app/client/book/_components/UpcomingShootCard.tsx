@@ -8,17 +8,19 @@ import {
 } from "@/app/owner/calendar/_lib/timezone";
 import { StatusBadge } from "./StatusBadge";
 import { IconCalendar, IconChevronRight } from "./Icons";
-import { MessageKelseyButton } from "./MessageKelseyButton";
+import { QuickMessageButton } from "@/components/messages/QuickMessageButton";
 
 interface UpcomingShootCardProps {
   /** Already filtered to upcoming + sorted ascending by scheduled_at. */
   shoots: ShootRecord[];
   baseHref: string;
+  clientId: string;
 }
 
 export function UpcomingShootCard({
   shoots,
   baseHref,
+  clientId,
 }: UpcomingShootCardProps) {
   const next = shoots[0] ?? null;
   const additional = Math.max(0, shoots.length - 1);
@@ -37,6 +39,7 @@ export function UpcomingShootCard({
           shoot={next}
           additional={additional}
           baseHref={baseHref}
+          clientId={clientId}
         />
       ) : (
         <EmptyBody />
@@ -78,9 +81,15 @@ interface PopulatedBodyProps {
   shoot: ShootRecord;
   additional: number;
   baseHref: string;
+  clientId: string;
 }
 
-function PopulatedBody({ shoot, additional, baseHref }: PopulatedBodyProps) {
+function PopulatedBody({
+  shoot,
+  additional,
+  baseHref,
+  clientId,
+}: PopulatedBodyProps) {
   const startsAt = new Date(shoot.scheduled_at);
   const endsAt = new Date(
     startsAt.getTime() + (shoot.duration_hours ?? 1) * 3600 * 1000
@@ -170,7 +179,7 @@ function PopulatedBody({ shoot, additional, baseHref }: PopulatedBodyProps) {
           <span style={{ flex: 1 }}>View Details</span>
           <IconChevronRight size={16} color="var(--text-muted)" />
         </Link>
-        <MessageKelseyButton />
+        <QuickMessageButton clientId={clientId} viewerRole="client" />
       </div>
 
       {additional > 0 && <p style={moreLineStyle}>{moreLabel}</p>}

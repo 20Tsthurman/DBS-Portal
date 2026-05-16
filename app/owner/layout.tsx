@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { currentUser } from "@clerk/nextjs/server";
-import { Sidebar, type SidebarNavItem } from "@/components/ui/Sidebar";
+import { type SidebarNavItem } from "@/components/ui/Sidebar";
+import { SidebarWithUnread } from "@/components/ui/SidebarWithUnread";
 import { TopBar } from "@/components/ui/TopBar";
 
 const ownerNav: SidebarNavItem[] = [
@@ -34,7 +35,11 @@ export default async function OwnerLayout({
       className="min-h-screen"
       style={{ backgroundColor: "var(--surface-base)" }}
     >
-      <Sidebar eyebrow="Owner Portal" navItems={ownerNav} />
+      <SidebarWithUnread
+        eyebrow="Owner Portal"
+        navItems={ownerNav}
+        viewerRole="owner"
+      />
       <div className="ml-60 flex min-h-screen flex-col">
         <TopBar navItems={ownerNav} fallbackTitle="Owner Portal" />
         <main className="flex-1 p-8">{children}</main>

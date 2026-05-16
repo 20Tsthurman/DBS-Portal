@@ -4,6 +4,7 @@ import {
   currentMonthKey,
   monthGridDateKeys,
 } from "@/app/owner/calendar/_lib/timezone";
+import { requireCurrentClient } from "@/lib/currentClient";
 import {
   fetchMyShoot,
   fetchMyShootsInRange,
@@ -67,7 +68,8 @@ export default async function ClientBookPage({
     ? fetchMyShoot(shootId)
     : Promise.resolve(null);
 
-  const [myShoots, upcomingShoots, viewedShoot] = await Promise.all([
+  const [client, myShoots, upcomingShoots, viewedShoot] = await Promise.all([
+    requireCurrentClient(),
     fetchMyShootsInRange(gridStartUtc, gridEndUtc),
     fetchMyUpcomingShoots(),
     shootPromise,
@@ -126,7 +128,11 @@ export default async function ClientBookPage({
             gap: 16,
           }}
         >
-          <UpcomingShootCard shoots={upcomingShoots} baseHref={baseHref} />
+          <UpcomingShootCard
+            shoots={upcomingShoots}
+            baseHref={baseHref}
+            clientId={client.id}
+          />
           <RequestNewShootCard href={requestHref} />
         </div>
       </div>

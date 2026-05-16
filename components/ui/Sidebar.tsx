@@ -7,6 +7,7 @@ import { UserButton, useUser } from "@clerk/nextjs";
 export interface SidebarNavItem {
   label: string;
   href: string;
+  badge?: number;
 }
 
 interface SidebarProps {
@@ -60,11 +61,17 @@ export function Sidebar({ eyebrow, navItems }: SidebarProps) {
         {navItems.map((item) => {
           const isActive =
             pathname === item.href || pathname.startsWith(`${item.href}/`);
+          const hasBadge = typeof item.badge === "number" && item.badge > 0;
+          const badgeLabel = hasBadge
+            ? item.badge! > 99
+              ? "99+"
+              : String(item.badge)
+            : null;
           return (
             <Link
               key={item.href}
               href={item.href}
-              className="block px-6 py-2.5 text-sm transition-colors"
+              className="flex items-center justify-between gap-3 px-6 py-2.5 text-sm transition-colors"
               style={{
                 color: isActive ? "#FFFFFF" : "rgba(255,255,255,0.55)",
                 backgroundColor: isActive
@@ -77,7 +84,24 @@ export function Sidebar({ eyebrow, navItems }: SidebarProps) {
                 fontWeight: isActive ? 600 : 400,
               }}
             >
-              {item.label}
+              <span className="truncate">{item.label}</span>
+              {badgeLabel && (
+                <span
+                  style={{
+                    backgroundColor: "var(--accent)",
+                    color: "#FFFFFF",
+                    padding: "2px 8px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    minWidth: 28,
+                    textAlign: "center",
+                    lineHeight: "14px",
+                    borderRadius: 0,
+                  }}
+                >
+                  {badgeLabel}
+                </span>
+              )}
             </Link>
           );
         })}

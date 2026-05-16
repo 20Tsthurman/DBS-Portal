@@ -20,6 +20,25 @@ create table if not exists clients (
   constraint clerk_user_id_not_empty check (clerk_user_id is null or length(clerk_user_id) > 0)
 );
 
+-- Messages feature: notification throttling. Two independent systems
+-- per recipient, each with its own 24-hour cooldown:
+--   *_last_new_msg_email_at  — stamped by POST /api/messages
+--   *_last_reminder_email_at — stamped by the daily reminder cron
+-- Worst case is two emails per 24h per thread per recipient.
+alter table clients add column if not exists owner_last_notified_at timestamptz;
+alter table clients add column if not exists client_last_notified_at timestamptz;
+
+-- One-shot migration: rename the original notification columns to scope
+-- them to the new-message email system (the reminder cron uses its own
+-- *_last_reminder_email_at columns added below). NOT idempotent — run
+-- once via Supabase SQL editor.
+alter table clients rename column owner_last_notified_at to owner_last_new_msg_email_at;
+alter table clients rename column client_last_notified_at to client_last_new_msg_email_at;
+
+-- Independent cooldown for the daily reminder cron — see docs §6.5.
+alter table clients add column if not exists owner_last_reminder_email_at timestamptz;
+alter table clients add column if not exists client_last_reminder_email_at timestamptz;
+
 -- ---------------------------------------------------------------------------
 -- packages
 -- ---------------------------------------------------------------------------

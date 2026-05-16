@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { auth, clerkClient, currentUser } from "@clerk/nextjs/server";
+import { clerkClient } from "@clerk/nextjs/server";
 import {
   getSupabaseServiceClient,
   type ClientRecord,
   type ClientStatus,
   type ClientType,
 } from "@/lib/supabase";
+import { requireOwnerApi } from "@/lib/auth";
 
 // Best-effort Clerk ban — never throws. The DB-level state change is
 // the source of truth; the ban is secondary protection so a banned
@@ -50,24 +51,12 @@ const VALID_STATUSES: ClientStatus[] = [
   "lead",
 ];
 
-async function requireOwner() {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const user = await currentUser();
-  if (user?.publicMetadata?.role !== "owner") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-  return null;
-}
-
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
-  const guard = await requireOwner();
-  if (guard) return guard;
+  const authError = await requireOwnerApi();
+  if (authError) return authError;
 
   const { id } = await context.params;
   if (!id) {
@@ -187,8 +176,8 @@ export async function DELETE(
   _request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
-  const guard = await requireOwner();
-  if (guard) return guard;
+  const authError = await requireOwnerApi();
+  if (authError) return authError;
 
   const { id } = await context.params;
   if (!id) {

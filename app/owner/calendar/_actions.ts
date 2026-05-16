@@ -1,24 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { auth, currentUser } from "@clerk/nextjs/server";
 import {
   getSupabaseServiceClient,
   type TimeBlockCategory,
   type TimeBlockRecord,
 } from "@/lib/supabase";
-
-async function ensureOwner(): Promise<
-  { ok: true } | { ok: false; error: string }
-> {
-  const { userId } = await auth();
-  if (!userId) return { ok: false, error: "Unauthorized" };
-  const user = await currentUser();
-  if (user?.publicMetadata?.role !== "owner") {
-    return { ok: false, error: "Forbidden" };
-  }
-  return { ok: true };
-}
+import { requireOwner } from "@/lib/auth";
 
 export interface ActionResult<T = null> {
   ok: boolean;
@@ -93,7 +81,7 @@ function validateClientId(
 export async function createTimeBlock(
   input: CreateTimeBlockInput
 ): Promise<ActionResult<TimeBlockRecord>> {
-  const guard = await ensureOwner();
+  const guard = await requireOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
 
   if (!input.date || !isValidDate(input.date)) {
@@ -137,7 +125,7 @@ export async function updateTimeBlock(
   blockId: string,
   updates: UpdateTimeBlockInput
 ): Promise<ActionResult<TimeBlockRecord>> {
-  const guard = await ensureOwner();
+  const guard = await requireOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
 
   if (!blockId) return { ok: false, error: "Missing block id." };
@@ -211,7 +199,7 @@ export async function updateTimeBlock(
 export async function deleteTimeBlock(
   blockId: string
 ): Promise<ActionResult> {
-  const guard = await ensureOwner();
+  const guard = await requireOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
   if (!blockId) return { ok: false, error: "Missing block id." };
 
