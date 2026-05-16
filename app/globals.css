@@ -92,3 +92,14 @@ table tbody td {
   color: var(--text-body);
   font-size: 14px;
 }
+
+.agenda-row:hover {
+  background-color: rgba(168, 120, 138, 0.06);
+}
+
+.client-shoot-pill {
+  transition: filter 120ms ease-out;
+}
+.client-shoot-pill:hover {
+  filter: brightness(0.94);
+}

@@ -192,6 +192,155 @@ export function formatTimeInTimezone(
 }
 
 /**
+ * Compact wall-clock time, "9am" or "2:30pm" — lowercase, no leading zero,
+ * minutes omitted on the hour. Used for the month-view event pills where
+ * horizontal space is tight.
+ */
+export function formatShortTimeInTimezone(
+  d: Date,
+  tz: string = PORTAL_TIMEZONE
+): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hourCycle: "h23",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(d);
+  const map: Record<string, string> = {};
+  for (const p of parts) {
+    if (p.type !== "literal") map[p.type] = p.value;
+  }
+  const h24 = Number(map.hour);
+  const mi = Number(map.minute);
+  const ampm = h24 >= 12 ? "pm" : "am";
+  let h12 = h24 % 12;
+  if (h12 === 0) h12 = 12;
+  return mi === 0 ? `${h12}${ampm}` : `${h12}:${String(mi).padStart(2, "0")}${ampm}`;
+}
+
+const MONTH_LONG_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+/** Parse "YYYY-MM" → { year, month } where month is 1-indexed. */
+export function parseMonthKey(s: string): { year: number; month: number } {
+  const [y, m] = s.split("-").map(Number);
+  return { year: y, month: m };
+}
+
+/** Format { year, month: 1-12 } → "YYYY-MM". */
+export function formatMonthKey(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+/** Current "YYYY-MM" in `tz`. */
+export function currentMonthKey(tz: string = PORTAL_TIMEZONE): string {
+  const key = dateKeyInTimezone(new Date(), tz);
+  return key.slice(0, 7);
+}
+
+/** Add `delta` months, normalizing year rollover. */
+export function addMonthsToMonthKey(monthKey: string, delta: number): string {
+  const { year, month } = parseMonthKey(monthKey);
+  const total = year * 12 + (month - 1) + delta;
+  const newYear = Math.floor(total / 12);
+  const newMonth = ((total % 12) + 12) % 12 + 1;
+  return formatMonthKey(newYear, newMonth);
+}
+
+/**
+ * The 42 date-keys (YYYY-MM-DD) for a 6×7 month grid starting on the Sunday
+ * that begins the week containing the 1st of the given month. Pure string
+ * math — no server-local Date methods.
+ */
+export function monthGridDateKeys(monthKey: string): string[] {
+  const { year, month } = parseMonthKey(monthKey);
+  const firstKey = `${year}-${String(month).padStart(2, "0")}-01`;
+  const firstWeekday = weekdayForDateKey(firstKey);
+  const gridStartKey = addDaysToDateKey(firstKey, -firstWeekday);
+  const out: string[] = [];
+  for (let i = 0; i < 42; i++) {
+    out.push(addDaysToDateKey(gridStartKey, i));
+  }
+  return out;
+}
+
+/** "May 2026" for a "YYYY-MM" key. */
+export function formatMonthLabel(monthKey: string): string {
+  const { year, month } = parseMonthKey(monthKey);
+  return `${MONTH_LONG_NAMES[month - 1]} ${year}`;
+}
+
+/** Whether a YYYY-MM-DD date-key falls inside the given YYYY-MM. */
+export function dateKeyInMonth(dateKey: string, monthKey: string): boolean {
+  return dateKey.slice(0, 7) === monthKey;
+}
+
+const WEEKDAY_SHORT_NAMES = [
+  "Sun",
+  "Mon",
+  "Tue",
+  "Wed",
+  "Thu",
+  "Fri",
+  "Sat",
+];
+
+const WEEKDAY_LONG_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+const MONTH_SHORT_NAMES = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/** "Thu", "Fri", etc. — short weekday for a YYYY-MM-DD key. */
+export function shortWeekdayForDateKey(dateKey: string): string {
+  return WEEKDAY_SHORT_NAMES[weekdayForDateKey(dateKey)] ?? "";
+}
+
+/** "May 14", "Dec 30" — short date label (no year). */
+export function shortDateLabelForDateKey(dateKey: string): string {
+  const [, m, d] = dateKey.split("-").map(Number);
+  return `${MONTH_SHORT_NAMES[m - 1]} ${d}`;
+}
+
+/** "Thursday, May 14, 2026" — full date label. */
+export function fullDateLabelForDateKey(dateKey: string): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const weekday = WEEKDAY_LONG_NAMES[weekdayForDateKey(dateKey)] ?? "";
+  return `${weekday}, ${MONTH_LONG_NAMES[m - 1]} ${d}, ${y}`;
+}
+
+/**
  * Build a UTC `Date` representing the instant when `tz`'s wall clock reads
  * `dateStr` + `timeStr`. DST-aware.
  *

@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npm *)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -Last 80)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -Last 60)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -Last 50)",
+      "PowerShell($env:NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=\"pk_test_dummy\"; $env:CLERK_SECRET_KEY=\"sk_test_dummy\"; $env:NEXT_PUBLIC_CLERK_SIGN_IN_URL=\"/sign-in\"; $env:NEXT_PUBLIC_CLERK_SIGN_UP_URL=\"/sign-in\"; $env:NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=\"/\"; $env:NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=\"/\"; $env:NEXT_PUBLIC_SUPABASE_URL=\"https://example.supabase.co\"; $env:NEXT_PUBLIC_SUPABASE_ANON_KEY=\"dummy\"; $env:SUPABASE_SERVICE_ROLE_KEY=\"dummy\"; $env:RESEND_API_KEY=\"dummy\"; npx next build 2>&1 | Select-Object -Last 60)",
+      "PowerShell(Get-ChildItem -Path C:\\\\dbs-portal -Recurse -File | Where-Object { $_.FullName -notmatch 'node_modules|\\\\.next|\\\\.claude' } | Sort-Object FullName | ForEach-Object { $_.FullName.Replace\\('C:\\\\dbs-portal\\\\',''\\) })",
+      "PowerShell(Get-ChildItem -Path C:\\\\dbs-portal\\\\app\\\\owner\\\\clients -Recurse -File | Sort-Object FullName | ForEach-Object { $_.FullName.Replace\\('C:\\\\dbs-portal\\\\',''\\) })",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -Last 30)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -Last 40)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -Last 20)",
+      "PowerShell(if \\(Test-Path \"C:\\\\dbs-portal\\\\.clerk\"\\) { Get-ChildItem \"C:\\\\dbs-portal\\\\.clerk\" -Recurse | ForEach-Object { Write-Output $_.FullName } } else { Write-Output \"no .clerk dir\" })",
+      "WebSearch",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:docs.svix.com)",
+      "Bash(npm view *)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(npx --no-install svix-cli --help)",
+      "Bash(not exist *)",
+      "PowerShell(New-Item *)",
+      "Bash(npx tsc *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(gh pr *)",
+      "PowerShell(Get-Command *)",
+      "Bash(npx next *)"
+    ]
+  }
+}

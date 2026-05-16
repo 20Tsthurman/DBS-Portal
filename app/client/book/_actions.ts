@@ -6,6 +6,11 @@ import {
   type ShootRecord,
 } from "@/lib/supabase";
 import { requireCurrentClient } from "@/lib/currentClient";
+import {
+  combineDateAndTimeInTimezone,
+  dateKeyInTimezone,
+} from "@/app/owner/calendar/_lib/timezone";
+import { checkBookingConflicts } from "./_lib/conflicts";
 
 export interface ActionResult<T = null> {
   ok: boolean;
@@ -13,72 +18,127 @@ export interface ActionResult<T = null> {
   data?: T;
 }
 
-export type TimeOfDay = "morning" | "afternoon" | "evening" | "specific";
-
 export interface RequestShootInput {
-  scheduledAt: string;
-  timeOfDay: TimeOfDay;
+  /** YYYY-MM-DD in PORTAL_TIMEZONE. */
+  date: string;
+  /** HH:MM in PORTAL_TIMEZONE. Must be within 07:00–21:00. */
+  startTime: string;
+  /** Hours. Must be 0.5–12. */
+  durationHours: number;
   location?: string | null;
   notes?: string | null;
+  /**
+   * When true, skip the conflict check and write directly. Used after the
+   * client confirms the "Kelsey has a possible conflict — send anyway?"
+   * prompt.
+   */
+  acknowledgeConflict?: boolean;
 }
 
-const VALID_TIMES_OF_DAY: TimeOfDay[] = [
-  "morning",
-  "afternoon",
-  "evening",
-  "specific",
-];
+export type RequestShootResult =
+  | { ok: true; shootId: string }
+  | { ok: false; error: "auth"; message: string }
+  | { ok: false; error: "validation"; message: string }
+  | { ok: false; error: "conflict"; conflictCount: number }
+  | { ok: false; error: "internal"; message: string };
 
-function isValidIso(value: string): boolean {
-  return Number.isFinite(Date.parse(value));
-}
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^\d{2}:\d{2}$/;
+const WORK_DAY_START_MIN = 7 * 60;
+const WORK_DAY_END_MIN = 21 * 60;
 
-function capitalize(s: string): string {
-  return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1);
-}
-
-// Time-of-day is captured in `shoots.notes` rather than a dedicated column:
-// it's UI metadata only, Kelsey reads it inline when reviewing requests, and
-// a schema change for one free-text field isn't worth it.
-function buildNotes(
-  timeOfDay: TimeOfDay,
-  rawNotes: string | null | undefined
-): string | null {
-  const userNotes = rawNotes?.trim() ?? "";
-  if (timeOfDay === "specific") {
-    return userNotes.length > 0 ? userNotes : null;
+function parseDateKey(s: string): { y: number; m: number; d: number } | null {
+  if (!DATE_RE.test(s)) return null;
+  const [y, m, d] = s.split("-").map(Number);
+  // Round-trip via UTC to reject things like 2026-02-30.
+  const probe = new Date(Date.UTC(y, m - 1, d));
+  if (
+    probe.getUTCFullYear() !== y ||
+    probe.getUTCMonth() !== m - 1 ||
+    probe.getUTCDate() !== d
+  ) {
+    return null;
   }
-  const prefix = `Time preference: ${capitalize(timeOfDay)}`;
-  return userNotes.length > 0 ? `${prefix}\n\n${userNotes}` : prefix;
+  return { y, m, d };
 }
 
-function revalidateBookingPaths(clientId: string): void {
-  revalidatePath("/client/book");
-  revalidatePath("/owner/shoots");
-  revalidatePath("/owner/calendar");
-  revalidatePath(`/owner/clients/${clientId}`);
+function parseTimeOfDay(s: string): number | null {
+  if (!TIME_RE.test(s)) return null;
+  const [h, m] = s.split(":").map(Number);
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return h * 60 + m;
 }
 
 export async function requestShoot(
   input: RequestShootInput
-): Promise<ActionResult<ShootRecord>> {
+): Promise<RequestShootResult> {
   let clientId: string;
   try {
     const client = await requireCurrentClient();
     clientId = client.id;
   } catch {
-    return { ok: false, error: "Unauthorized" };
+    return { ok: false, error: "auth", message: "Not authenticated." };
   }
 
-  if (!input.scheduledAt || !isValidIso(input.scheduledAt)) {
-    return { ok: false, error: "scheduled_at must be a valid ISO timestamp" };
+  if (!parseDateKey(input.date)) {
+    return { ok: false, error: "validation", message: "Invalid date." };
   }
-  if (new Date(input.scheduledAt) <= new Date()) {
-    return { ok: false, error: "Cannot request a shoot in the past" };
+
+  const startMin = parseTimeOfDay(input.startTime);
+  if (startMin === null) {
+    return { ok: false, error: "validation", message: "Invalid start time." };
   }
-  if (!VALID_TIMES_OF_DAY.includes(input.timeOfDay)) {
-    return { ok: false, error: "Invalid time-of-day preference" };
+
+  const duration = Number(input.durationHours);
+  if (!Number.isFinite(duration) || duration < 0.5 || duration > 12) {
+    return {
+      ok: false,
+      error: "validation",
+      message: "Duration must be between 0.5 and 12 hours.",
+    };
   }
+
+  if (startMin < WORK_DAY_START_MIN) {
+    return {
+      ok: false,
+      error: "validation",
+      message: "Start time must be 7 AM or later.",
+    };
+  }
+  if (startMin >= WORK_DAY_END_MIN) {
+    return {
+      ok: false,
+      error: "validation",
+      message: "Start time must be before 9 PM.",
+    };
+  }
+
+  const endMin = startMin + duration * 60;
+  if (endMin > WORK_DAY_END_MIN) {
+    return {
+      ok: false,
+      error: "validation",
+      message: "Shoot must end by 9 PM.",
+    };
+  }
+
+  const todayKey = dateKeyInTimezone(new Date());
+  if (input.date < todayKey) {
+    return { ok: false, error: "validation", message: "Date is in the past." };
+  }
+
+  const startsAt = combineDateAndTimeInTimezone(input.date, input.startTime);
+  const endsAt = new Date(startsAt.getTime() + duration * 60 * 60 * 1000);
+
+  if (!input.acknowledgeConflict) {
+    const { count } = await checkBookingConflicts(startsAt, endsAt);
+    if (count > 0) {
+      return { ok: false, error: "conflict", conflictCount: count };
+    }
+  }
+
+  const location = input.location?.trim() || null;
+  const notes = input.notes?.trim() || null;
 
   const supabase = getSupabaseServiceClient();
   const { data, error } = await supabase
@@ -86,22 +146,34 @@ export async function requestShoot(
     .insert({
       client_id: clientId,
       project_id: null,
-      scheduled_at: input.scheduledAt,
-      location: input.location?.trim() || null,
-      duration_hours: null,
-      notes: buildNotes(input.timeOfDay, input.notes),
+      scheduled_at: startsAt.toISOString(),
+      duration_hours: duration,
+      location,
+      notes,
       status: "requested",
     })
-    .select("*")
+    .select("id")
     .single();
 
   if (error || !data) {
-    return { ok: false, error: error?.message ?? "Failed to request shoot" };
+    return {
+      ok: false,
+      error: "internal",
+      message: error?.message ?? "Failed to create shoot.",
+    };
   }
 
-  const created = data as ShootRecord;
-  revalidateBookingPaths(clientId);
-  return { ok: true, data: created };
+  revalidatePath("/client/book");
+  revalidatePath("/owner/calendar");
+
+  return { ok: true, shootId: (data as { id: string }).id };
+}
+
+function revalidateBookingPaths(clientId: string): void {
+  revalidatePath("/client/book");
+  revalidatePath("/owner/shoots");
+  revalidatePath("/owner/calendar");
+  revalidatePath(`/owner/clients/${clientId}`);
 }
 
 export async function cancelMyShootRequest(

@@ -1,23 +1,24 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import {
-  addDaysToDateKey,
-  formatWeekRangeLabel,
+  addMonthsToMonthKey,
+  combineDateAndTimeInTimezone,
+  currentMonthKey,
+  formatMonthLabel,
   weekStartKeyForDate,
 } from "../_lib/timezone";
 
-interface WeekToolbarProps {
-  weekStartKey: string;
+interface MonthToolbarProps {
+  monthKey: string;
 }
 
-export function WeekToolbar({ weekStartKey }: WeekToolbarProps) {
-  const prevKey = addDaysToDateKey(weekStartKey, -7);
-  const nextKey = addDaysToDateKey(weekStartKey, 7);
-  const todayKey = weekStartKeyForDate(new Date());
-  const rangeLabel = formatWeekRangeLabel(weekStartKey);
+export function MonthToolbar({ monthKey }: MonthToolbarProps) {
+  const prevKey = addMonthsToMonthKey(monthKey, -1);
+  const nextKey = addMonthsToMonthKey(monthKey, 1);
+  const todayMonth = currentMonthKey();
+  const label = formatMonthLabel(monthKey);
 
-  const weekHref = (k: string) =>
-    `/owner/calendar?view=week&week=${k}`;
+  const monthHref = (k: string) => `/owner/calendar?view=month&month=${k}`;
 
   return (
     <div
@@ -31,19 +32,19 @@ export function WeekToolbar({ weekStartKey }: WeekToolbarProps) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <Link href={weekHref(todayKey)} style={pillButton}>
+        <Link href={monthHref(todayMonth)} style={pillButton}>
           Today
         </Link>
         <Link
-          href={weekHref(prevKey)}
-          aria-label="Previous week"
+          href={monthHref(prevKey)}
+          aria-label="Previous month"
           style={iconButton}
         >
           ◀
         </Link>
         <Link
-          href={weekHref(nextKey)}
-          aria-label="Next week"
+          href={monthHref(nextKey)}
+          aria-label="Next month"
           style={iconButton}
         >
           ▶
@@ -58,14 +59,14 @@ export function WeekToolbar({ weekStartKey }: WeekToolbarProps) {
             letterSpacing: "-0.01em",
           }}
         >
-          {rangeLabel}
+          {label}
         </h2>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <ViewToggle activeWeekKey={weekStartKey} />
+        <ViewToggle activeMonthKey={monthKey} />
         <Link
-          href={`/owner/calendar?view=week&week=${weekStartKey}&new=time_block`}
+          href={`/owner/calendar?view=month&month=${monthKey}&new=time_block`}
           style={addButton}
         >
           + Add
@@ -76,20 +77,31 @@ export function WeekToolbar({ weekStartKey }: WeekToolbarProps) {
 }
 
 interface ViewToggleProps {
-  activeWeekKey: string;
+  activeMonthKey: string;
 }
 
-function ViewToggle({ activeWeekKey }: ViewToggleProps) {
+function ViewToggle({ activeMonthKey }: ViewToggleProps) {
+  // Week link: if the displayed month is the current month, land on the week
+  // containing today; otherwise land on the week containing the 1st of the
+  // displayed month. This matches the historic week-↔-month bridge behavior.
+  const todayMonth = currentMonthKey();
+  const weekProbeKey =
+    activeMonthKey === todayMonth
+      ? weekStartKeyForDate(new Date())
+      : weekStartKeyForDate(
+          combineDateAndTimeInTimezone(`${activeMonthKey}-01`, "12:00")
+        );
+
   const items: Array<{ label: string; href: string; active: boolean }> = [
     {
       label: "Week",
-      href: `/owner/calendar?view=week&week=${activeWeekKey}`,
-      active: true,
+      href: `/owner/calendar?view=week&week=${weekProbeKey}`,
+      active: false,
     },
     {
       label: "Month",
-      href: `/owner/calendar?view=month`,
-      active: false,
+      href: `/owner/calendar?view=month&month=${activeMonthKey}`,
+      active: true,
     },
     {
       label: "Agenda",

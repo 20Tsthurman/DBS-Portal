@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { CSSProperties } from "react";
 import type { CalendarEvent } from "../_lib/types";
 import {
@@ -14,6 +15,7 @@ import {
   weekdayForDateKey,
 } from "../_lib/timezone";
 import { EventChip } from "./EventChip";
+import { assignEventLanes } from "../_lib/overlap";
 
 interface WeekViewProps {
   /** Sunday's YYYY-MM-DD in PORTAL_TIMEZONE. */
@@ -178,6 +180,7 @@ export function WeekView({ weekStartKey, events, now = new Date() }: WeekViewPro
         {dayKeys.map((dk, i) => {
           const isToday = dk === todayKey;
           const dayEvents = eventsByDay.get(dk) ?? [];
+          const dayHref = `/owner/calendar?view=week&week=${weekStartKey}&date=${dk}`;
           return (
             <div
               key={dk}
@@ -191,6 +194,17 @@ export function WeekView({ weekStartKey, events, now = new Date() }: WeekViewPro
                 overflow: "hidden",
               }}
             >
+              {/* Empty-area click target — opens the day panel without selecting an event. */}
+              <Link
+                href={dayHref}
+                aria-label={`Open ${dk}`}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 0,
+                }}
+              />
+
               {/* Hour grid lines */}
               {hourMarks.map((h) => {
                 const top = (h - WEEK_GRID_START_HOUR) * WEEK_GRID_HOUR_PX;
@@ -229,14 +243,26 @@ export function WeekView({ weekStartKey, events, now = new Date() }: WeekViewPro
                 );
               })}
 
-              {/* Event chips */}
-              {dayEvents.map((e) => {
-                const top = chipTop(e);
-                const height = chipHeight(e);
-                return (
-                  <EventChip key={e.id} event={e} top={top} height={height} />
-                );
-              })}
+              {/* Event chips — lane-assigned so overlapping events split width */}
+              {(() => {
+                const lanes = assignEventLanes(dayEvents);
+                return dayEvents.map((e) => {
+                  const top = chipTop(e);
+                  const height = chipHeight(e);
+                  const lane = lanes.get(e.id);
+                  return (
+                    <EventChip
+                      key={e.id}
+                      event={e}
+                      weekKey={weekStartKey}
+                      top={top}
+                      height={height}
+                      laneIndex={lane?.laneIndex ?? 0}
+                      laneCount={lane?.laneCount ?? 1}
+                    />
+                  );
+                });
+              })()}
 
               {/* "Now" line — today only, only when current time is in working hours */}
               {isToday && showNowLine && (

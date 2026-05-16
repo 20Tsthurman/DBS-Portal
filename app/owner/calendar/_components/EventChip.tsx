@@ -1,5 +1,4 @@
-"use client";
-
+import Link from "next/link";
 import type { CSSProperties } from "react";
 import type { CalendarEvent } from "../_lib/types";
 import { stripeBackgroundImage, visualsForEvent } from "../_lib/eventColors";
@@ -7,26 +6,38 @@ import { formatTimeInTimezone } from "../_lib/timezone";
 
 interface EventChipProps {
   event: CalendarEvent;
+  weekKey: string;
   top: number;
   height: number;
+  laneIndex: number;
+  laneCount: number;
 }
 
-export function EventChip({ event, top, height }: EventChipProps) {
+export function EventChip({
+  event,
+  weekKey,
+  top,
+  height,
+  laneIndex,
+  laneCount,
+}: EventChipProps) {
   const v = visualsForEvent(event);
+  const editHref = `/owner/calendar?view=week&week=${weekKey}&date=${event.dateKey}&edit=${event.id}`;
+
+  const widthPct = 100 / laneCount;
+  const leftPct = laneIndex * widthPct;
 
   const baseStyle: CSSProperties = {
     position: "absolute",
     top,
-    left: 2,
-    right: 2,
+    left: `calc(${leftPct}% + 2px)`,
+    width: `calc(${widthPct}% - 4px)`,
     height,
-    border: "none",
+    display: "block",
     borderLeft: v.borderLeft,
     backgroundColor: v.background,
     backgroundImage:
-      v.fillTexture === "diagonal-stripes"
-        ? stripeBackgroundImage()
-        : undefined,
+      v.fillTexture === "diagonal-stripes" ? stripeBackgroundImage() : undefined,
     color: v.textColor,
     padding: "4px 8px",
     fontSize: 11,
@@ -36,6 +47,7 @@ export function EventChip({ event, top, height }: EventChipProps) {
     overflow: "hidden",
     fontFamily: "inherit",
     fontStyle: v.textTexture === "italic" ? "italic" : undefined,
+    textDecoration: "none",
     zIndex: 2,
   };
 
@@ -80,20 +92,10 @@ export function EventChip({ event, top, height }: EventChipProps) {
     .join(" · ");
 
   return (
-    <button
-      type="button"
-      title={tooltip}
-      style={baseStyle}
-      onClick={(e) => {
-        e.stopPropagation();
-        // Placeholder — day panel wiring lands in the next PR.
-        // eslint-disable-next-line no-console
-        console.log("[calendar] event clicked", event.id);
-      }}
-    >
+    <Link href={editHref} title={tooltip} style={baseStyle}>
       <div style={timeStyle}>{timeText}</div>
       <div style={titleStyle}>{event.title || "—"}</div>
       {event.subtitle && <div style={subtitleStyle}>{event.subtitle}</div>}
-    </button>
+    </Link>
   );
 }

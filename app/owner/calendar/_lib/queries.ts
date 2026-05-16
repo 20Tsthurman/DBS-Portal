@@ -159,6 +159,47 @@ function defaultLabelForCategory(category: TimeBlockCategory): string {
   }
 }
 
+/** Fetch a single shoot by id, or null if not found. */
+export async function fetchShoot(id: string): Promise<ShootRecord | null> {
+  if (!id) return null;
+  const supabase = getSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from("shoots")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as ShootRecord | null) ?? null;
+}
+
+/** Fetch a single time_block by id, or null if not found. */
+export async function fetchTimeBlock(
+  id: string
+): Promise<TimeBlockRecord | null> {
+  if (!id) return null;
+  const supabase = getSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from("time_blocks")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as TimeBlockRecord | null) ?? null;
+}
+
+/** {id, name}[] of all clients, ordered by name. Used by the form pickers. */
+export async function fetchClientsLite(): Promise<
+  Array<{ id: string; name: string }>
+> {
+  const supabase = getSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from("clients")
+    .select("id, name")
+    .order("name", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Array<{ id: string; name: string }>;
+}
+
 async function fetchClientNames(
   supabase: SupabaseClient,
   clientIds: string[]
