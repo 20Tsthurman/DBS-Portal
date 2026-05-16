@@ -2,6 +2,7 @@
 
 import { useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cancelMyShootRequest } from "../_actions";
 
 interface CancelRequestButtonProps {
@@ -14,23 +15,23 @@ export function CancelRequestButton({
   closeHref,
 }: CancelRequestButtonProps) {
   const router = useRouter();
-  const [submitting, setSubmitting] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleClick = async () => {
-    if (!window.confirm("Cancel this shoot request? This can't be undone.")) {
-      return;
-    }
+  const handleConfirm = async () => {
     setError(null);
-    setSubmitting(true);
+    setBusy(true);
     const result = await cancelMyShootRequest(shootId);
-    setSubmitting(false);
+    setBusy(false);
 
     if (!result.ok) {
       setError(result.error ?? "Failed to cancel request.");
+      setOpen(false);
       return;
     }
 
+    setOpen(false);
     router.push(closeHref);
     router.refresh();
   };
@@ -39,17 +40,32 @@ export function CancelRequestButton({
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <button
         type="button"
-        onClick={handleClick}
-        disabled={submitting}
+        onClick={() => setOpen(true)}
+        disabled={busy}
         style={{
           ...destructiveButtonStyle,
-          opacity: submitting ? 0.6 : 1,
-          cursor: submitting ? "not-allowed" : "pointer",
+          opacity: busy ? 0.6 : 1,
+          cursor: busy ? "not-allowed" : "pointer",
         }}
       >
-        {submitting ? "Cancelling…" : "Cancel request"}
+        {busy ? "Cancelling…" : "Cancel request"}
       </button>
       {error && <p style={errorTextStyle}>{error}</p>}
+
+      <ConfirmDialog
+        open={open}
+        onCancel={() => {
+          if (busy) return;
+          setOpen(false);
+        }}
+        onConfirm={handleConfirm}
+        busy={busy}
+        title="Cancel this shoot request?"
+        body="The request will be removed from Kelsey's calendar. You can submit a new one anytime."
+        confirmLabel="Cancel request"
+        cancelLabel="Keep request"
+        variant="danger"
+      />
     </div>
   );
 }

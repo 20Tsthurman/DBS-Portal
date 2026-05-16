@@ -1,4 +1,6 @@
+import type { CSSProperties } from "react";
 import { StatusPill } from "@/components/ui/StatusPill";
+import type { MeetingType, ShootKind } from "@/lib/supabase";
 import {
   formatDateTime,
   formatHours,
@@ -140,10 +142,21 @@ function ShootSection({
                 >
 
                   <td style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-                    {shoot.client_name || "—"}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <KindBadge kind={shoot.kind} />
+                      <span>{shoot.client_name || "—"}</span>
+                    </div>
                   </td>
                   <td>{formatDateTime(shoot.scheduled_at)}</td>
-                  <td>{shoot.location ?? "—"}</td>
+                  <td>
+                    {locationCellText(shoot.location, shoot.meeting_type)}
+                  </td>
                   <td>
                     {shoot.duration_hours !== null
                       ? `${formatHours(Number(shoot.duration_hours))}h`
@@ -166,4 +179,49 @@ function ShootSection({
       )}
     </div>
   );
+}
+
+function KindBadge({ kind }: { kind: ShootKind }) {
+  const isMeeting = kind === "meeting";
+  const style: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "2px 6px",
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    border: isMeeting
+      ? "1px solid rgba(120, 130, 168, 1)"
+      : "1px solid var(--accent)",
+    color: isMeeting ? "#3d4868" : "var(--text-primary)",
+    backgroundColor: isMeeting
+      ? "rgba(120, 130, 168, 0.12)"
+      : "rgba(168, 120, 138, 0.10)",
+  };
+  return <span style={style}>{isMeeting ? "Meeting" : "Shoot"}</span>;
+}
+
+function meetingTypeLabel(t: MeetingType): string {
+  switch (t) {
+    case "zoom":
+      return "Zoom";
+    case "phone":
+      return "Phone";
+    case "in_person":
+      return "In-person";
+  }
+}
+
+function locationCellText(
+  location: string | null,
+  meetingType: MeetingType | null
+): string {
+  const loc = location?.trim() || null;
+  if (meetingType) {
+    const mt = meetingTypeLabel(meetingType);
+    if (loc) return `${mt} · ${loc}`;
+    return mt;
+  }
+  return loc ?? "—";
 }

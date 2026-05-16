@@ -72,13 +72,15 @@ export function ShootRowActions({ shoot, clients }: ShootRowActionsProps) {
     setEditOpen(true);
   };
 
+  const kindNoun = shoot.kind === "meeting" ? "meeting" : "shoot";
+
   const handleDelete = () => {
-    if (!confirm("Delete this shoot? This cannot be undone.")) return;
+    if (!confirm(`Delete this ${kindNoun}? This cannot be undone.`)) return;
     setMenuOpen(false);
     startTransition(async () => {
       const r = await deleteShoot(shoot.id);
       if (!r.ok) {
-        alert(r.error ?? "Failed to delete shoot.");
+        alert(r.error ?? `Failed to delete ${kindNoun}.`);
         return;
       }
       router.refresh();
@@ -89,7 +91,7 @@ export function ShootRowActions({ shoot, clients }: ShootRowActionsProps) {
     onEdit: handleEdit,
     onConfirm: () => runStatusAction(confirmShoot),
     onComplete: () => runStatusAction(completeShoot),
-    onCancel: () => runStatusAction(cancelShoot, "Cancel this shoot?"),
+    onCancel: () => runStatusAction(cancelShoot, `Cancel this ${kindNoun}?`),
     onDelete: handleDelete,
   });
 

@@ -33,7 +33,9 @@ export function MonthEventPill({ event, monthKey }: MonthEventPillProps) {
     borderLeft: v.borderLeft,
     backgroundColor: v.background,
     backgroundImage:
-      v.fillTexture === "diagonal-stripes" ? stripeBackgroundImage() : undefined,
+      v.fillTexture === "diagonal-stripes"
+        ? stripeBackgroundImage(v.stripeColor)
+        : undefined,
     color: v.textColor,
     fontSize: 11,
     fontWeight: 500,

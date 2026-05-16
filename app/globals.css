@@ -103,3 +103,10 @@ table tbody td {
 .client-shoot-pill:hover {
   filter: brightness(0.94);
 }
+
+.client-cta-button {
+  transition: filter 120ms ease-out;
+}
+.client-cta-button:hover {
+  filter: brightness(0.92);
+}

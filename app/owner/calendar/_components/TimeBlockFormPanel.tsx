@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import type {
   TimeBlockCategory,
   TimeBlockRecord,
@@ -112,6 +113,7 @@ export function TimeBlockFormPanel({
   );
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Remembers the times the user typed before flipping "All day" on, so we can restore. */
   const savedTimes = useRef<{ start: string; end: string } | null>(null);
@@ -208,19 +210,20 @@ export function TimeBlockFormPanel({
 
   const handleDelete = async () => {
     if (mode !== "edit" || !existing) return;
-    if (!window.confirm("Delete this event? This cannot be undone.")) return;
-
     setDeleting(true);
     try {
       const result = await deleteTimeBlock(existing.id);
       if (!result.ok) {
         setError(result.error ?? "Failed to delete event.");
+        setDeleteOpen(false);
         return;
       }
+      setDeleteOpen(false);
       router.push(closeHref);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unexpected error.");
+      setDeleteOpen(false);
     } finally {
       setDeleting(false);
     }
@@ -440,7 +443,7 @@ export function TimeBlockFormPanel({
           {mode === "edit" && (
             <button
               type="button"
-              onClick={handleDelete}
+              onClick={() => setDeleteOpen(true)}
               disabled={submitting || deleting}
               style={{
                 width: "100%",
@@ -463,6 +466,21 @@ export function TimeBlockFormPanel({
           )}
         </div>
       </form>
+
+      <ConfirmDialog
+        open={deleteOpen}
+        onCancel={() => {
+          if (deleting) return;
+          setDeleteOpen(false);
+        }}
+        onConfirm={handleDelete}
+        busy={deleting}
+        title="Delete this event?"
+        body="This event will be permanently removed from the calendar. This action can't be undone."
+        confirmLabel="Delete event"
+        cancelLabel="Keep event"
+        variant="danger"
+      />
     </SlidePanel>
   );
 }

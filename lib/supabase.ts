@@ -6,6 +6,8 @@ export type PackageTier = "starter" | "growth" | "premium";
 export type ProjectPhase = "onboarding" | "strategy" | "content" | "reporting";
 export type ProjectStatus = "active" | "paused" | "completed";
 export type ShootStatus = "requested" | "confirmed" | "completed" | "cancelled";
+export type ShootKind = "shoot" | "meeting";
+export type MeetingType = "zoom" | "phone" | "in_person";
 export type TimeLogCategory =
   | "editing"
   | "planning"
@@ -64,6 +66,8 @@ export interface ShootRecord {
   duration_hours: number | null;
   status: ShootStatus;
   notes: string | null;
+  kind: ShootKind;
+  meeting_type: MeetingType | null;
   created_at: string;
 }
 

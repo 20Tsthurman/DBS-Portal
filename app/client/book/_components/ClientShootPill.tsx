@@ -24,13 +24,15 @@ export function ClientShootPill({ shoot, baseHref }: ClientShootPillProps) {
   const endsAt = new Date(
     startsAt.getTime() + (shoot.duration_hours ?? 1) * 3600 * 1000
   );
+  const isMeeting = shoot.kind === "meeting";
+  const pillLabel = isMeeting ? "Your meeting" : "Your shoot";
   const event: CalendarEvent = {
     id: `shoot:${shoot.id}`,
-    category: "shoot",
+    category: isMeeting ? "meeting" : "shoot",
     dateKey: dateKeyInTimezone(startsAt),
     startsAt,
     endsAt,
-    title: "Your shoot",
+    title: pillLabel,
     subtitle: null,
     status: shoot.status,
     source: { kind: "shoot", shootId: shoot.id, clientId: shoot.client_id },
@@ -54,7 +56,9 @@ export function ClientShootPill({ shoot, baseHref }: ClientShootPillProps) {
     borderLeft: v.borderLeft,
     backgroundColor: v.background,
     backgroundImage:
-      v.fillTexture === "diagonal-stripes" ? stripeBackgroundImage() : undefined,
+      v.fillTexture === "diagonal-stripes"
+        ? stripeBackgroundImage(v.stripeColor)
+        : undefined,
     color: v.textColor,
     fontSize: 11,
     fontWeight: 500,
@@ -73,7 +77,7 @@ export function ClientShootPill({ shoot, baseHref }: ClientShootPillProps) {
       style={pillStyle}
     >
       <span style={{ opacity: 0.75, marginRight: 4 }}>{startLabel}</span>
-      <span>Your shoot</span>
+      <span>{pillLabel}</span>
       {pending && (
         <span style={{ marginLeft: 4, fontStyle: "italic", opacity: 0.85 }}>
           (pending)

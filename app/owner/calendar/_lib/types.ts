@@ -22,7 +22,7 @@
 
 import type { TimeBlockCategory } from "@/lib/supabase";
 
-export type EventCategory = "shoot" | TimeBlockCategory;
+export type EventCategory = "shoot" | "meeting" | TimeBlockCategory;
 
 export type EventStatus =
   | "requested"

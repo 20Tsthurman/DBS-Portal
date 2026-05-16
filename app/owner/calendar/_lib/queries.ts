@@ -16,7 +16,13 @@ import type { CalendarEvent } from "./types";
 
 type ShootLite = Pick<
   ShootRecord,
-  "id" | "client_id" | "scheduled_at" | "duration_hours" | "location" | "status"
+  | "id"
+  | "client_id"
+  | "scheduled_at"
+  | "duration_hours"
+  | "location"
+  | "status"
+  | "kind"
 >;
 
 type TimeBlockLite = Pick<
@@ -58,7 +64,7 @@ export async function fetchEventsInRange(
     supabase
       .from("shoots")
       .select(
-        "id, client_id, scheduled_at, duration_hours, location, status"
+        "id, client_id, scheduled_at, duration_hours, location, status, kind"
       )
       .gte("scheduled_at", start.toISOString())
       .lt("scheduled_at", end.toISOString()),
@@ -110,7 +116,7 @@ function shootToEvent(
     : startsAt;
   return {
     id: `shoot:${s.id}`,
-    category: "shoot",
+    category: s.kind === "meeting" ? "meeting" : "shoot",
     dateKey: dateKeyInTimezone(startsAt),
     startsAt,
     endsAt,
@@ -157,6 +163,56 @@ function defaultLabelForCategory(category: TimeBlockCategory): string {
     case "blocked":
       return "Unavailable";
   }
+}
+
+export interface PendingShoot {
+  id: string;
+  scheduled_at: string;
+  duration_hours: number | null;
+  location: string | null;
+  notes: string | null;
+  client_id: string;
+  client_name: string;
+}
+
+/**
+ * Pending (client-requested, not yet acted on) shoots whose scheduled_at is in
+ * the future. Used by the owner's "Pending Requests" bar so Kelsey can see and
+ * confirm/decline them without opening each one.
+ */
+export async function fetchPendingShoots(): Promise<PendingShoot[]> {
+  const supabase = getSupabaseServiceClient();
+  const nowIso = new Date().toISOString();
+
+  const { data: shoots, error: shootsError } = await supabase
+    .from("shoots")
+    .select("id, client_id, scheduled_at, duration_hours, location, notes")
+    .eq("status", "requested")
+    .gte("scheduled_at", nowIso)
+    .order("scheduled_at", { ascending: true });
+
+  if (shootsError) throw new Error(shootsError.message);
+
+  const rows = (shoots ?? []) as Array<
+    Pick<
+      ShootRecord,
+      "id" | "client_id" | "scheduled_at" | "duration_hours" | "location" | "notes"
+    >
+  >;
+  if (rows.length === 0) return [];
+
+  const clientIds = Array.from(new Set(rows.map((r) => r.client_id)));
+  const nameById = await fetchClientNames(supabase, clientIds);
+
+  return rows.map((r) => ({
+    id: r.id,
+    scheduled_at: r.scheduled_at,
+    duration_hours: r.duration_hours,
+    location: r.location,
+    notes: r.notes,
+    client_id: r.client_id,
+    client_name: nameById.get(r.client_id) ?? "Unknown client",
+  }));
 }
 
 /** Fetch a single shoot by id, or null if not found. */

@@ -25,8 +25,8 @@ export function DayPanel({ baseHref, dateKey, events }: DayPanelProps) {
   const sortedEvents = [...events].sort(
     (a, b) => a.startsAt.getTime() - b.startsAt.getTime()
   );
-  const blockedAddHref = `${baseHref}&date=${dateKey}&new=time_block&block_category=blocked`;
-  const anyAddHref = `${baseHref}&date=${dateKey}&new=time_block`;
+  const addSessionHref = `${baseHref}&date=${dateKey}&new=shoot`;
+  const addTimeBlockHref = `${baseHref}&date=${dateKey}&new=time_block&block_category=blocked`;
 
   return (
     <>
@@ -130,11 +130,11 @@ export function DayPanel({ baseHref, dateKey, events }: DayPanelProps) {
             borderTop: "1px solid var(--border)",
           }}
         >
-          <Link href={blockedAddHref} style={primaryActionStyle}>
-            + Block time
+          <Link href={addSessionHref} style={primaryActionStyle}>
+            + Add session
           </Link>
-          <Link href={anyAddHref} style={secondaryActionStyle}>
-            + Add event
+          <Link href={addTimeBlockHref} style={secondaryActionStyle}>
+            + Add time block
           </Link>
         </footer>
       </aside>
@@ -158,7 +158,9 @@ function EventCard({ event, baseHref }: EventCardProps) {
     borderLeft: v.borderLeft,
     backgroundColor: v.background,
     backgroundImage:
-      v.fillTexture === "diagonal-stripes" ? stripeBackgroundImage() : undefined,
+      v.fillTexture === "diagonal-stripes"
+        ? stripeBackgroundImage(v.stripeColor)
+        : undefined,
     color: v.textColor,
     cursor: "pointer",
     textDecoration: "none",
@@ -221,6 +223,8 @@ function categoryBadge(event: CalendarEvent): string {
   switch (event.category) {
     case "shoot":
       return `Shoot · ${capitalize(event.status)}`;
+    case "meeting":
+      return `Meeting · ${capitalize(event.status)}`;
     case "sonography":
       return "Sonography";
     case "work_block":

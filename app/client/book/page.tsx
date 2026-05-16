@@ -11,7 +11,10 @@ import {
 } from "./_lib/queries";
 import { ClientBookingToolbar } from "./_components/ClientBookingToolbar";
 import { ClientBookingCalendar } from "./_components/ClientBookingCalendar";
-import { MyShootsList } from "./_components/MyShootsList";
+import { RequestShootCTA } from "./_components/RequestShootCTA";
+import { UpcomingShootCard } from "./_components/UpcomingShootCard";
+import { RequestNewShootCard } from "./_components/RequestNewShootCard";
+import { BookingFeatureCards } from "./_components/BookingFeatureCards";
 import { RequestShootFormPanel } from "./_components/RequestShootFormPanel";
 import { MyShootDetailPanel } from "./_components/MyShootDetailPanel";
 
@@ -52,6 +55,7 @@ export default async function ClientBookPage({
 
   const baseHref = `/client/book?month=${monthKey}`;
   const closeHref = baseHref;
+  const requestHref = `${baseHref}&request=1`;
 
   const grid = monthGridDateKeys(monthKey);
   const gridStartKey = grid[0];
@@ -69,6 +73,12 @@ export default async function ClientBookPage({
     shootPromise,
   ]);
 
+  // Display filter only: cancelled shoots stay in the DB and remain visible
+  // on the owner calendar + directly via `?shoot=<id>` URLs. They're hidden
+  // here because a struck-through pill for a shoot the client cancelled is
+  // confusing.
+  const visibleShoots = myShoots.filter((s) => s.status !== "cancelled");
+
   // The URL contract permits both `?request=1&shoot=<id>` simultaneously.
   // When both are present, prefer the detail panel: a client looking at a
   // specific shoot shouldn't have the request form on top of it.
@@ -80,15 +90,48 @@ export default async function ClientBookPage({
       <header style={{ marginBottom: 24 }}>
         <p className="eyebrow mb-3">Client — Calendar</p>
         <h1 className="page-title">Book a Shoot</h1>
+        <p
+          style={{
+            marginTop: 8,
+            fontSize: 14,
+            color: "var(--text-body)",
+          }}
+        >
+          Request a shoot anytime, or check the status of upcoming sessions below.
+        </p>
       </header>
 
-      <ClientBookingToolbar monthKey={monthKey} />
-      <ClientBookingCalendar
-        monthKey={monthKey}
-        myShoots={myShoots}
-        baseHref={baseHref}
-      />
-      <MyShootsList shoots={upcomingShoots} baseHref={baseHref} />
+      <RequestShootCTA href={requestHref} />
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr minmax(0, 320px)",
+          gap: 24,
+          marginBottom: 32,
+        }}
+      >
+        <div>
+          <ClientBookingToolbar monthKey={monthKey} />
+          <ClientBookingCalendar
+            monthKey={monthKey}
+            myShoots={visibleShoots}
+            baseHref={baseHref}
+          />
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+          }}
+        >
+          <UpcomingShootCard shoots={upcomingShoots} baseHref={baseHref} />
+          <RequestNewShootCard href={requestHref} />
+        </div>
+      </div>
+
+      <BookingFeatureCards />
 
       {showRequest && (
         <RequestShootFormPanel

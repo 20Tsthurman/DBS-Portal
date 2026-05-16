@@ -151,6 +151,10 @@ export async function requestShoot(
       location,
       notes,
       status: "requested",
+      // Clients can only request shoots, never meetings. Hard-coded here
+      // as defense-in-depth even though the action does not accept a
+      // `kind` parameter and the DB column defaults to 'shoot'.
+      kind: "shoot",
     })
     .select("id")
     .single();

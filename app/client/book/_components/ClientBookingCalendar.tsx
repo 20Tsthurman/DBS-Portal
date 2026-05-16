@@ -29,6 +29,7 @@ export function ClientBookingCalendar({
 }: ClientBookingCalendarProps) {
   const grid = monthGridDateKeys(monthKey);
   const todayKey = dateKeyInTimezone(now);
+  const hasAnyShoots = myShoots.length > 0;
 
   const shootsByDay = new Map<string, ShootRecord[]>();
   for (const s of myShoots) {
@@ -50,6 +51,7 @@ export function ClientBookingCalendar({
   return (
     <div
       style={{
+        position: "relative",
         border: "1px solid var(--border)",
         backgroundColor: "var(--surface-raised)",
         overflow: "hidden",
@@ -105,8 +107,8 @@ export function ClientBookingCalendar({
                 borderRight: col < 6 ? "1px solid var(--border)" : undefined,
                 borderBottom: row < 5 ? "1px solid var(--border)" : undefined,
                 backgroundColor: inMonth
-                  ? "var(--surface-base)"
-                  : "var(--surface-raised)",
+                  ? "var(--surface-raised)"
+                  : "var(--surface-base)",
                 outline: isToday ? "2px solid var(--accent)" : undefined,
                 outlineOffset: isToday ? "-2px" : undefined,
                 padding: 4,
@@ -157,6 +159,24 @@ export function ClientBookingCalendar({
           );
         })}
       </div>
+
+      {!hasAnyShoots && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+            color: "var(--text-muted)",
+            fontSize: 14,
+            fontStyle: "italic",
+          }}
+        >
+          No shoots scheduled this month.
+        </div>
+      )}
     </div>
   );
 }

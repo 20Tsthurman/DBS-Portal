@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
-import type { ShootRecord } from "@/lib/supabase";
+import type { MeetingType, ShootRecord } from "@/lib/supabase";
 import {
   dateKeyInTimezone,
   formatTimeInTimezone,
@@ -26,12 +26,25 @@ export function MyShootDetailPanel({
   const dateLabel = fullDateLabelForDateKey(dateKeyInTimezone(startsAt));
   const timeLabel = `${formatTimeInTimezone(startsAt)} – ${formatTimeInTimezone(endsAt)}`;
   const durationLabel = formatDuration(durationHours);
+  const isMeeting = shoot.kind === "meeting";
+  const headerTitle = isMeeting ? "Your meeting" : "Your shoot";
+  const formatLabel =
+    isMeeting && shoot.meeting_type
+      ? meetingTypeFriendly(shoot.meeting_type)
+      : null;
+  // For a phone meeting, the Location row is meaningless — skip it
+  // entirely. For Zoom meetings, the link (if any) lives in the existing
+  // Location field; relabel the row to "Meeting link".
+  const locationFieldLabel =
+    isMeeting && shoot.meeting_type === "zoom" ? "Meeting link" : "Location";
+  const showLocationField =
+    !(isMeeting && shoot.meeting_type === "phone");
 
   return (
     <>
       <Link
         href={closeHref}
-        aria-label="Close shoot panel"
+        aria-label={isMeeting ? "Close meeting panel" : "Close shoot panel"}
         style={{
           position: "fixed",
           inset: 0,
@@ -42,7 +55,7 @@ export function MyShootDetailPanel({
       <aside
         role="dialog"
         aria-modal="false"
-        aria-label="Your shoot"
+        aria-label={headerTitle}
         style={{
           position: "fixed",
           top: 0,
@@ -76,7 +89,7 @@ export function MyShootDetailPanel({
               letterSpacing: "-0.01em",
             }}
           >
-            Your shoot
+            {headerTitle}
           </h2>
           <Link href={closeHref} aria-label="Close" style={iconCloseStyle}>
             ×
@@ -96,10 +109,16 @@ export function MyShootDetailPanel({
           <div>
             <StatusBadge status={shoot.status} />
           </div>
+          {formatLabel && <Field label="Format" value={formatLabel} />}
           <Field label="Date" value={dateLabel} />
           <Field label="Time" value={timeLabel} />
           <Field label="Duration" value={durationLabel} />
-          <Field label="Location" value={shoot.location?.trim() || null} />
+          {showLocationField && (
+            <Field
+              label={locationFieldLabel}
+              value={shoot.location?.trim() || null}
+            />
+          )}
           <Field
             label="Notes"
             value={shoot.notes?.trim() || null}
@@ -189,6 +208,17 @@ function formatDuration(hours: number): string {
   // Drop trailing ".0" for whole numbers, keep ".5" for halves.
   const text = Number.isInteger(hours) ? `${hours}` : `${hours}`;
   return `${text} hours`;
+}
+
+function meetingTypeFriendly(t: MeetingType): string {
+  switch (t) {
+    case "zoom":
+      return "Zoom call";
+    case "phone":
+      return "Phone call";
+    case "in_person":
+      return "In-person";
+  }
 }
 
 const iconCloseStyle: CSSProperties = {

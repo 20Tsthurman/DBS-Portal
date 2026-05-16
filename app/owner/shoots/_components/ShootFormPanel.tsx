@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import type {
   ClientRecord,
+  MeetingType,
+  ShootKind,
   ShootRecord,
   ShootStatus,
 } from "@/lib/supabase";
@@ -16,6 +18,7 @@ import {
   fieldStyle,
   labelStyle,
 } from "@/app/owner/clients/_components/formStyles";
+import { PendingRequestActions } from "@/app/owner/calendar/_components/PendingRequestActions";
 import { createShoot, updateShoot } from "../_actions";
 
 interface ShootFormPanelProps {
@@ -25,6 +28,8 @@ interface ShootFormPanelProps {
   shoot?: ShootRecord;
   /** ISO timestamp used to prefill the date field in create mode. Ignored when `shoot` is provided. */
   defaultScheduledAt?: string;
+  /** Initial kind in create mode (e.g. when DayPanel's "+ Add meeting" path is wired up). Defaults to "shoot". Ignored when `shoot` is provided. */
+  defaultKind?: ShootKind;
 }
 
 interface FormValues {
@@ -34,6 +39,10 @@ interface FormValues {
   durationHours: string;
   status: ShootStatus;
   notes: string;
+  kind: ShootKind;
+  // Stored as "" when kind === "shoot"; required to be one of the
+  // MeetingType values when kind === "meeting".
+  meetingType: MeetingType | "";
 }
 
 const emptyValues: FormValues = {
@@ -43,6 +52,8 @@ const emptyValues: FormValues = {
   durationHours: "",
   status: "confirmed",
   notes: "",
+  kind: "shoot",
+  meetingType: "",
 };
 
 function pad(n: number): string {
@@ -66,6 +77,8 @@ function valuesFromShoot(shoot: ShootRecord): FormValues {
       shoot.duration_hours !== null ? String(shoot.duration_hours) : "",
     status: shoot.status,
     notes: shoot.notes ?? "",
+    kind: shoot.kind,
+    meetingType: shoot.meeting_type ?? "",
   };
 }
 
@@ -75,6 +88,7 @@ export function ShootFormPanel({
   clients,
   shoot,
   defaultScheduledAt,
+  defaultKind,
 }: ShootFormPanelProps) {
   const router = useRouter();
   const isEdit = Boolean(shoot);
@@ -86,17 +100,18 @@ export function ShootFormPanel({
     if (open) {
       if (shoot) {
         setValues(valuesFromShoot(shoot));
-      } else if (defaultScheduledAt) {
+      } else {
         setValues({
           ...emptyValues,
-          scheduledAt: isoToLocalDateTime(defaultScheduledAt),
+          scheduledAt: defaultScheduledAt
+            ? isoToLocalDateTime(defaultScheduledAt)
+            : "",
+          kind: defaultKind ?? "shoot",
         });
-      } else {
-        setValues(emptyValues);
       }
       setError(null);
     }
-  }, [open, shoot, defaultScheduledAt]);
+  }, [open, shoot, defaultScheduledAt, defaultKind]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -126,13 +141,29 @@ export function ShootFormPanel({
       durationHours = n;
     }
 
+    if (values.kind === "meeting" && values.meetingType === "") {
+      setError("Pick a meeting type (Zoom, phone, or in-person).");
+      return;
+    }
+
     const payload = {
       clientId: values.clientId,
       scheduledAt: localDate.toISOString(),
-      location: values.location.trim() || null,
+      // Phone meetings have no location; the field is hidden in the UI but
+      // we also strip any stale value here in case `location` was filled
+      // before the user switched kind.
+      location:
+        values.kind === "meeting" && values.meetingType === "phone"
+          ? null
+          : values.location.trim() || null,
       durationHours,
       notes: values.notes.trim() || null,
       status: values.status,
+      kind: values.kind,
+      meetingType:
+        values.kind === "meeting"
+          ? (values.meetingType as MeetingType)
+          : null,
     };
 
     setSubmitting(true);
@@ -153,8 +184,45 @@ export function ShootFormPanel({
     }
   };
 
-  const title = isEdit ? "Edit Shoot" : "Add Shoot";
-  const submitIdle = isEdit ? "Save Changes" : "Save Shoot";
+  const isMeeting = values.kind === "meeting";
+  const title = isEdit
+    ? isMeeting
+      ? "Edit Meeting"
+      : "Edit Shoot"
+    : isMeeting
+      ? "Schedule Meeting"
+      : "Add Shoot";
+  const submitIdle = isEdit
+    ? "Save Changes"
+    : isMeeting
+      ? "Schedule Meeting"
+      : "Save Shoot";
+
+  // Location field adapts to the meeting type:
+  //   shoot               → "Location" (e.g. "Franklin, TN")
+  //   meeting + in_person → "Location" (e.g. "client's home")
+  //   meeting + zoom      → "Meeting link" (free-text; Zoom link goes here)
+  //   meeting + phone     → hidden entirely (no location for a phone call)
+  let locationLabel = "Location";
+  let showLocation = true;
+  if (isMeeting) {
+    if (values.meetingType === "zoom") locationLabel = "Meeting link";
+    else if (values.meetingType === "phone") showLocation = false;
+  }
+
+  const isPendingRequest = shoot?.status === "requested";
+  const pendingClientName =
+    (shoot && clients.find((c) => c.id === shoot.client_id)?.name) ?? "This client";
+  const pendingWhenLabel =
+    shoot && values.scheduledAt
+      ? new Date(shoot.scheduled_at).toLocaleString(undefined, {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : "";
 
   return (
     <SlidePanel open={open} onClose={onClose} title={title}>
@@ -164,6 +232,120 @@ export function ShootFormPanel({
         style={{ minHeight: 0 }}
       >
         <div className="flex-1 space-y-5">
+          {isPendingRequest && shoot && (
+            <div
+              style={{
+                padding: "14px 16px",
+                border: "1px solid var(--accent)",
+                borderTop: "3px solid var(--accent)",
+                backgroundColor: "rgba(168, 120, 138, 0.08)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+            >
+              <div>
+                <p
+                  style={{
+                    fontSize: 11,
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                    color: "var(--accent)",
+                    fontWeight: 700,
+                    margin: 0,
+                  }}
+                >
+                  Pending your review
+                </p>
+                <p
+                  style={{
+                    fontSize: 13,
+                    color: "var(--text-body)",
+                    margin: 0,
+                    marginTop: 4,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {pendingClientName} requested this shoot. Confirm to accept
+                  it, or decline to cancel. Use the form below first if the
+                  details need adjusting.
+                </p>
+              </div>
+              <PendingRequestActions
+                shootId={shoot.id}
+                clientName={pendingClientName}
+                whenLabel={pendingWhenLabel}
+                size="md"
+                onSuccess={onClose}
+              />
+            </div>
+          )}
+
+          <div>
+            <span style={labelStyle}>Kind</span>
+            <div
+              role="radiogroup"
+              aria-label="Kind"
+              style={{
+                display: "flex",
+                gap: 8,
+                marginTop: 4,
+              }}
+            >
+              <KindOption
+                value="shoot"
+                label="Shoot"
+                checked={values.kind === "shoot"}
+                onSelect={() =>
+                  setValues((v) => ({
+                    ...v,
+                    kind: "shoot",
+                    // Clear meeting-only fields when switching back to a shoot.
+                    meetingType: "",
+                  }))
+                }
+              />
+              <KindOption
+                value="meeting"
+                label="Meeting"
+                checked={values.kind === "meeting"}
+                onSelect={() =>
+                  setValues((v) => ({
+                    ...v,
+                    kind: "meeting",
+                  }))
+                }
+              />
+            </div>
+          </div>
+
+          {isMeeting && (
+            <div>
+              <label htmlFor="shoot-meeting-type" style={labelStyle}>
+                Meeting type
+              </label>
+              <select
+                id="shoot-meeting-type"
+                required
+                value={values.meetingType}
+                onChange={(e) =>
+                  setValues((v) => ({
+                    ...v,
+                    meetingType: e.target.value as MeetingType | "",
+                  }))
+                }
+                onFocus={applyFocus}
+                onBlur={clearFocus}
+                style={fieldStyle}
+              >
+                <option value="">Select a type…</option>
+                <option value="zoom">Zoom</option>
+                <option value="phone">Phone call</option>
+                <option value="in_person">In-person</option>
+              </select>
+            </div>
+          )}
+
           <div>
             <label htmlFor="shoot-client" style={labelStyle}>
               Client
@@ -206,22 +388,24 @@ export function ShootFormPanel({
             />
           </div>
 
-          <div>
-            <label htmlFor="shoot-location" style={labelStyle}>
-              Location
-            </label>
-            <input
-              id="shoot-location"
-              type="text"
-              value={values.location}
-              onChange={(e) =>
-                setValues((v) => ({ ...v, location: e.target.value }))
-              }
-              onFocus={applyFocus}
-              onBlur={clearFocus}
-              style={fieldStyle}
-            />
-          </div>
+          {showLocation && (
+            <div>
+              <label htmlFor="shoot-location" style={labelStyle}>
+                {locationLabel}
+              </label>
+              <input
+                id="shoot-location"
+                type="text"
+                value={values.location}
+                onChange={(e) =>
+                  setValues((v) => ({ ...v, location: e.target.value }))
+                }
+                onFocus={applyFocus}
+                onBlur={clearFocus}
+                style={fieldStyle}
+              />
+            </div>
+          )}
 
           <div>
             <label htmlFor="shoot-duration" style={labelStyle}>
@@ -298,5 +482,54 @@ export function ShootFormPanel({
         </div>
       </form>
     </SlidePanel>
+  );
+}
+
+interface KindOptionProps {
+  value: ShootKind;
+  label: string;
+  checked: boolean;
+  onSelect: () => void;
+}
+
+function KindOption({ value, label, checked, onSelect }: KindOptionProps) {
+  return (
+    <label
+      htmlFor={`shoot-kind-${value}`}
+      style={{
+        flex: 1,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        padding: "10px 12px",
+        border: checked
+          ? "1px solid var(--accent)"
+          : "1px solid var(--border)",
+        backgroundColor: checked
+          ? "rgba(168, 120, 138, 0.10)"
+          : "transparent",
+        color: checked ? "var(--text-primary)" : "var(--text-body)",
+        fontSize: 13,
+        fontWeight: 600,
+        cursor: "pointer",
+      }}
+    >
+      <input
+        id={`shoot-kind-${value}`}
+        type="radio"
+        name="shoot-kind"
+        value={value}
+        checked={checked}
+        onChange={onSelect}
+        style={{
+          // Hide the native control — the surrounding label is the affordance.
+          position: "absolute",
+          opacity: 0,
+          pointerEvents: "none",
+        }}
+      />
+      {label}
+    </label>
   );
 }

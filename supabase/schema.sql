@@ -61,7 +61,19 @@ create table if not exists shoots (
   duration_hours   numeric,
   status           text not null check (status in ('requested', 'confirmed', 'completed', 'cancelled')) default 'requested',
   notes            text,
-  created_at       timestamptz not null default now()
+  -- 'shoot' = a content shoot / filming day; 'meeting' = a Zoom / phone /
+  -- in-person meeting Kelsey schedules with a client. Clients can only
+  -- request shoots (client booking action hard-codes kind='shoot'); only
+  -- the owner-side form lets Kelsey pick.
+  kind             text not null default 'shoot'
+                     check (kind in ('shoot', 'meeting')),
+  -- Only meaningful (and only allowed) when kind = 'meeting'.
+  meeting_type     text
+                     check (meeting_type is null
+                            or meeting_type in ('zoom', 'phone', 'in_person')),
+  created_at       timestamptz not null default now(),
+  constraint shoots_meeting_type_only_for_meetings
+    check ((kind = 'meeting') or (meeting_type is null))
 );
 
 create index if not exists shoots_client_id_idx on shoots (client_id);
@@ -217,3 +229,23 @@ alter table expenses add  constraint expenses_category_check
 --    migrated. Re-run-safe; if the table doesn't exist (fresh install),
 --    this is a no-op.
 drop table if exists availability_blocks;
+
+-- 5. shoots.kind + shoots.meeting_type — added to support Kelsey scheduling
+--    meetings (zoom / phone / in_person) alongside content shoots. The
+--    `default 'shoot'` on `kind` backfills every existing row automatically.
+alter table shoots
+  add column if not exists kind text not null default 'shoot';
+alter table shoots
+  add column if not exists meeting_type text;
+
+alter table shoots drop constraint if exists shoots_kind_check;
+alter table shoots add  constraint shoots_kind_check
+  check (kind in ('shoot', 'meeting'));
+
+alter table shoots drop constraint if exists shoots_meeting_type_check;
+alter table shoots add  constraint shoots_meeting_type_check
+  check (meeting_type is null or meeting_type in ('zoom', 'phone', 'in_person'));
+
+alter table shoots drop constraint if exists shoots_meeting_type_only_for_meetings;
+alter table shoots add  constraint shoots_meeting_type_only_for_meetings
+  check ((kind = 'meeting') or (meeting_type is null));

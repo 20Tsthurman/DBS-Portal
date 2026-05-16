@@ -37,7 +37,9 @@ export function EventChip({
     borderLeft: v.borderLeft,
     backgroundColor: v.background,
     backgroundImage:
-      v.fillTexture === "diagonal-stripes" ? stripeBackgroundImage() : undefined,
+      v.fillTexture === "diagonal-stripes"
+        ? stripeBackgroundImage(v.stripeColor)
+        : undefined,
     color: v.textColor,
     padding: "4px 8px",
     fontSize: 11,

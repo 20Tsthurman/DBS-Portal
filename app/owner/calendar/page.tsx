@@ -2,6 +2,7 @@ import type { TimeBlockCategory } from "@/lib/supabase";
 import {
   fetchClientsLite,
   fetchEventsInRange,
+  fetchPendingShoots,
   fetchShoot,
   fetchTimeBlock,
 } from "./_lib/queries";
@@ -22,6 +23,7 @@ import { AgendaToolbar } from "./_components/AgendaToolbar";
 import { DayPanel } from "./_components/DayPanel";
 import { TimeBlockFormPanel } from "./_components/TimeBlockFormPanel";
 import { EditShootPanel } from "./_components/EditShootPanel";
+import { PendingRequestsBar } from "./_components/PendingRequestsBar";
 
 export const dynamic = "force-dynamic";
 
@@ -76,6 +78,13 @@ function parseEditParam(
   if (kind !== "shoot" && kind !== "time_block") return null;
   if (!id) return null;
   return { kind, id };
+}
+
+function parseNewParam(
+  raw: string | undefined
+): "time_block" | "shoot" | null {
+  if (raw === "time_block" || raw === "shoot") return raw;
+  return null;
 }
 
 function parseCategoryDefault(
@@ -133,7 +142,7 @@ async function renderWeekView(
   const dateKey = isValidDateKey(dateRaw) ? dateRaw : null;
 
   const editParam = parseEditParam(paramStr(params.edit));
-  const newParam = paramStr(params.new) === "time_block" ? "time_block" : null;
+  const newParam = parseNewParam(paramStr(params.new));
   const blockCategory = parseCategoryDefault(paramStr(params.block_category));
 
   const eventsPromise = fetchEventsInRange(weekStartUtc, weekEndUtc);
@@ -149,12 +158,14 @@ async function renderWeekView(
       ? fetchTimeBlock(editParam.id)
       : Promise.resolve(null);
 
-  const [events, clients, editShoot, editTimeBlock] = await Promise.all([
-    eventsPromise,
-    clientsPromise,
-    editShootPromise,
-    editTimeBlockPromise,
-  ]);
+  const [events, clients, editShoot, editTimeBlock, pendingShoots] =
+    await Promise.all([
+      eventsPromise,
+      clientsPromise,
+      editShootPromise,
+      editTimeBlockPromise,
+      fetchPendingShoots(),
+    ]);
 
   const dayEvents = dateKey
     ? events.filter((e) => e.dateKey === dateKey)
@@ -162,6 +173,7 @@ async function renderWeekView(
 
   const baseHref = `/owner/calendar?view=week&week=${weekStartKey}`;
   const dayCloseHref = dateKey ? `${baseHref}&date=${dateKey}` : baseHref;
+  const editHrefFor = (shootId: string) => `${baseHref}&edit=shoot:${shootId}`;
 
   return (
     <section>
@@ -169,6 +181,7 @@ async function renderWeekView(
         <p className="eyebrow mb-3">Owner — Calendar</p>
         <h1 className="page-title">Calendar</h1>
       </header>
+      <PendingRequestsBar shoots={pendingShoots} editHrefFor={editHrefFor} />
       <WeekToolbar weekStartKey={weekStartKey} />
       <WeekView weekStartKey={weekStartKey} events={events} />
 
@@ -187,6 +200,14 @@ async function renderWeekView(
           defaultCategory={blockCategory}
           clients={clients}
           closeHref={dayCloseHref}
+        />
+      )}
+
+      {newParam === "shoot" && (
+        <EditShootPanel
+          clients={clients}
+          closeHref={dayCloseHref}
+          defaultDateKey={dateKey ?? undefined}
         />
       )}
 
@@ -224,7 +245,7 @@ async function renderMonthView(
   const dateKey = isValidDateKey(dateRaw) ? dateRaw : null;
 
   const editParam = parseEditParam(paramStr(params.edit));
-  const newParam = paramStr(params.new) === "time_block" ? "time_block" : null;
+  const newParam = parseNewParam(paramStr(params.new));
   const blockCategory = parseCategoryDefault(paramStr(params.block_category));
 
   const eventsPromise = fetchEventsInRange(gridStartUtc, gridEndUtc);
@@ -240,12 +261,14 @@ async function renderMonthView(
       ? fetchTimeBlock(editParam.id)
       : Promise.resolve(null);
 
-  const [events, clients, editShoot, editTimeBlock] = await Promise.all([
-    eventsPromise,
-    clientsPromise,
-    editShootPromise,
-    editTimeBlockPromise,
-  ]);
+  const [events, clients, editShoot, editTimeBlock, pendingShoots] =
+    await Promise.all([
+      eventsPromise,
+      clientsPromise,
+      editShootPromise,
+      editTimeBlockPromise,
+      fetchPendingShoots(),
+    ]);
 
   const dayEvents = dateKey
     ? events.filter((e) => e.dateKey === dateKey)
@@ -253,6 +276,7 @@ async function renderMonthView(
 
   const baseHref = `/owner/calendar?view=month&month=${monthKey}`;
   const dayCloseHref = dateKey ? `${baseHref}&date=${dateKey}` : baseHref;
+  const editHrefFor = (shootId: string) => `${baseHref}&edit=shoot:${shootId}`;
 
   return (
     <section>
@@ -260,6 +284,7 @@ async function renderMonthView(
         <p className="eyebrow mb-3">Owner — Calendar</p>
         <h1 className="page-title">Calendar</h1>
       </header>
+      <PendingRequestsBar shoots={pendingShoots} editHrefFor={editHrefFor} />
       <MonthToolbar monthKey={monthKey} />
       <MonthView monthKey={monthKey} events={events} />
 
@@ -278,6 +303,14 @@ async function renderMonthView(
           defaultCategory={blockCategory}
           clients={clients}
           closeHref={dayCloseHref}
+        />
+      )}
+
+      {newParam === "shoot" && (
+        <EditShootPanel
+          clients={clients}
+          closeHref={dayCloseHref}
+          defaultDateKey={dateKey ?? undefined}
         />
       )}
 
@@ -318,7 +351,7 @@ async function renderAgendaView(
   const dateKey = isValidDateKey(dateRaw) ? dateRaw : null;
 
   const editParam = parseEditParam(paramStr(params.edit));
-  const newParam = paramStr(params.new) === "time_block" ? "time_block" : null;
+  const newParam = parseNewParam(paramStr(params.new));
   const blockCategory = parseCategoryDefault(paramStr(params.block_category));
 
   const eventsPromise = fetchEventsInRange(rangeStartUtc, rangeEndUtc);
@@ -334,12 +367,14 @@ async function renderAgendaView(
       ? fetchTimeBlock(editParam.id)
       : Promise.resolve(null);
 
-  const [events, clients, editShoot, editTimeBlock] = await Promise.all([
-    eventsPromise,
-    clientsPromise,
-    editShootPromise,
-    editTimeBlockPromise,
-  ]);
+  const [events, clients, editShoot, editTimeBlock, pendingShoots] =
+    await Promise.all([
+      eventsPromise,
+      clientsPromise,
+      editShootPromise,
+      editTimeBlockPromise,
+      fetchPendingShoots(),
+    ]);
 
   const dayEvents = dateKey
     ? events.filter((e) => e.dateKey === dateKey)
@@ -347,6 +382,7 @@ async function renderAgendaView(
 
   const baseHref = `/owner/calendar?view=agenda&start=${startDateKey}`;
   const dayCloseHref = dateKey ? `${baseHref}&date=${dateKey}` : baseHref;
+  const editHrefFor = (shootId: string) => `${baseHref}&edit=shoot:${shootId}`;
 
   return (
     <section>
@@ -354,6 +390,7 @@ async function renderAgendaView(
         <p className="eyebrow mb-3">Owner — Calendar</p>
         <h1 className="page-title">Calendar</h1>
       </header>
+      <PendingRequestsBar shoots={pendingShoots} editHrefFor={editHrefFor} />
       <AgendaToolbar startDateKey={startDateKey} days={days} />
       <AgendaView
         startDateKey={startDateKey}
@@ -377,6 +414,14 @@ async function renderAgendaView(
           defaultCategory={blockCategory}
           clients={clients}
           closeHref={dayCloseHref}
+        />
+      )}
+
+      {newParam === "shoot" && (
+        <EditShootPanel
+          clients={clients}
+          closeHref={dayCloseHref}
+          defaultDateKey={dateKey ?? undefined}
         />
       )}
 
