@@ -1,16 +1,12 @@
 "use server";
 
 import { requireOwner } from "@/lib/auth";
+import { csvEscape } from "@/lib/csv";
+import type { ActionResult } from "@/lib/actions";
 import {
   currentMonthKeyForExport,
   fetchMonthlyTimeLogsForExport,
 } from "./_lib/queries";
-
-export interface ActionResult<T = null> {
-  ok: boolean;
-  error?: string;
-  data?: T;
-}
 
 export interface MonthlyCsvExport {
   /** YYYY-MM month bucket the CSV covers (Central time). */
@@ -32,21 +28,6 @@ const CSV_HEADERS = [
 ];
 
 /**
- * RFC 4180 quoting: wrap any field containing comma, double-quote, CR, or LF
- * in double quotes, and escape internal `"` as `""`. Null/undefined → empty
- * string. Numbers are converted to strings (caller decides formatting).
- */
-function csvEscape(value: string | number | null | undefined): string {
-  if (value === null || value === undefined) return "";
-  const s = typeof value === "number" ? String(value) : value;
-  if (s === "") return "";
-  if (/[",\r\n]/.test(s)) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
-
-/**
  * Owner-only. Returns the CSV body for every time_log in the current Central
  * month (sorted by date asc, created_at asc). The client component triggers
  * the download via Blob + URL.createObjectURL — we don't stream a Response
@@ -59,32 +40,40 @@ export async function exportMonthlyTimeLogsAction(): Promise<
   const guard = await requireOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
 
-  const logs = await fetchMonthlyTimeLogsForExport();
-  const monthKey = currentMonthKeyForExport();
+  try {
+    const logs = await fetchMonthlyTimeLogsForExport();
+    const monthKey = currentMonthKeyForExport();
 
-  const lines: string[] = [];
-  lines.push(CSV_HEADERS.map(csvEscape).join(","));
-  for (const log of logs) {
-    const row = [
-      log.date,
-      log.clientName,
-      log.category,
-      Number(log.hours).toString(),
-      log.notes ?? "",
-      log.logged_by,
-      log.created_at,
-    ];
-    lines.push(row.map(csvEscape).join(","));
+    const lines: string[] = [];
+    lines.push(CSV_HEADERS.map(csvEscape).join(","));
+    for (const log of logs) {
+      const row = [
+        log.date,
+        log.clientName,
+        log.category,
+        Number(log.hours).toString(),
+        log.notes ?? "",
+        log.logged_by,
+        log.created_at,
+      ];
+      lines.push(row.map(csvEscape).join(","));
+    }
+    // RFC 4180 prefers CRLF between records.
+    const csv = lines.join("\r\n");
+
+    return {
+      ok: true,
+      data: {
+        monthKey,
+        filename: `time-logs-${monthKey}.csv`,
+        csv,
+      },
+    };
+  } catch (err) {
+    console.error("[exportMonthlyTimeLogsAction]", err);
+    return {
+      ok: false,
+      error: "Could not generate export. Please try again.",
+    };
   }
-  // RFC 4180 prefers CRLF between records.
-  const csv = lines.join("\r\n");
-
-  return {
-    ok: true,
-    data: {
-      monthKey,
-      filename: `time-logs-${monthKey}.csv`,
-      csv,
-    },
-  };
 }

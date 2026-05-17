@@ -11,12 +11,7 @@ import {
   dateKeyInTimezone,
 } from "@/app/owner/calendar/_lib/timezone";
 import { checkBookingConflicts } from "./_lib/conflicts";
-
-export interface ActionResult<T = null> {
-  ok: boolean;
-  error?: string;
-  data?: T;
-}
+import type { ActionResult } from "@/lib/actions";
 
 export interface RequestShootInput {
   /** YYYY-MM-DD in PORTAL_TIMEZONE. */

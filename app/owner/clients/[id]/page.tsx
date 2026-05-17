@@ -9,6 +9,7 @@ import {
   formatDate,
 } from "../_lib/format";
 import { TypePill } from "../_components/TypePill";
+import { DeactivateClientButton } from "./_components/DeactivateClientButton";
 import { EditClientButton } from "./_components/EditClientButton";
 import { OverviewTab } from "./_components/OverviewTab";
 import { TabNav, type TabDefinition } from "./_components/TabNav";
@@ -154,17 +155,24 @@ export default async function OwnerClientDetailPage({ params }: PageProps) {
             </p>
           )}
         </div>
-        <EditClientButton
-          packages={packages}
-          initialValues={{
-            id: client.id,
-            name: client.name,
-            email: client.email,
-            type: client.type,
-            status: client.status,
-            packageId: project?.package_id ?? null,
-          }}
-        />
+        <div className="flex items-start gap-2">
+          <DeactivateClientButton
+            clientId={client.id}
+            clientName={client.name}
+            isAlreadyInactive={client.status === "inactive"}
+          />
+          <EditClientButton
+            packages={packages}
+            initialValues={{
+              id: client.id,
+              name: client.name,
+              email: client.email,
+              type: client.type,
+              status: client.status,
+              packageId: project?.package_id ?? null,
+            }}
+          />
+        </div>
       </header>
 
       <TabNav tabs={tabs} initial="overview" />

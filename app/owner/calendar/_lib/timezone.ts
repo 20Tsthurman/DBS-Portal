@@ -290,6 +290,35 @@ export function addMonthsToMonthKey(monthKey: string, delta: number): string {
 }
 
 /**
+ * YYYY-MM month key → inclusive {start, end} pair of YYYY-MM-DD date keys.
+ * Use this when the range is driven by URL state rather than `now` (e.g. a
+ * month picker on /owner/financials). For "this month" prefer
+ * `currentMonthRange(now)` which already exists.
+ */
+export function monthRangeForKey(monthKey: string): { start: string; end: string } {
+  const { year, month } = parseMonthKey(monthKey);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const mm = String(month).padStart(2, "0");
+  return {
+    start: `${year}-${mm}-01`,
+    end: `${year}-${mm}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
+/**
+ * Year-to-date range: Jan 1 of the current PORTAL_TIMEZONE year through TODAY
+ * (not Dec 31). `end` is today's wall-clock date in Central, so a Jan 1 query
+ * at 11pm CT on Dec 31 still returns the previous year's window.
+ */
+export function yearToDateRange(
+  now: Date = new Date()
+): { start: string; end: string; year: string } {
+  const today = dateKeyInTimezone(now);
+  const year = today.slice(0, 4);
+  return { start: `${year}-01-01`, end: today, year };
+}
+
+/**
  * The 42 date-keys (YYYY-MM-DD) for a 6×7 month grid starting on the Sunday
  * that begins the week containing the 1st of the given month. Pure string
  * math — no server-local Date methods.

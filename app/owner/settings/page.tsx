@@ -1,5 +1,46 @@
-import { Placeholder } from "@/components/ui/Placeholder";
+/**
+ * /owner/settings — admin surface for app-wide configuration plus the
+ * Phase-4 recurring expense templates. The page is structured as two
+ * stacked sections inside a single client board:
+ *
+ *   1. Business Settings — home_address, mileage_rate_per_mile,
+ *      tax_set_aside_percent. These flow into financials calculations.
+ *   2. Recurring Expense Templates — the producer/admin UI for the
+ *      table that drives monthly expense suggestions on /owner/financials.
+ *
+ * Page auth: relies on the owner-only guard in app/owner/layout.tsx;
+ * matches the rest of the owner routes.
+ */
 
-export default function OwnerSettingsPage() {
-  return <Placeholder eyebrow="Owner — Settings" title="Settings" />;
+import { SettingsBoard } from "./_components/SettingsBoard";
+import { fetchAllTemplates, fetchAppSettings } from "./_lib/queries";
+
+export const dynamic = "force-dynamic";
+
+export default async function OwnerSettingsPage() {
+  const [settings, templates] = await Promise.all([
+    fetchAppSettings(),
+    fetchAllTemplates(),
+  ]);
+
+  return (
+    <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+      <h1
+        style={{
+          fontFamily: "var(--font-playfair), serif",
+          fontSize: 32,
+          fontWeight: 500,
+          color: "var(--text-primary)",
+          letterSpacing: "-0.01em",
+          marginBottom: 24,
+        }}
+      >
+        Settings
+      </h1>
+      <SettingsBoard
+        initialSettings={settings}
+        initialTemplates={templates}
+      />
+    </div>
+  );
 }

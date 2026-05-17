@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 /**
  * Shared default poll cadence (30s) for owner/client live-update surfaces.
@@ -48,22 +48,26 @@ export function useVisibilityPolling(
     fetcherRef.current = fetcher;
   }, [fetcher]);
 
+  // Single AbortController across both effects: at any given time the hook
+  // owns at most one in-flight fetch. Lifted here so the invalidation-event
+  // handler can abort a poll mid-flight (and vice versa), and so unmount
+  // cleanup from either effect can tear down whichever is current.
+  const controllerRef = useRef<AbortController | null>(null);
+
+  const runFetch = useCallback(() => {
+    if (controllerRef.current) {
+      controllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    void fetcherRef.current(controller.signal);
+  }, []);
+
   useEffect(() => {
     if (!enabled) return;
     if (typeof document === "undefined") return;
 
     let intervalId: ReturnType<typeof setInterval> | null = null;
-    let activeController: AbortController | null = null;
-
-    const runFetch = () => {
-      // Replace any prior in-flight fetch — only one at a time.
-      if (activeController) {
-        activeController.abort();
-      }
-      const controller = new AbortController();
-      activeController = controller;
-      void fetcherRef.current(controller.signal);
-    };
 
     const start = () => {
       if (intervalId === null) {
@@ -82,9 +86,9 @@ export function useVisibilityPolling(
       if (document.visibilityState === "hidden") {
         // Abort any in-flight request so we don't hold a stale connection
         // open while the user is away.
-        if (activeController) {
-          activeController.abort();
-          activeController = null;
+        if (controllerRef.current) {
+          controllerRef.current.abort();
+          controllerRef.current = null;
         }
         stop();
       } else if (document.visibilityState === "visible") {
@@ -104,12 +108,12 @@ export function useVisibilityPolling(
     return () => {
       stop();
       document.removeEventListener("visibilitychange", onVisibility);
-      if (activeController) {
-        activeController.abort();
-        activeController = null;
+      if (controllerRef.current) {
+        controllerRef.current.abort();
+        controllerRef.current = null;
       }
     };
-  }, [enabled, intervalMs]);
+  }, [enabled, intervalMs, runFetch]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -117,12 +121,15 @@ export function useVisibilityPolling(
     if (typeof window === "undefined") return;
 
     const handler = () => {
-      const controller = new AbortController();
-      void fetcherRef.current(controller.signal);
+      runFetch();
     };
     window.addEventListener(invalidationEvent, handler);
     return () => {
       window.removeEventListener(invalidationEvent, handler);
+      if (controllerRef.current) {
+        controllerRef.current.abort();
+        controllerRef.current = null;
+      }
     };
-  }, [enabled, invalidationEvent]);
+  }, [enabled, invalidationEvent, runFetch]);
 }

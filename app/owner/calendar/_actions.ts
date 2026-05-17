@@ -7,12 +7,8 @@ import {
   type TimeBlockRecord,
 } from "@/lib/supabase";
 import { requireOwner } from "@/lib/auth";
-
-export interface ActionResult<T = null> {
-  ok: boolean;
-  error?: string;
-  data?: T;
-}
+import { isValidDateKey } from "@/lib/validation";
+import type { ActionResult } from "@/lib/actions";
 
 const VALID_CATEGORIES: TimeBlockCategory[] = [
   "sonography",
@@ -34,11 +30,6 @@ export interface CreateTimeBlockInput {
 }
 
 export type UpdateTimeBlockInput = Partial<CreateTimeBlockInput>;
-
-function isValidDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  return !Number.isNaN(new Date(`${value}T00:00:00`).getTime());
-}
 
 function isValidTime(value: string): boolean {
   return /^\d{2}:\d{2}(:\d{2})?$/.test(value);
@@ -84,7 +75,7 @@ export async function createTimeBlock(
   const guard = await requireOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
 
-  if (!input.date || !isValidDate(input.date)) {
+  if (!input.date || !isValidDateKey(input.date)) {
     return { ok: false, error: "`date` must be a valid YYYY-MM-DD." };
   }
   if (!VALID_CATEGORIES.includes(input.category)) {
@@ -133,7 +124,7 @@ export async function updateTimeBlock(
   const patch: Record<string, unknown> = {};
 
   if (updates.date !== undefined) {
-    if (!isValidDate(updates.date)) {
+    if (!isValidDateKey(updates.date)) {
       return { ok: false, error: "`date` must be a valid YYYY-MM-DD." };
     }
     patch.date = updates.date;

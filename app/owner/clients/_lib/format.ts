@@ -10,6 +10,20 @@ export function formatCurrency(value: number | null | undefined): string {
 
 export function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
+  // YYYY-MM-DD: parse the parts directly so we get a local-time Date
+  // and toLocaleDateString has no UTC→local shift to perform. Bare
+  // `new Date(yyyy-mm-dd)` parses as UTC midnight, which on hosts
+  // west of UTC renders one day earlier.
+  const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (ymd) {
+    const [, y, m, d] = ymd;
+    const date = new Date(Number(y), Number(m) - 1, Number(d));
+    return date.toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleDateString(undefined, {

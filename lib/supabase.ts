@@ -16,12 +16,22 @@ export type TimeLogCategory =
   | "communication";
 export type InvoiceStatus = "draft" | "sent" | "paid" | "overdue";
 export type ExpenseCategory =
-  | "equipment"
-  | "software"
-  | "travel"
-  | "marketing"
-  | "meals"
+  | "platform_software"
+  | "marketing_advertising"
+  | "equipment_gear"
+  | "travel_transportation"
+  | "professional_services"
+  | "business_operations";
+export type IncomeType =
+  | "brand_retainer"
+  | "wedding_same_day"
+  | "one_off_shoot"
   | "other";
+export type IncomePaymentSource = "manual" | "suggested_retainer";
+export type SuggestionType =
+  | "income_retainer"
+  | "mileage_shoot"
+  | "expense_template";
 export type FileType = "content" | "contract" | "invoice" | "other";
 export type SenderRole = "owner" | "client";
 export type TimeBlockCategory = "sonography" | "work_block" | "blocked";
@@ -107,6 +117,11 @@ export interface ExpenseRecord {
   receipt_url: string | null;
   notes: string | null;
   created_at: string;
+  /**
+   * FK to recurring_expense_templates(id). NULL = manually entered;
+   * non-NULL = created from accepting a Phase 4 expense suggestion.
+   */
+  source_template_id: string | null;
 }
 
 export interface MessageRecord {
@@ -144,6 +159,78 @@ export interface TimeBlockRecord {
   created_at: string;
 }
 
+export interface AppSettingsRecord {
+  id: string;
+  singleton: boolean;
+  home_address: string;
+  mileage_rate_per_mile: number;
+  tax_set_aside_percent: number;
+  updated_at: string;
+}
+
+export interface IncomePaymentRecord {
+  id: string;
+  client_id: string | null;
+  client_name_snapshot: string;
+  /** YYYY-MM-DD */
+  payment_date: string;
+  amount: number;
+  income_type: IncomeType;
+  payment_method: string | null;
+  notes: string | null;
+  logged_by: string;
+  created_at: string;
+  /**
+   * NULL = manually entered (existing rows + manual ghost-row inserts);
+   * 'suggested_retainer' = created from accepting a Phase 4 brand-retainer
+   * income suggestion.
+   */
+  source: IncomePaymentSource | null;
+}
+
+export interface MileageLogRecord {
+  id: string;
+  /** YYYY-MM-DD */
+  trip_date: string;
+  from_address: string;
+  to_address: string;
+  start_odometer: number | null;
+  end_odometer: number | null;
+  miles: number;
+  /** Snapshot of app_settings.mileage_rate_per_mile at write time. */
+  rate_per_mile: number;
+  client_id: string | null;
+  notes: string | null;
+  logged_by: string;
+  created_at: string;
+  /**
+   * FK to shoots(id). NULL = manually entered; non-NULL = created from
+   * accepting a Phase 4 mileage suggestion for that shoot.
+   */
+  source_shoot_id: string | null;
+}
+
+export interface RecurringExpenseTemplateRecord {
+  id: string;
+  name: string;
+  category: ExpenseCategory;
+  amount: number;
+  day_of_month: number;
+  notes: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export interface DismissedSuggestionRecord {
+  id: string;
+  type: SuggestionType;
+  /** Source-record id: client_id, shoot_id, or template_id depending on `type`. */
+  reference_id: string;
+  /** Wall-clock month key in PORTAL_TIMEZONE, e.g. '2026-05'. */
+  period_yyyymm: string;
+  dismissed_at: string;
+}
+
 
 type Relationships = readonly {
   foreignKeyName: string;
@@ -173,6 +260,15 @@ export type Database = {
       messages: TableShape<MessageRecord & Record<string, unknown>>;
       files: TableShape<FileRecord & Record<string, unknown>>;
       time_blocks: TableShape<TimeBlockRecord & Record<string, unknown>>;
+      app_settings: TableShape<AppSettingsRecord & Record<string, unknown>>;
+      income_payments: TableShape<IncomePaymentRecord & Record<string, unknown>>;
+      mileage_logs: TableShape<MileageLogRecord & Record<string, unknown>>;
+      recurring_expense_templates: TableShape<
+        RecurringExpenseTemplateRecord & Record<string, unknown>
+      >;
+      dismissed_suggestions: TableShape<
+        DismissedSuggestionRecord & Record<string, unknown>
+      >;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

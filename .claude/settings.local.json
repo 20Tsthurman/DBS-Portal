@@ -31,7 +31,13 @@
       "Bash(npx next *)",
       "Bash(echo \"EXIT: $?\")",
       "PowerShell(npx tsc --noEmit)",
-      "PowerShell(npx next build 2>&1 | Select-Object -Last 80)"
+      "PowerShell(npx next build 2>&1 | Select-Object -Last 80)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(echo \"EXIT_CODE: $?\")",
+      "Bash(echo \"Exit: $?\")",
+      "Read(//mnt/skills/**)",
+      "Read(//mnt/**)",
+      "Read(//c//**)"
     ]
   }
 }

@@ -256,7 +256,24 @@ export function ClientFormPanel({
               <option value="lead">Lead</option>
               <option value="onboarding">Onboarding</option>
               <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
+              {/*
+                "Inactive" is intentionally NOT a user-selectable option here:
+                deactivation routes through the dedicated "Deactivate Client"
+                button on the detail page so the gravity of the action is
+                visible and the Clerk ban fires reliably (see
+                app/owner/clients/[id]/_components/DeactivateClientButton.tsx).
+
+                The option is rendered here ONLY when the client is already
+                inactive — otherwise the controlled <select> would silently
+                coerce the value to the first listed option, losing state.
+                Picking active/onboarding/lead from this dropdown for an
+                already-inactive client reactivates them via the PATCH
+                handler's existing unban branch
+                (app/api/clients/[id]/route.ts:160-170).
+              */}
+              {values.status === "inactive" && (
+                <option value="inactive">Inactive</option>
+              )}
             </select>
           </div>
 

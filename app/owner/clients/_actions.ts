@@ -3,11 +3,14 @@
 import { revalidatePath } from "next/cache";
 import {
   getSupabaseServiceClient,
+  type ClientRecord,
   type ProjectRecord,
   type TimeLogCategory,
   type TimeLogRecord,
 } from "@/lib/supabase";
 import { requireOwner } from "@/lib/auth";
+import { tryBanClerkUser } from "@/lib/clerk";
+import type { ActionResult } from "@/lib/actions";
 
 const VALID_CATEGORIES: TimeLogCategory[] = [
   "editing",
@@ -23,12 +26,6 @@ export interface AddTimeLogInput {
   hours: number;
   category: TimeLogCategory;
   notes: string;
-}
-
-export interface ActionResult<T = null> {
-  ok: boolean;
-  error?: string;
-  data?: T;
 }
 
 export async function addTimeLogAction(
@@ -128,4 +125,53 @@ export async function updateNotesAction(
 
   revalidatePath(`/owner/clients/${input.clientId}`);
   return { ok: true, data: { savedAt: new Date().toISOString() } };
+}
+
+// ---------------------------------------------------------------------------
+// deactivateClientAction
+//
+// Soft-delete: flips clients.status to 'inactive' and best-effort bans the
+// Clerk user so they can't create new sessions. Mirrors the behavior of
+// `DELETE /api/clients/[id]` (app/api/clients/[id]/route.ts:175-211) — both
+// paths exist because the API route is what `EditClientButton`'s legacy
+// flow targets, and this server action is what the new "Deactivate Client"
+// button on the detail page targets. The shared ban helper lives in
+// lib/clerk.ts; never duplicate it inline.
+//
+// NEVER convert this to a SQL DELETE — see the NEVER-HARD-DELETE comment
+// at the top of `clients` in supabase/schema.sql.
+// ---------------------------------------------------------------------------
+export async function deactivateClientAction(
+  id: string
+): Promise<ActionResult<null>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  if (!id) return { ok: false, error: "Missing client id" };
+
+  const supabase = getSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from("clients")
+    .update({ status: "inactive" })
+    .eq("id", id)
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    return {
+      ok: false,
+      error: error?.message ?? "Failed to deactivate client",
+    };
+  }
+
+  const deactivated = data as ClientRecord;
+  if (deactivated.clerk_user_id) {
+    await tryBanClerkUser(deactivated.clerk_user_id);
+    console.log(
+      `[clients] deactivated row=${deactivated.id} banned=${deactivated.clerk_user_id}`
+    );
+  }
+
+  revalidatePath("/owner/clients");
+  revalidatePath(`/owner/clients/${id}`);
+  return { ok: true };
 }

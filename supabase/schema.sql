@@ -6,6 +6,23 @@ create extension if not exists "pgcrypto";
 
 -- ---------------------------------------------------------------------------
 -- clients
+--
+-- NEVER HARD-DELETE A CLIENT ROW. The FKs below cascade-delete projects,
+-- shoots, time_logs, invoices, messages, and files when a client is removed —
+-- losing time_logs is a real tax-audit risk for a service business that bills
+-- by the hour. The cascades are kept for schema-cleanliness but the app
+-- enforces a SOFT-DELETE-ONLY contract:
+--
+--   * DELETE /api/clients/[id]  → updates status to 'inactive' + bans the
+--     Clerk user. Never issues a SQL DELETE against clients.
+--   * deactivateClientAction (app/owner/clients/_actions.ts) is the only
+--     UI-facing entry point and mirrors the same logic.
+--   * The /owner/clients edit form intentionally omits 'inactive' from its
+--     status dropdown; deactivation lives behind a dedicated button so the
+--     gravity of the action is visible.
+--
+-- If you are adding a new mutation surface, NEVER call
+-- `.from("clients").delete()`. Update status to 'inactive' instead.
 -- ---------------------------------------------------------------------------
 create table if not exists clients (
   id              uuid primary key default gen_random_uuid(),
@@ -216,6 +233,98 @@ create index if not exists time_blocks_client_id_idx
   on time_blocks (client_id) where client_id is not null;
 
 -- ---------------------------------------------------------------------------
+-- app_settings — single-row owner config (Phase 1 Financials).
+-- The `singleton` column + unique constraint enforces that only one row
+-- can exist. Always read via a `limit 1` / `maybeSingle()` after seed.
+-- ---------------------------------------------------------------------------
+create table if not exists app_settings (
+  id                     uuid primary key default gen_random_uuid(),
+  singleton              boolean not null default true,
+  home_address           text not null default '',
+  mileage_rate_per_mile  numeric not null default 0.70
+                           check (mileage_rate_per_mile >= 0),
+  tax_set_aside_percent  numeric not null default 28
+                           check (tax_set_aside_percent >= 0
+                                  and tax_set_aside_percent <= 100),
+  updated_at             timestamptz not null default now(),
+  constraint app_settings_singleton_unique unique (singleton)
+);
+
+-- ---------------------------------------------------------------------------
+-- income_payments — money received. Distinct from `invoices` (which tracks
+-- billing status). `client_name_snapshot` is captured at write time so the
+-- row survives a client deletion and works for pre-client backfill.
+-- ---------------------------------------------------------------------------
+create table if not exists income_payments (
+  id                    uuid primary key default gen_random_uuid(),
+  client_id             uuid references clients(id) on delete set null,
+  client_name_snapshot  text not null,
+  payment_date          date not null,
+  amount                numeric not null check (amount > 0),
+  income_type           text not null check (income_type in (
+                          'brand_retainer', 'wedding_same_day',
+                          'one_off_shoot', 'other'
+                        )),
+  payment_method        text,
+  notes                 text,
+  logged_by             text not null,
+  created_at            timestamptz not null default now()
+);
+
+create index if not exists income_payments_payment_date_idx
+  on income_payments (payment_date);
+create index if not exists income_payments_client_id_idx
+  on income_payments (client_id);
+create index if not exists income_payments_income_type_idx
+  on income_payments (income_type);
+
+-- ---------------------------------------------------------------------------
+-- mileage_logs — raw mileage entries. The deduction is computed at read time
+-- as `miles * rate_per_mile`; `rate_per_mile` is a snapshot of
+-- `app_settings.mileage_rate_per_mile` at the moment of logging so historical
+-- entries don't shift when the IRS rate changes.
+-- ---------------------------------------------------------------------------
+create table if not exists mileage_logs (
+  id              uuid primary key default gen_random_uuid(),
+  trip_date       date not null,
+  from_address    text not null,
+  to_address      text not null,
+  start_odometer  numeric check (start_odometer is null or start_odometer >= 0),
+  end_odometer    numeric check (end_odometer is null or end_odometer >= 0),
+  miles           numeric not null check (miles > 0),
+  rate_per_mile   numeric not null check (rate_per_mile >= 0),
+  client_id       uuid references clients(id) on delete set null,
+  notes           text,
+  logged_by       text not null,
+  created_at      timestamptz not null default now()
+);
+
+create index if not exists mileage_logs_trip_date_idx on mileage_logs (trip_date);
+create index if not exists mileage_logs_client_id_idx on mileage_logs (client_id);
+
+-- ---------------------------------------------------------------------------
+-- recurring_expense_templates — monthly subscriptions / recurring costs.
+-- Each active template surfaces a per-month suggestion row in /owner/financials
+-- on `day_of_month`; accepting it inserts a matching `expenses` row.
+-- ---------------------------------------------------------------------------
+create table if not exists recurring_expense_templates (
+  id            uuid primary key default gen_random_uuid(),
+  name          text not null,
+  category      text not null check (category in (
+                  'platform_software', 'marketing_advertising', 'equipment_gear',
+                  'travel_transportation', 'professional_services', 'business_operations'
+                )),
+  amount        numeric not null check (amount > 0),
+  day_of_month  smallint not null default 1 check (day_of_month between 1 and 28),
+  notes         text,
+  active        boolean not null default true,
+  created_at    timestamptz not null default now()
+);
+
+create index if not exists recurring_expense_templates_active_idx
+  on recurring_expense_templates (active);
+
+-- ---------------------------------------------------------------------------
 -- Alignment block — idempotent ALTERs to bring an already-deployed instance
 -- in line with the CREATE TABLE blocks above. Safe to re-run.
 -- ---------------------------------------------------------------------------
@@ -268,3 +377,34 @@ alter table shoots add  constraint shoots_meeting_type_check
 alter table shoots drop constraint if exists shoots_meeting_type_only_for_meetings;
 alter table shoots add  constraint shoots_meeting_type_only_for_meetings
   check ((kind = 'meeting') or (meeting_type is null));
+
+-- ============================================================================
+-- Phase 1 Financials — expenses category enum swap.
+--
+-- The original six categories ('equipment','software','travel','marketing',
+-- 'meals','other') are replaced with Kelsey's six real categories. The audit
+-- confirmed no app code path writes to `expenses` and no seed inserts exist,
+-- so a drop-and-re-add is safe in this repo. The CREATE TABLE block above is
+-- left at the original values intentionally — it only runs on greenfield init
+-- and the alignment block is what runs on the live DB (existing precedent).
+--
+-- WARNING: This ALTER will fail if any row in `expenses` holds a category
+-- outside the new list. Before applying, run:
+--   select category, count(*) from expenses
+--   where category not in (
+--     'platform_software','marketing_advertising','equipment_gear',
+--     'travel_transportation','professional_services','business_operations'
+--   ) group by category;
+-- If any rows return, decide on remap or delete BEFORE running the swap.
+-- ============================================================================
+alter table expenses drop constraint if exists expenses_category_check;
+alter table expenses add  constraint expenses_category_check
+  check (category in (
+    'platform_software', 'marketing_advertising', 'equipment_gear',
+    'travel_transportation', 'professional_services', 'business_operations'
+  ));
+
+-- Seed the app_settings singleton row if not already present.
+insert into app_settings (singleton, home_address, mileage_rate_per_mile, tax_set_aside_percent)
+select true, '', 0.70, 28
+where not exists (select 1 from app_settings);

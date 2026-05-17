@@ -1,3 +1,4 @@
+import { cache } from "react";
 import {
   getSupabaseServiceClient,
   type ClientRecord,
@@ -15,9 +16,12 @@ export interface ClientWithRelations {
   hoursThisMonth: number;
 }
 
-export async function fetchClientsWithRelations(): Promise<
+// Request-scoped memoization so dashboard widgets that all need the joined
+// client roster (BudgetStatusWidget + ClientRosterWidget) share one query
+// bundle per render. Behavior is unchanged across requests.
+export const fetchClientsWithRelations = cache(async (): Promise<
   ClientWithRelations[]
-> {
+> => {
   const supabase = getSupabaseServiceClient();
 
   const [clientsRes, projectsRes, packagesRes] = await Promise.all([
@@ -74,7 +78,7 @@ export async function fetchClientsWithRelations(): Promise<
       hoursThisMonth: totals.get(client.id) ?? 0,
     };
   });
-}
+});
 
 export async function fetchActivePackages(): Promise<PackageRecord[]> {
   const supabase = getSupabaseServiceClient();

@@ -9,6 +9,7 @@ import {
   type ShootStatus,
 } from "@/lib/supabase";
 import { requireOwner } from "@/lib/auth";
+import type { ActionResult } from "@/lib/actions";
 
 const VALID_STATUSES: ShootStatus[] = [
   "requested",
@@ -19,12 +20,6 @@ const VALID_STATUSES: ShootStatus[] = [
 
 const VALID_KINDS: ShootKind[] = ["shoot", "meeting"];
 const VALID_MEETING_TYPES: MeetingType[] = ["zoom", "phone", "in_person"];
-
-export interface ActionResult<T = null> {
-  ok: boolean;
-  error?: string;
-  data?: T;
-}
 
 export interface CreateShootInput {
   clientId: string;

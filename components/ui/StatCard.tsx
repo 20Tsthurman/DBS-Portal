@@ -3,9 +3,16 @@ import type { ReactNode } from "react";
 interface StatCardProps {
   label: string;
   value: ReactNode;
-  tone?: "default" | "danger";
+  tone?: "default" | "success" | "danger" | "muted";
   hint?: string;
 }
+
+const TONE_COLOR: Record<NonNullable<StatCardProps["tone"]>, string> = {
+  default: "var(--text-primary)",
+  success: "var(--status-success)",
+  danger: "var(--status-danger)",
+  muted: "var(--text-muted)",
+};
 
 export function StatCard({ label, value, tone = "default", hint }: StatCardProps) {
   return (
@@ -33,10 +40,7 @@ export function StatCard({ label, value, tone = "default", hint }: StatCardProps
           fontFamily: "var(--font-playfair), serif",
           fontSize: "26px",
           fontWeight: 500,
-          color:
-            tone === "danger"
-              ? "var(--status-danger)"
-              : "var(--text-primary)",
+          color: TONE_COLOR[tone],
           letterSpacing: "-0.01em",
         }}
       >

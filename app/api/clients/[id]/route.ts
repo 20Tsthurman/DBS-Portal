@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { clerkClient } from "@clerk/nextjs/server";
 import {
   getSupabaseServiceClient,
   type ClientRecord,
@@ -7,34 +6,7 @@ import {
   type ClientType,
 } from "@/lib/supabase";
 import { requireOwnerApi } from "@/lib/auth";
-
-// Best-effort Clerk ban — never throws. The DB-level state change is
-// the source of truth; the ban is secondary protection so a banned
-// client can't create new sessions. If Clerk is down or the user is
-// already deleted, log and move on.
-async function tryBanClerkUser(clerkUserId: string): Promise<void> {
-  try {
-    const clerk = await clerkClient();
-    await clerk.users.banUser(clerkUserId);
-  } catch (err) {
-    console.warn(
-      `[clients] failed to ban Clerk user ${clerkUserId} (deactivation succeeded anyway):`,
-      err instanceof Error ? err.message : err
-    );
-  }
-}
-
-async function tryUnbanClerkUser(clerkUserId: string): Promise<void> {
-  try {
-    const clerk = await clerkClient();
-    await clerk.users.unbanUser(clerkUserId);
-  } catch (err) {
-    console.warn(
-      `[clients] failed to unban Clerk user ${clerkUserId} (reactivation succeeded anyway):`,
-      err instanceof Error ? err.message : err
-    );
-  }
-}
+import { tryBanClerkUser, tryUnbanClerkUser } from "@/lib/clerk";
 
 interface PatchBody {
   name?: unknown;

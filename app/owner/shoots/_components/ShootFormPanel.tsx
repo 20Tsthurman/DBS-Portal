@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import type {
@@ -92,6 +92,11 @@ export function ShootFormPanel({
 }: ShootFormPanelProps) {
   const router = useRouter();
   const isEdit = Boolean(shoot);
+  // Every list row mounts its own ShootFormPanel (SlidePanel keeps the DOM
+  // mounted while closed), so static ids would collide and label htmlFor
+  // would resolve to the wrong panel's input — most visibly, the Kind radio
+  // toggle would refuse to flip. useId scopes ids to this instance.
+  const fieldId = useId();
   const [values, setValues] = useState<FormValues>(emptyValues);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -293,6 +298,7 @@ export function ShootFormPanel({
               }}
             >
               <KindOption
+                idPrefix={fieldId}
                 value="shoot"
                 label="Shoot"
                 checked={values.kind === "shoot"}
@@ -306,6 +312,7 @@ export function ShootFormPanel({
                 }
               />
               <KindOption
+                idPrefix={fieldId}
                 value="meeting"
                 label="Meeting"
                 checked={values.kind === "meeting"}
@@ -321,11 +328,11 @@ export function ShootFormPanel({
 
           {isMeeting && (
             <div>
-              <label htmlFor="shoot-meeting-type" style={labelStyle}>
+              <label htmlFor={`${fieldId}-meeting-type`} style={labelStyle}>
                 Meeting type
               </label>
               <select
-                id="shoot-meeting-type"
+                id={`${fieldId}-meeting-type`}
                 required
                 value={values.meetingType}
                 onChange={(e) =>
@@ -347,11 +354,11 @@ export function ShootFormPanel({
           )}
 
           <div>
-            <label htmlFor="shoot-client" style={labelStyle}>
+            <label htmlFor={`${fieldId}-client`} style={labelStyle}>
               Client
             </label>
             <select
-              id="shoot-client"
+              id={`${fieldId}-client`}
               required
               value={values.clientId}
               onChange={(e) =>
@@ -371,11 +378,11 @@ export function ShootFormPanel({
           </div>
 
           <div>
-            <label htmlFor="shoot-when" style={labelStyle}>
+            <label htmlFor={`${fieldId}-when`} style={labelStyle}>
               Date &amp; Time
             </label>
             <input
-              id="shoot-when"
+              id={`${fieldId}-when`}
               type="datetime-local"
               required
               value={values.scheduledAt}
@@ -390,11 +397,11 @@ export function ShootFormPanel({
 
           {showLocation && (
             <div>
-              <label htmlFor="shoot-location" style={labelStyle}>
+              <label htmlFor={`${fieldId}-location`} style={labelStyle}>
                 {locationLabel}
               </label>
               <input
-                id="shoot-location"
+                id={`${fieldId}-location`}
                 type="text"
                 value={values.location}
                 onChange={(e) =>
@@ -408,11 +415,11 @@ export function ShootFormPanel({
           )}
 
           <div>
-            <label htmlFor="shoot-duration" style={labelStyle}>
+            <label htmlFor={`${fieldId}-duration`} style={labelStyle}>
               Duration (hours)
             </label>
             <input
-              id="shoot-duration"
+              id={`${fieldId}-duration`}
               type="number"
               step="0.5"
               min={0}
@@ -427,11 +434,11 @@ export function ShootFormPanel({
           </div>
 
           <div>
-            <label htmlFor="shoot-status" style={labelStyle}>
+            <label htmlFor={`${fieldId}-status`} style={labelStyle}>
               Status
             </label>
             <select
-              id="shoot-status"
+              id={`${fieldId}-status`}
               value={values.status}
               onChange={(e) =>
                 setValues((v) => ({
@@ -451,11 +458,11 @@ export function ShootFormPanel({
           </div>
 
           <div>
-            <label htmlFor="shoot-notes" style={labelStyle}>
+            <label htmlFor={`${fieldId}-notes`} style={labelStyle}>
               Notes
             </label>
             <textarea
-              id="shoot-notes"
+              id={`${fieldId}-notes`}
               rows={4}
               value={values.notes}
               onChange={(e) =>
@@ -486,16 +493,17 @@ export function ShootFormPanel({
 }
 
 interface KindOptionProps {
+  idPrefix: string;
   value: ShootKind;
   label: string;
   checked: boolean;
   onSelect: () => void;
 }
 
-function KindOption({ value, label, checked, onSelect }: KindOptionProps) {
+function KindOption({ idPrefix, value, label, checked, onSelect }: KindOptionProps) {
   return (
     <label
-      htmlFor={`shoot-kind-${value}`}
+      htmlFor={`${idPrefix}-kind-${value}`}
       style={{
         flex: 1,
         display: "inline-flex",
@@ -516,9 +524,9 @@ function KindOption({ value, label, checked, onSelect }: KindOptionProps) {
       }}
     >
       <input
-        id={`shoot-kind-${value}`}
+        id={`${idPrefix}-kind-${value}`}
         type="radio"
-        name="shoot-kind"
+        name={`${idPrefix}-kind`}
         value={value}
         checked={checked}
         onChange={onSelect}
