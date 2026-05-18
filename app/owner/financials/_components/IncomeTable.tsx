@@ -34,6 +34,11 @@ interface IncomeTableProps {
   onSuggestionDismiss: (
     suggestion: IncomeSuggestion
   ) => Promise<CommitResult>;
+  /** Optional success notifications. The table also clears its own local
+   * `sugDrafts` entry on success — these callbacks let the parent observe
+   * the same event if it ever needs to. */
+  onAcceptSuccess?: (referenceId: string) => void;
+  onDismissSuccess?: (referenceId: string) => void;
 }
 
 const INCOME_TYPE_OPTIONS = (
@@ -54,6 +59,8 @@ export function IncomeTable({
   suggestions,
   onSuggestionAccept,
   onSuggestionDismiss,
+  onAcceptSuccess,
+  onDismissSuccess,
 }: IncomeTableProps) {
   const [confirmRowId, setConfirmRowId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -62,10 +69,37 @@ export function IncomeTable({
   // Per-suggestion local edit overlay: keyed by referenceId, holds the
   // cell-level overrides Kelsey has typed before clicking ✓. The
   // effective values fed to the accept action are
-  // `{ ...suggestion, ...overrides }`.
+  // `{ ...suggestion, ...overrides }`. The corresponding entry is cleared
+  // from the map on a successful accept or dismiss (see handleAccept /
+  // handleDismiss below) so this map can't grow unboundedly.
   const [sugDrafts, setSugDrafts] = useState<
     Map<string, Partial<IncomeSuggestion>>
   >(new Map());
+
+  const clearDraft = (refId: string) => {
+    setSugDrafts((m) => {
+      if (!m.has(refId)) return m;
+      const next = new Map(m);
+      next.delete(refId);
+      return next;
+    });
+  };
+
+  const handleAccept = async (sug: IncomeSuggestion) => {
+    const res = await onSuggestionAccept(effective(sug));
+    if (res.ok) {
+      clearDraft(sug.referenceId);
+      onAcceptSuccess?.(sug.referenceId);
+    }
+  };
+
+  const handleDismiss = async (sug: IncomeSuggestion) => {
+    const res = await onSuggestionDismiss(sug);
+    if (res.ok) {
+      clearDraft(sug.referenceId);
+      onDismissSuccess?.(sug.referenceId);
+    }
+  };
 
   // Sort by suggested date desc; for a typical month every retainer share
   // the 1st, so name asc breaks ties so the order is stable.
@@ -260,7 +294,7 @@ export function IncomeTable({
                         type="button"
                         className="fb-suggestion-btn fb-suggestion-btn-accept"
                         aria-label="Accept suggestion"
-                        onClick={() => onSuggestionAccept(effective(sug))}
+                        onClick={() => handleAccept(sug)}
                       >
                         ✓
                       </button>
@@ -268,7 +302,7 @@ export function IncomeTable({
                         type="button"
                         className="fb-suggestion-btn fb-suggestion-btn-dismiss"
                         aria-label="Dismiss suggestion"
-                        onClick={() => onSuggestionDismiss(sug)}
+                        onClick={() => handleDismiss(sug)}
                       >
                         ×
                       </button>

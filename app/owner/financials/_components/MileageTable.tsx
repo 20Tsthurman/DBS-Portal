@@ -31,6 +31,11 @@ interface MileageTableProps {
   onSuggestionDismiss: (
     suggestion: MileageSuggestion
   ) => Promise<CommitResult>;
+  /** Optional success notifications. The table also clears its own local
+   * `sugDrafts` entry on success — these callbacks let the parent observe
+   * the same event if it ever needs to. */
+  onAcceptSuccess?: (referenceId: string) => void;
+  onDismissSuccess?: (referenceId: string) => void;
 }
 
 const COLUMN_COUNT = 8;
@@ -47,11 +52,15 @@ export function MileageTable({
   suggestions,
   onSuggestionAccept,
   onSuggestionDismiss,
+  onAcceptSuccess,
+  onDismissSuccess,
 }: MileageTableProps) {
   const [confirmRowId, setConfirmRowId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // sugDrafts keys are cleared in handleAccept / handleDismiss below so the
+  // map can't grow unboundedly across a long session.
   const [sugDrafts, setSugDrafts] = useState<
     Map<string, Partial<MileageSuggestion>>
   >(new Map());
@@ -88,18 +97,34 @@ export function MileageTable({
       return next;
     });
   };
+  const clearDraft = (refId: string) => {
+    setSugDrafts((m) => {
+      if (!m.has(refId)) return m;
+      const next = new Map(m);
+      next.delete(refId);
+      return next;
+    });
+  };
 
   const handleAccept = async (sug: MileageSuggestion) => {
     if (sugInFlight.has(sug.referenceId)) return;
     setInFlight(sug.referenceId, true);
-    await onSuggestionAccept(effective(sug));
+    const res = await onSuggestionAccept(effective(sug));
     setInFlight(sug.referenceId, false);
+    if (res.ok) {
+      clearDraft(sug.referenceId);
+      onAcceptSuccess?.(sug.referenceId);
+    }
   };
   const handleDismiss = async (sug: MileageSuggestion) => {
     if (sugInFlight.has(sug.referenceId)) return;
     setInFlight(sug.referenceId, true);
-    await onSuggestionDismiss(sug);
+    const res = await onSuggestionDismiss(sug);
     setInFlight(sug.referenceId, false);
+    if (res.ok) {
+      clearDraft(sug.referenceId);
+      onDismissSuccess?.(sug.referenceId);
+    }
   };
 
   const closeConfirm = () => {

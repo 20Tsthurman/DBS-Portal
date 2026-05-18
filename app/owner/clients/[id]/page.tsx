@@ -15,7 +15,9 @@ import { OverviewTab } from "./_components/OverviewTab";
 import { TabNav, type TabDefinition } from "./_components/TabNav";
 import { TimeTab } from "./_components/TimeTab";
 import { NotesTab } from "./_components/NotesTab";
+import { FilesPanel } from "./_components/FilesPanel";
 import { MessageThread } from "@/components/messages/MessageThread";
+import { fetchFilesForClient } from "./_lib/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -42,9 +44,10 @@ function PlaceholderPanel({ message }: { message: string }) {
 export default async function OwnerClientDetailPage({ params }: PageProps) {
   const { id } = await params;
 
-  const [detail, packages] = await Promise.all([
+  const [detail, packages, files] = await Promise.all([
     fetchClientDetail(id),
     fetchActivePackages(),
+    fetchFilesForClient(id),
   ]);
 
   if (!detail) {
@@ -86,7 +89,13 @@ export default async function OwnerClientDetailPage({ params }: PageProps) {
     {
       key: "files",
       label: "Files",
-      content: <PlaceholderPanel message="File management coming soon." />,
+      content: (
+        <FilesPanel
+          clientId={client.id}
+          clientName={client.name}
+          files={files}
+        />
+      ),
     },
     {
       key: "invoices",

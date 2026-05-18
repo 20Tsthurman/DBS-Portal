@@ -41,8 +41,8 @@ export interface IncomeSuggestion {
   clientName: string;
   /**
    * Defaults to `brand_retainer` (the suggestion exists *because* a retainer
-   * is expected). Widened to the full `IncomeType` union so the Step-5
-   * ghost row's type dropdown can edit it before accepting.
+   * is expected). Widened to the full `IncomeType` union so the
+   * suggestion row's type dropdown can edit it before accepting.
    */
   incomeType: IncomeType;
   amount: number;

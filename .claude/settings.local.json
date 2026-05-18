@@ -37,7 +37,10 @@
       "Bash(echo \"Exit: $?\")",
       "Read(//mnt/skills/**)",
       "Read(//mnt/**)",
-      "Read(//c//**)"
+      "Read(//c//**)",
+      "Bash(dir C:\\\\dbs-portal\\\\supabase\\\\migrations *)",
+      "Bash(Get-ChildItem *)",
+      "PowerShell(head *)"
     ]
   }
 }

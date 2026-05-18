@@ -4,6 +4,7 @@ interface DashboardCardProps {
   eyebrow: string;
   title: string;
   children: ReactNode;
+  variant?: "default" | "subdued";
 }
 
 /**
@@ -11,21 +12,30 @@ interface DashboardCardProps {
  *
  * Card: --surface-raised, 1px --border, sharp corners (enforced globally),
  * 24px padding. Header row: uppercase eyebrow + Playfair 20px title.
+ *
+ * `variant="subdued"` collapses padding + title size for secondary-rank
+ * sections (e.g. Mileage under the financials KPIs).
  */
-export function DashboardCard({ eyebrow, title, children }: DashboardCardProps) {
+export function DashboardCard({
+  eyebrow,
+  title,
+  children,
+  variant = "default",
+}: DashboardCardProps) {
+  const subdued = variant === "subdued";
   return (
     <div
       className="border"
       style={{
         borderColor: "var(--border)",
         backgroundColor: "var(--surface-raised)",
-        padding: 24,
+        padding: subdued ? 16 : 24,
         height: "100%",
         display: "flex",
         flexDirection: "column",
       }}
     >
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: subdued ? 12 : 16 }}>
         <p
           style={{
             color: "var(--text-muted)",
@@ -33,7 +43,7 @@ export function DashboardCard({ eyebrow, title, children }: DashboardCardProps) 
             letterSpacing: "0.08em",
             textTransform: "uppercase",
             fontWeight: 600,
-            marginBottom: 6,
+            marginBottom: subdued ? 4 : 6,
           }}
         >
           {eyebrow}
@@ -41,7 +51,7 @@ export function DashboardCard({ eyebrow, title, children }: DashboardCardProps) 
         <h2
           style={{
             fontFamily: "var(--font-playfair), serif",
-            fontSize: 20,
+            fontSize: subdued ? 16 : 20,
             fontWeight: 500,
             color: "var(--text-primary)",
             letterSpacing: "-0.01em",

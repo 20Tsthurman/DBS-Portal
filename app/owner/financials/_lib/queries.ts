@@ -16,8 +16,16 @@ import {
  * action, suggestion compute) into one round trip per render. Mirrors
  * the pattern in `app/owner/clients/_lib/queries.ts:fetchClientsWithRelations`.
  *
- * Throws on Supabase error or missing singleton. Server-action callers
- * that need a `{ ok, error }` envelope should catch.
+ * Returns a defaults sentinel if the singleton row is missing
+ * (greenfield-safe). The defaults match the schema's column defaults
+ * (`supabase/schema.sql:243-247`): `mileage_rate_per_mile = 0.70`,
+ * `tax_set_aside_percent = 28`, `home_address = ''`. An empty
+ * home_address triggers the existing guard in
+ * `computeMileageSuggestions` so mileage suggestions become an empty
+ * array — the correct fallback before Kelsey has entered her address.
+ *
+ * Still throws on Supabase infrastructure errors — that's a genuine
+ * failure callers should bubble up.
  */
 export const fetchAppSettings = cache(async (): Promise<AppSettingsRecord> => {
   const supabase = getSupabaseServiceClient();
@@ -27,7 +35,16 @@ export const fetchAppSettings = cache(async (): Promise<AppSettingsRecord> => {
     .eq("singleton", true)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  if (!data) throw new Error("app_settings row not found");
+  if (!data) {
+    return {
+      id: "default",
+      singleton: true,
+      home_address: "",
+      mileage_rate_per_mile: 0.7,
+      tax_set_aside_percent: 28,
+      updated_at: new Date().toISOString(),
+    } satisfies AppSettingsRecord;
+  }
   return data as AppSettingsRecord;
 });
 
@@ -243,7 +260,9 @@ export async function fetchFinancialsForRange(
   const expenses = expensesFromTable + mileageDeduction;
   const netProfit = income - expenses;
   const taxSetAside = netProfit > 0 ? netProfit * (taxRatePercent / 100) : 0;
-  const takeHome = netProfit - taxSetAside;
+  // Mileage deduction reduces taxes owed (via netProfit/taxSetAside above) but does
+  // not leave the bank account — so it is intentionally excluded from take-home.
+  const takeHome = income - expensesFromTable - taxSetAside;
 
   return {
     range,

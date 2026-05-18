@@ -137,8 +137,13 @@ export interface FileRecord {
   id: string;
   client_id: string;
   name: string;
-  file_url: string;
+  /** Canonical storage key in the `client-files` bucket (see lib/storage.ts). */
+  storage_path: string;
   file_type: FileType;
+  /** MIME type read back from the verified upload at finalize time. */
+  mime_type: string;
+  /** Object size in bytes, read back from the verified upload at finalize time. */
+  size_bytes: number;
   uploaded_at: string;
   uploaded_by: string;
 }

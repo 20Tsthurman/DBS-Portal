@@ -34,6 +34,11 @@ interface ExpenseTableProps {
   onSuggestionDismiss: (
     suggestion: ExpenseSuggestion
   ) => Promise<CommitResult>;
+  /** Optional success notifications. The table also clears its own local
+   * `sugDrafts` entry on success — these callbacks let the parent observe
+   * the same event if it ever needs to. */
+  onAcceptSuccess?: (referenceId: string) => void;
+  onDismissSuccess?: (referenceId: string) => void;
 }
 
 const EXPENSE_CATEGORY_OPTIONS = (
@@ -54,14 +59,43 @@ export function ExpenseTable({
   suggestions,
   onSuggestionAccept,
   onSuggestionDismiss,
+  onAcceptSuccess,
+  onDismissSuccess,
 }: ExpenseTableProps) {
   const [confirmRowId, setConfirmRowId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // sugDrafts keys are cleared in handleAccept / handleDismiss below so the
+  // map can't grow unboundedly across a long session.
   const [sugDrafts, setSugDrafts] = useState<
     Map<string, Partial<ExpenseSuggestion>>
   >(new Map());
+
+  const clearDraft = (refId: string) => {
+    setSugDrafts((m) => {
+      if (!m.has(refId)) return m;
+      const next = new Map(m);
+      next.delete(refId);
+      return next;
+    });
+  };
+
+  const handleAccept = async (sug: ExpenseSuggestion) => {
+    const res = await onSuggestionAccept(effective(sug));
+    if (res.ok) {
+      clearDraft(sug.referenceId);
+      onAcceptSuccess?.(sug.referenceId);
+    }
+  };
+
+  const handleDismiss = async (sug: ExpenseSuggestion) => {
+    const res = await onSuggestionDismiss(sug);
+    if (res.ok) {
+      clearDraft(sug.referenceId);
+      onDismissSuccess?.(sug.referenceId);
+    }
+  };
 
   const sortedSuggestions = useMemo(
     () =>
@@ -248,7 +282,7 @@ export function ExpenseTable({
                         type="button"
                         className="fb-suggestion-btn fb-suggestion-btn-accept"
                         aria-label="Accept suggestion"
-                        onClick={() => onSuggestionAccept(effective(sug))}
+                        onClick={() => handleAccept(sug)}
                       >
                         ✓
                       </button>
@@ -256,7 +290,7 @@ export function ExpenseTable({
                         type="button"
                         className="fb-suggestion-btn fb-suggestion-btn-dismiss"
                         aria-label="Dismiss suggestion"
-                        onClick={() => onSuggestionDismiss(sug)}
+                        onClick={() => handleDismiss(sug)}
                       >
                         ×
                       </button>

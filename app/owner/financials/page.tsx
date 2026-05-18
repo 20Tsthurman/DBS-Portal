@@ -131,29 +131,36 @@ export default async function FinancialsPage({
     });
   }
 
-  const summaryEyebrow =
-    range === "ytd" ? "YEAR-TO-DATE" : fetchRange.label.toUpperCase();
-
   return (
-    <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-      <h1
+    <div>
+      <div
         style={{
-          fontFamily: "var(--font-playfair), serif",
-          fontSize: 32,
-          fontWeight: 500,
-          color: "var(--text-primary)",
-          letterSpacing: "-0.01em",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 16,
           marginBottom: 24,
         }}
       >
-        Financials
-      </h1>
+        <h1
+          style={{
+            fontFamily: "var(--font-playfair), serif",
+            fontSize: 32,
+            fontWeight: 500,
+            color: "var(--text-primary)",
+            letterSpacing: "-0.01em",
+            margin: 0,
+          }}
+        >
+          Financials
+        </h1>
 
-      <FinancialsToolbar
-        range={range}
-        monthKey={monthKey}
-        yearLabel={yearLabel}
-      />
+        <FinancialsToolbar
+          range={range}
+          monthKey={monthKey}
+          yearLabel={yearLabel}
+        />
+      </div>
 
       <FinancialsBoard
         key={range === "ytd" ? `ytd-${yearLabel}` : `month-${monthKey}`}
@@ -161,7 +168,6 @@ export default async function FinancialsPage({
         initialExpenseRows={data.expenseRows}
         initialMileageRows={data.mileageRows}
         taxRatePercent={data.summary.taxRatePercent}
-        summaryEyebrow={summaryEyebrow}
         incomeSuggestions={incomeSuggestions}
         expenseSuggestions={expenseSuggestions}
         mileageSuggestions={mileageSuggestions}

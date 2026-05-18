@@ -40,6 +40,15 @@ import {
 import { ExpenseTable } from "./ExpenseTable";
 import { IncomeTable } from "./IncomeTable";
 import { MileageTable } from "./MileageTable";
+import {
+  IconExpenses,
+  IconIncome,
+  IconPiggyBank,
+  IconTax,
+  IconWallet,
+} from "./StatCardIcons";
+import { BreakdownPanel } from "./BreakdownPanel";
+import { InsightsPanel } from "./InsightsPanel";
 
 export type DraftIncomeRow = {
   date: string | null;
@@ -137,7 +146,6 @@ interface FinancialsBoardProps {
   initialExpenseRows: ExpenseRow[];
   initialMileageRows: MileageRow[];
   taxRatePercent: number;
-  summaryEyebrow: string;
   /** Suggestion arrays for inline ghost rows. Empty in YTD view. */
   incomeSuggestions: IncomeSuggestion[];
   expenseSuggestions: ExpenseSuggestion[];
@@ -161,10 +169,13 @@ function recomputeSummary(
   const expensesAll = expensesFromTable + mileageDeduction;
   const netProfit = incomeTotal - expensesAll;
   const taxSetAside = netProfit > 0 ? netProfit * (taxRatePercent / 100) : 0;
-  const takeHome = netProfit - taxSetAside;
+  // Mileage deduction reduces taxes owed (via netProfit/taxSetAside above) but does
+  // not leave the bank account — so it is intentionally excluded from take-home.
+  const takeHome = incomeTotal - expensesFromTable - taxSetAside;
   return {
     income: incomeTotal,
     expenses: expensesAll,
+    mileageDeduction,
     netProfit,
     taxSetAside,
     takeHome,
@@ -177,7 +188,6 @@ export function FinancialsBoard({
   initialExpenseRows,
   initialMileageRows,
   taxRatePercent,
-  summaryEyebrow,
   incomeSuggestions,
   expenseSuggestions,
   mileageSuggestions,
@@ -514,12 +524,11 @@ export function FinancialsBoard({
 
   // ---------- suggestion accept / dismiss ----------
   //
-  // Accept flow: optimistic-remove → call action → on success prepend the
+  // Accept flow: optimistic-remove → call action → on success splice the
   // returned record (mapped to the display row shape) into the rows state
-  // and sortIncome/sortExpense/sortMileage; on failure restore the
-  // suggestion at the front of its array (position within the array isn't
-  // semantically meaningful — the tables re-sort by date) and surface the
-  // error in the shared banner.
+  // via sortByDateDesc; on failure restore the suggestion at the front of
+  // its array (position within the array isn't semantically meaningful —
+  // the tables re-sort by date) and surface the error in the shared banner.
   //
   // Dismiss flow: optimistic-remove → fire dismissSuggestionAction →
   // restore + banner on failure. No corresponding rows-state insert.
@@ -744,7 +753,7 @@ export function FinancialsBoard({
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
       {sugError && (
         <div
           role="alert"
@@ -780,81 +789,100 @@ export function FinancialsBoard({
         </div>
       )}
 
-      <DashboardCard eyebrow={summaryEyebrow} title="Summary">
-        <div className="financials-summary-grid">
-          <StatCard
-            label="Total Income"
-            value={formatCurrency(summary.income)}
+      <div className="financials-summary-grid">
+        <StatCard
+          label="Total Income"
+          value={formatCurrency(summary.income)}
+          icon={<IconIncome size={28} />}
+        />
+        <StatCard
+          label="Total Expenses"
+          value={formatCurrency(summary.expenses)}
+          icon={<IconExpenses size={28} />}
+        />
+        <StatCard
+          label="Net Profit"
+          value={formatCurrency(summary.netProfit)}
+          tone={summary.netProfit < 0 ? "danger" : "success"}
+          icon={<IconWallet size={28} />}
+        />
+        <StatCard
+          label={`Tax Set-Aside (${summary.taxRatePercent}%)`}
+          value={formatCurrency(summary.taxSetAside)}
+          tone="muted"
+          icon={<IconTax size={28} />}
+        />
+        <StatCard
+          label="Est. Take-Home"
+          value={formatCurrency(summary.takeHome)}
+          tone={summary.takeHome > 0 ? "success" : "default"}
+          icon={<IconPiggyBank size={28} />}
+        />
+      </div>
+
+      <div className="financials-main-grid">
+        <DashboardCard eyebrow="INCOME" title="Payments received">
+          <IncomeTable
+            rows={incomeRows}
+            onUpdate={handleIncomeUpdate}
+            onDelete={handleIncomeDelete}
+            draft={incomeDraft}
+            draftKey={incomeDraftKey}
+            draftSaving={incomeDraftSaving}
+            draftError={incomeDraftError}
+            onDraftFieldChange={handleIncomeDraftFieldChange}
+            suggestions={incomeSugState}
+            onSuggestionAccept={handleIncomeSuggestionAccept}
+            onSuggestionDismiss={handleIncomeSuggestionDismiss}
           />
-          <StatCard
-            label="Total Expenses"
-            value={formatCurrency(summary.expenses)}
+        </DashboardCard>
+
+        <DashboardCard eyebrow="EXPENSES" title="Expenses logged">
+          <ExpenseTable
+            rows={expenseRows}
+            onUpdate={handleExpenseUpdate}
+            onDelete={handleExpenseDelete}
+            draft={expenseDraft}
+            draftKey={expenseDraftKey}
+            draftSaving={expenseDraftSaving}
+            draftError={expenseDraftError}
+            onDraftFieldChange={handleExpenseDraftFieldChange}
+            suggestions={expenseSugState}
+            onSuggestionAccept={handleExpenseSuggestionAccept}
+            onSuggestionDismiss={handleExpenseSuggestionDismiss}
           />
-          <StatCard
-            label="Net Profit"
-            value={formatCurrency(summary.netProfit)}
-            tone={summary.netProfit < 0 ? "danger" : "success"}
+        </DashboardCard>
+
+        <DashboardCard eyebrow="MILEAGE" title="Trips logged">
+          <MileageTable
+            rows={mileageRows}
+            onUpdate={handleMileageUpdate}
+            onDelete={handleMileageDelete}
+            draft={mileageDraft}
+            draftKey={mileageDraftKey}
+            draftSaving={mileageDraftSaving}
+            draftError={mileageDraftError}
+            onDraftFieldChange={handleMileageDraftFieldChange}
+            suggestions={mileageSugState}
+            onSuggestionAccept={handleMileageSuggestionAccept}
+            onSuggestionDismiss={handleMileageSuggestionDismiss}
           />
-          <StatCard
-            label={`Tax Set-Aside (${summary.taxRatePercent}%)`}
-            value={formatCurrency(summary.taxSetAside)}
-            tone="muted"
-          />
-          <StatCard
-            label="Est. Take-Home"
-            value={formatCurrency(summary.takeHome)}
-            tone={summary.takeHome > 0 ? "success" : "default"}
+        </DashboardCard>
+
+        <div className="financials-insights-pair">
+          <BreakdownPanel summary={summary} />
+          <InsightsPanel
+            summary={summary}
+            pendingSuggestionsCount={
+              incomeSugState.length +
+              expenseSugState.length +
+              mileageSugState.length
+            }
+            incomeCount={incomeRows.length}
+            expenseCount={expenseRows.length}
           />
         </div>
-      </DashboardCard>
-
-      <DashboardCard eyebrow="INCOME" title="Payments received">
-        <IncomeTable
-          rows={incomeRows}
-          onUpdate={handleIncomeUpdate}
-          onDelete={handleIncomeDelete}
-          draft={incomeDraft}
-          draftKey={incomeDraftKey}
-          draftSaving={incomeDraftSaving}
-          draftError={incomeDraftError}
-          onDraftFieldChange={handleIncomeDraftFieldChange}
-          suggestions={incomeSugState}
-          onSuggestionAccept={handleIncomeSuggestionAccept}
-          onSuggestionDismiss={handleIncomeSuggestionDismiss}
-        />
-      </DashboardCard>
-
-      <DashboardCard eyebrow="EXPENSES" title="Expenses logged">
-        <ExpenseTable
-          rows={expenseRows}
-          onUpdate={handleExpenseUpdate}
-          onDelete={handleExpenseDelete}
-          draft={expenseDraft}
-          draftKey={expenseDraftKey}
-          draftSaving={expenseDraftSaving}
-          draftError={expenseDraftError}
-          onDraftFieldChange={handleExpenseDraftFieldChange}
-          suggestions={expenseSugState}
-          onSuggestionAccept={handleExpenseSuggestionAccept}
-          onSuggestionDismiss={handleExpenseSuggestionDismiss}
-        />
-      </DashboardCard>
-
-      <DashboardCard eyebrow="MILEAGE" title="Trips logged">
-        <MileageTable
-          rows={mileageRows}
-          onUpdate={handleMileageUpdate}
-          onDelete={handleMileageDelete}
-          draft={mileageDraft}
-          draftKey={mileageDraftKey}
-          draftSaving={mileageDraftSaving}
-          draftError={mileageDraftError}
-          onDraftFieldChange={handleMileageDraftFieldChange}
-          suggestions={mileageSugState}
-          onSuggestionAccept={handleMileageSuggestionAccept}
-          onSuggestionDismiss={handleMileageSuggestionDismiss}
-        />
-      </DashboardCard>
+      </div>
 
       <style>{`
         .financials-summary-grid {
@@ -867,6 +895,22 @@ export function FinancialsBoard({
         }
         @media (max-width: 480px) {
           .financials-summary-grid { grid-template-columns: 1fr; }
+        }
+        .financials-main-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 24px;
+        }
+        @media (max-width: 1280px) {
+          .financials-main-grid { grid-template-columns: 1fr; }
+        }
+        .financials-insights-pair {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 16px;
+        }
+        @media (max-width: 1280px) {
+          .financials-insights-pair { grid-template-columns: 1fr; }
         }
         .fb-row:hover td { background-color: var(--surface-base); }
 

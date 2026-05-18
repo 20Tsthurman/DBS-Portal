@@ -45,6 +45,15 @@ export function formatDateTime(value: string | null | undefined): string {
   });
 }
 
+export function formatPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "—";
+  }
+  const pct = value * 100;
+  const clamped = Math.max(-999.9, Math.min(999.9, pct));
+  return `${clamped.toFixed(1)}%`;
+}
+
 export function formatHours(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   return Number(value).toLocaleString(undefined, {
