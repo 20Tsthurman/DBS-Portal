@@ -40,7 +40,9 @@
       "Read(//c//**)",
       "Bash(dir C:\\\\dbs-portal\\\\supabase\\\\migrations *)",
       "Bash(Get-ChildItem *)",
-      "PowerShell(head *)"
+      "PowerShell(head *)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(node *)"
     ]
   }
 }

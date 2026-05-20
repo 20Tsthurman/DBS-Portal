@@ -6,10 +6,19 @@ interface SlidePanelProps {
   open: boolean;
   onClose: () => void;
   title: string;
+  /** Panel width in pixels. Defaults to 400; invoices pass 520 to fit
+   * the line-items editor without cramping descriptions. */
+  widthPx?: number;
   children: ReactNode;
 }
 
-export function SlidePanel({ open, onClose, title, children }: SlidePanelProps) {
+export function SlidePanel({
+  open,
+  onClose,
+  title,
+  widthPx,
+  children,
+}: SlidePanelProps) {
   useEffect(() => {
     if (!open) return;
     const handleKey = (event: KeyboardEvent) => {
@@ -43,7 +52,7 @@ export function SlidePanel({ open, onClose, title, children }: SlidePanelProps) 
           top: 0,
           right: 0,
           bottom: 0,
-          width: "400px",
+          width: `${widthPx ?? 400}px`,
           maxWidth: "100%",
           backgroundColor: "var(--surface-raised)",
           borderLeft: "1px solid var(--border)",

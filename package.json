@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:webhook": "npx svix-cli listen http://localhost:3000/api/webhooks/clerk",
+    "dev:stripe": "stripe listen --forward-to http://localhost:3000/api/webhooks/stripe",
     "test:webhook": "node --env-file=.env.local scripts/test-webhook.mjs",
     "build": "next build",
     "start": "next start",
@@ -13,11 +14,13 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^6.0.0",
+    "@react-pdf/renderer": "^4.5.1",
     "@supabase/supabase-js": "^2.45.0",
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "resend": "^4.0.0",
+    "stripe": "^17.7.0",
     "svix": "^1.93.0"
   },
   "devDependencies": {

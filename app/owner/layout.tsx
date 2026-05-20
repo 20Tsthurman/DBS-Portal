@@ -11,6 +11,7 @@ const ownerNav: SidebarNavItem[] = [
   { label: "Calendar", href: "/owner/calendar" },
   { label: "Time Tracker", href: "/owner/time" },
   { label: "Financials", href: "/owner/financials" },
+  { label: "Invoices", href: "/owner/invoices" },
   { label: "Messages", href: "/owner/messages" },
   { label: "Settings", href: "/owner/settings" },
 ];

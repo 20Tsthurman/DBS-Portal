@@ -6,7 +6,7 @@ interface MessageEmailParams {
   portalUrl: string;
 }
 
-function buildShell(opts: {
+export function buildShell(opts: {
   headline: string;
   bodyParagraph: string;
   portalUrl: string;

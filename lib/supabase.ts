@@ -27,7 +27,7 @@ export type IncomeType =
   | "wedding_same_day"
   | "one_off_shoot"
   | "other";
-export type IncomePaymentSource = "manual" | "suggested_retainer";
+export type IncomePaymentSource = "manual" | "suggested_retainer" | "invoice";
 export type SuggestionType =
   | "income_retainer"
   | "mileage_shoot"
@@ -106,6 +106,25 @@ export interface InvoiceRecord {
   stripe_payment_link: string | null;
   line_items: Array<{ description: string; amount: number }>;
   created_at: string;
+  /**
+   * Human-readable identifier in the form INV-YYYY-NNNN. Assigned at
+   * create time, so even drafts have a stable number. NULL only for
+   * legacy rows that predate migration 003 (none exist in practice).
+   */
+  invoice_number: string | null;
+  income_type: IncomeType;
+  /**
+   * Free-form note rendered on the generated PDF and surfaced in the
+   * payment email. NULL = no memo block on the PDF.
+   */
+  memo: string | null;
+  /**
+   * Timestamp when the invoice transitioned from draft -> sent. NULL
+   * while in draft. The "issued date" rendered on the PDF and shown
+   * in lists is derived from this column (date portion), not from
+   * created_at. created_at remains for audit/row-creation purposes.
+   */
+  sent_at: string | null;
 }
 
 export interface ExpenseRecord {
@@ -188,9 +207,18 @@ export interface IncomePaymentRecord {
   /**
    * NULL = manually entered (existing rows + manual ghost-row inserts);
    * 'suggested_retainer' = created from accepting a Phase 4 brand-retainer
-   * income suggestion.
+   * income suggestion;
+   * 'invoice' = created automatically when an invoice was paid (Stripe
+   * webhook or manual mark-as-paid). Pair with `invoice_id` to find
+   * the source invoice.
    */
   source: IncomePaymentSource | null;
+  /**
+   * FK to invoices(id). NULL unless this row was created by the invoice
+   * flow (source='invoice'). On invoice delete the FK nulls out so the
+   * historical income record survives.
+   */
+  invoice_id: string | null;
 }
 
 export interface MileageLogRecord {

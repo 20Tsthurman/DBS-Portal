@@ -90,6 +90,36 @@ export async function createSignedDownloadUrl(
 }
 
 /**
+ * Upload a server-generated buffer (PDF, etc.) directly to storage. The
+ * buffer never leaves the server, so going through the signed-URL flow
+ * (which is built for browser uploads) would be pointless. Used by the
+ * invoice send/edit actions to write the generated PDF into the
+ * `client-files` bucket.
+ *
+ * `upsert = true` overwrites an existing object at the same path; the
+ * invoice edit flow uses this to regenerate the PDF in place without
+ * touching the originating `files` row. Default is `false` (fresh
+ * upload, conflict surfaces as an error).
+ *
+ * Throws on Supabase error.
+ */
+export async function uploadServerBuffer(
+  storagePath: string,
+  buffer: Buffer,
+  mimeType: string,
+  upsert?: boolean
+): Promise<void> {
+  const supabase = getSupabaseServiceClient();
+  const { error } = await supabase.storage
+    .from(FILES_BUCKET)
+    .upload(storagePath, buffer, {
+      contentType: mimeType,
+      upsert: upsert ?? false,
+    });
+  if (error) throw new Error(error.message);
+}
+
+/**
  * Hard-delete the storage object at `storagePath`. Throws on Supabase
  * error. Per the Phase 5 contract, callers delete the DB row first; a
  * storage failure here is logged but does NOT roll back the row delete.

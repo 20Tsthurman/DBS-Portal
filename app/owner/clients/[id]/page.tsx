@@ -18,6 +18,11 @@ import { NotesTab } from "./_components/NotesTab";
 import { FilesPanel } from "./_components/FilesPanel";
 import { MessageThread } from "@/components/messages/MessageThread";
 import { fetchFilesForClient } from "./_lib/queries";
+import { InvoicesBoard } from "@/app/owner/invoices/_components/InvoicesBoard";
+import {
+  fetchClientsForPicker,
+  fetchInvoices,
+} from "@/app/owner/invoices/_lib/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -25,29 +30,15 @@ interface PageProps {
   params: Promise<{ id: string }>;
 }
 
-function PlaceholderPanel({ message }: { message: string }) {
-  return (
-    <div
-      className="flex items-center justify-center border px-8 py-20 text-center"
-      style={{
-        borderColor: "var(--border)",
-        backgroundColor: "var(--surface-raised)",
-        color: "var(--text-muted)",
-        fontSize: 14,
-      }}
-    >
-      {message}
-    </div>
-  );
-}
-
 export default async function OwnerClientDetailPage({ params }: PageProps) {
   const { id } = await params;
 
-  const [detail, packages, files] = await Promise.all([
+  const [detail, packages, files, invoices, allClients] = await Promise.all([
     fetchClientDetail(id),
     fetchActivePackages(),
     fetchFilesForClient(id),
+    fetchInvoices({ clientId: id }),
+    fetchClientsForPicker(),
   ]);
 
   if (!detail) {
@@ -100,7 +91,14 @@ export default async function OwnerClientDetailPage({ params }: PageProps) {
     {
       key: "invoices",
       label: "Invoices",
-      content: <PlaceholderPanel message="Invoices coming in Phase 4." />,
+      content: (
+        <InvoicesBoard
+          invoices={invoices}
+          clients={allClients}
+          mode="embedded"
+          defaultClientId={client.id}
+        />
+      ),
     },
     {
       key: "notes",
