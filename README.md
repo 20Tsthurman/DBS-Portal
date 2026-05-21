@@ -31,17 +31,23 @@ The portal is invite-only. End-to-end:
 
 ## Database
 
-`supabase/schema.sql` is the source of truth. There is no migrations system — when the schema changes, the diff has to be applied manually in the Supabase SQL Editor.
+The schema is a single consolidated migration:
+`supabase/migrations/001_initial_schema.sql`. It is idempotent — running it
+top-to-bottom against an empty Postgres database reproduces the full schema,
+and re-running it against an already-migrated database is a safe no-op.
 
-Recent changes that need a manual apply if you set up Supabase before May 2026:
+To provision a database, run these in the Supabase SQL Editor, in order:
 
-```sql
--- Reject empty-string clerk_user_id values (Phase 4)
-update clients set clerk_user_id = null where clerk_user_id = '';
-alter table clients
-  add constraint clerk_user_id_not_empty
-  check (clerk_user_id is null or length(clerk_user_id) > 0);
-```
+1. `supabase/migrations/001_initial_schema.sql` — schema: all tables,
+   constraints, indexes, the `client-files` Storage bucket, and the
+   `app_settings` singleton row.
+2. `supabase/seed.sql` — the three package tiers. One-shot; **not** idempotent.
+3. `supabase/seed-financials.sql` — Kelsey's Q1–Q2 2026 financial backfill.
+   One-shot; **not** idempotent.
+
+The pre-consolidation files (the old `schema.sql` and migrations `001`–`003`)
+are kept under `supabase/migrations/_archive/` for history only — do not run
+them.
 
 ## Local webhook development
 
