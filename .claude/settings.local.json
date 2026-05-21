@@ -42,7 +42,8 @@
       "Bash(Get-ChildItem *)",
       "PowerShell(head *)",
       "Bash(echo \"exit:$?\")",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(git mv *)"
     ]
   }
 }
