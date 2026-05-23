@@ -43,7 +43,8 @@
       "PowerShell(head *)",
       "Bash(echo \"exit:$?\")",
       "Bash(node *)",
-      "Bash(git mv *)"
+      "Bash(git mv *)",
+      "Bash(npx tailwindcss *)"
     ]
   }
 }

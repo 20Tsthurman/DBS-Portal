@@ -1,6 +1,13 @@
 import Link from "next/link";
 import { StatusPill } from "@/components/ui/StatusPill";
 import {
+  MobileCard,
+  MobileCardActions,
+  MobileCardField,
+  MobileCardHeader,
+  MobileCardList,
+} from "@/components/ui/MobileCard";
+import {
   fetchActivePackages,
   fetchClientsWithRelations,
 } from "./_lib/queries";
@@ -52,63 +59,107 @@ export default async function OwnerClientsPage() {
           <AddClientButton packages={packages} label="Add Your First Client" />
         </div>
       ) : (
-        <div
-          className="border"
-          style={{
-            borderColor: "var(--border)",
-            backgroundColor: "var(--surface-raised)",
-          }}
-        >
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Package</th>
-                <th>Status</th>
-                <th>Start Date</th>
-                <th>Monthly Value</th>
-                <th>Hours This Month</th>
-                <th style={{ textAlign: "right" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(({ client, project, pkg, hoursThisMonth }) => (
-                <tr key={client.id} className="row-hover">
-                  <td style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-                    {client.name}
-                  </td>
-                  <td>
-                    <TypePill type={client.type} />
-                  </td>
-                  <td>{pkg?.name ?? "—"}</td>
-                  <td>
+        <>
+          <div
+            className="hidden border lg:block"
+            style={{
+              borderColor: "var(--border)",
+              backgroundColor: "var(--surface-raised)",
+            }}
+          >
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Package</th>
+                  <th>Status</th>
+                  <th>Start Date</th>
+                  <th>Monthly Value</th>
+                  <th>Hours This Month</th>
+                  <th style={{ textAlign: "right" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(({ client, project, pkg, hoursThisMonth }) => (
+                  <tr key={client.id} className="row-hover">
+                    <td style={{ color: "var(--text-primary)", fontWeight: 600 }}>
+                      {client.name}
+                    </td>
+                    <td>
+                      <TypePill type={client.type} />
+                    </td>
+                    <td>{pkg?.name ?? "—"}</td>
+                    <td>
+                      <StatusPill tone={clientStatusTone(client.status)}>
+                        {clientStatusLabel(client.status)}
+                      </StatusPill>
+                    </td>
+                    <td>{formatDate(project?.start_date)}</td>
+                    <td>{formatCurrency(pkg?.monthly_price)}</td>
+                    <td>{formatHours(hoursThisMonth)}</td>
+                    <td style={{ textAlign: "right" }}>
+                      <Link
+                        href={`/owner/clients/${client.id}`}
+                        style={{
+                          color: "var(--accent)",
+                          fontSize: "13px",
+                          fontWeight: 600,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                        }}
+                      >
+                        View
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <MobileCardList className="lg:hidden">
+            {rows.map(({ client, project, pkg, hoursThisMonth }) => (
+              <MobileCard key={client.id}>
+                <MobileCardHeader
+                  title={client.name}
+                  badge={
                     <StatusPill tone={clientStatusTone(client.status)}>
                       {clientStatusLabel(client.status)}
                     </StatusPill>
-                  </td>
-                  <td>{formatDate(project?.start_date)}</td>
-                  <td>{formatCurrency(pkg?.monthly_price)}</td>
-                  <td>{formatHours(hoursThisMonth)}</td>
-                  <td style={{ textAlign: "right" }}>
-                    <Link
-                      href={`/owner/clients/${client.id}`}
-                      style={{
-                        color: "var(--accent)",
-                        fontSize: "13px",
-                        fontWeight: 600,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.06em",
-                      }}
-                    >
-                      View
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  }
+                  subtitle={<TypePill type={client.type} />}
+                />
+                <MobileCardField label="Package">
+                  {pkg?.name ?? "—"}
+                </MobileCardField>
+                <MobileCardField label="Start Date">
+                  {formatDate(project?.start_date)}
+                </MobileCardField>
+                <MobileCardField label="Monthly Value">
+                  {formatCurrency(pkg?.monthly_price)}
+                </MobileCardField>
+                <MobileCardField label="Hours This Month">
+                  {formatHours(hoursThisMonth)}
+                </MobileCardField>
+                <MobileCardActions align="end">
+                  <Link
+                    href={`/owner/clients/${client.id}`}
+                    style={{
+                      color: "var(--accent)",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                    }}
+                  >
+                    View →
+                  </Link>
+                </MobileCardActions>
+              </MobileCard>
+            ))}
+          </MobileCardList>
+        </>
       )}
 
       <style>{`

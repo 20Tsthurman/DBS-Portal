@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { MobileTableScroll } from "@/components/ui/MobileTableScroll";
 import {
   EXPENSE_CATEGORY_LABELS,
   type ExpenseRow,
@@ -142,12 +143,7 @@ export function ExpenseTable({
 
   return (
     <>
-      <div
-        style={{
-          border: "1px solid var(--border)",
-          backgroundColor: "var(--surface-raised)",
-        }}
-      >
+      <MobileTableScroll minWidth={720}>
         <table>
           <thead>
             <tr>
@@ -386,7 +382,7 @@ export function ExpenseTable({
             )}
           </tbody>
         </table>
-      </div>
+      </MobileTableScroll>
 
       <ConfirmDialog
         open={confirmRowId !== null}

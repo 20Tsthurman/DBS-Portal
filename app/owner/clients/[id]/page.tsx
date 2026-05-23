@@ -136,11 +136,11 @@ export default async function OwnerClientDetailPage({ params }: PageProps) {
         </Link>
       </div>
 
-      <header className="mb-8 flex items-start justify-between gap-6">
+      <header className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
         <div>
           <h1
-            className="page-title"
-            style={{ fontSize: 36, marginBottom: 12 }}
+            className="page-title !text-[28px] lg:!text-[36px]"
+            style={{ marginBottom: 12 }}
           >
             {client.name}
           </h1>

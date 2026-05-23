@@ -1,5 +1,12 @@
 import type { CSSProperties } from "react";
 import { StatusPill } from "@/components/ui/StatusPill";
+import {
+  MobileCard,
+  MobileCardActions,
+  MobileCardField,
+  MobileCardHeader,
+  MobileCardList,
+} from "@/components/ui/MobileCard";
 import type { MeetingType, ShootKind } from "@/lib/supabase";
 import {
   formatDateTime,
@@ -108,74 +115,114 @@ function ShootSection({
           {emptyText}
         </div>
       ) : (
-        <div
-          className="border"
-          style={{
-            borderColor: "var(--border)",
-            backgroundColor: "var(--surface-raised)",
-          }}
-        >
-          <table>
-            <thead>
-              <tr>
-                <th>Client</th>
-                <th>Date &amp; Time</th>
-                <th>Location</th>
-                <th>Duration</th>
-                <th>Status</th>
-                <th style={{ textAlign: "right" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((shoot) => {
-                const rowOpacity =
-                  shoot.status === "cancelled"
-                    ? 0.6
-                    : shoot.status === "completed"
-                      ? 0.7
-                      : 1;
-                return (
-                <tr
-                  key={shoot.id}
-                  className="row-hover"
-                  style={{ opacity: rowOpacity }}
-                >
+        <>
+          <div
+            className="hidden border lg:block"
+            style={{
+              borderColor: "var(--border)",
+              backgroundColor: "var(--surface-raised)",
+            }}
+          >
+            <table>
+              <thead>
+                <tr>
+                  <th>Client</th>
+                  <th>Date &amp; Time</th>
+                  <th>Location</th>
+                  <th>Duration</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: "right" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((shoot) => {
+                  const rowOpacity =
+                    shoot.status === "cancelled"
+                      ? 0.6
+                      : shoot.status === "completed"
+                        ? 0.7
+                        : 1;
+                  return (
+                  <tr
+                    key={shoot.id}
+                    className="row-hover"
+                    style={{ opacity: rowOpacity }}
+                  >
 
-                  <td style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                      }}
-                    >
-                      <KindBadge kind={shoot.kind} />
-                      <span>{shoot.client_name || "—"}</span>
-                    </div>
-                  </td>
-                  <td>{formatDateTime(shoot.scheduled_at)}</td>
-                  <td>
+                    <td style={{ color: "var(--text-primary)", fontWeight: 600 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <KindBadge kind={shoot.kind} />
+                        <span>{shoot.client_name || "—"}</span>
+                      </div>
+                    </td>
+                    <td>{formatDateTime(shoot.scheduled_at)}</td>
+                    <td>
+                      {locationCellText(shoot.location, shoot.meeting_type)}
+                    </td>
+                    <td>
+                      {shoot.duration_hours !== null
+                        ? `${formatHours(Number(shoot.duration_hours))}h`
+                        : "—"}
+                    </td>
+                    <td>
+                      <StatusPill tone={shootStatusTone(shoot.status)}>
+                        {shootStatusLabel(shoot.status)}
+                      </StatusPill>
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      <ShootRowActions shoot={shoot} clients={clients} />
+                    </td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <MobileCardList className="lg:hidden">
+            {rows.map((shoot) => {
+              const rowOpacity =
+                shoot.status === "cancelled"
+                  ? 0.6
+                  : shoot.status === "completed"
+                    ? 0.7
+                    : 1;
+              return (
+                <MobileCard key={shoot.id} style={{ opacity: rowOpacity }}>
+                  <MobileCardHeader
+                    title={shoot.client_name || "—"}
+                    badge={
+                      <StatusPill tone={shootStatusTone(shoot.status)}>
+                        {shootStatusLabel(shoot.status)}
+                      </StatusPill>
+                    }
+                    subtitle={<KindBadge kind={shoot.kind} />}
+                  />
+                  <MobileCardField label="Date & Time">
+                    {formatDateTime(shoot.scheduled_at)}
+                  </MobileCardField>
+                  <MobileCardField label="Location">
                     {locationCellText(shoot.location, shoot.meeting_type)}
-                  </td>
-                  <td>
+                  </MobileCardField>
+                  <MobileCardField label="Duration">
                     {shoot.duration_hours !== null
                       ? `${formatHours(Number(shoot.duration_hours))}h`
                       : "—"}
-                  </td>
-                  <td>
-                    <StatusPill tone={shootStatusTone(shoot.status)}>
-                      {shootStatusLabel(shoot.status)}
-                    </StatusPill>
-                  </td>
-                  <td style={{ textAlign: "right" }}>
+                  </MobileCardField>
+                  <MobileCardActions align="end">
                     <ShootRowActions shoot={shoot} clients={clients} />
-                  </td>
-                </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                  </MobileCardActions>
+                </MobileCard>
+              );
+            })}
+          </MobileCardList>
+        </>
       )}
     </div>
   );

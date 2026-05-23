@@ -27,7 +27,7 @@ export function TabNav({ tabs, initial }: TabNavProps) {
   return (
     <div>
       <div
-        className="flex items-center gap-2 border-b"
+        className="flex flex-nowrap items-center gap-2 overflow-x-auto border-b [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={{ borderColor: "var(--border)" }}
         role="tablist"
       >
@@ -40,6 +40,7 @@ export function TabNav({ tabs, initial }: TabNavProps) {
               role="tab"
               aria-selected={isActive}
               onClick={() => setActive(tab.key)}
+              className="flex-shrink-0 min-h-[44px]"
               style={{
                 padding: "12px 16px",
                 fontSize: 14,

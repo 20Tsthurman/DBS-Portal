@@ -32,7 +32,7 @@ const styles: Record<Position, { bg: string; fg: string }> = {
 
 export function PhaseTracker({ current }: PhaseTrackerProps) {
   return (
-    <div className="flex w-full items-stretch">
+    <div className="flex w-full flex-col items-stretch gap-1 lg:flex-row lg:gap-0">
       {PHASES.map((phase, index) => {
         const pos = positionFor(current, index);
         const style = styles[pos];
@@ -40,7 +40,7 @@ export function PhaseTracker({ current }: PhaseTrackerProps) {
         return (
           <div
             key={phase.key}
-            className="flex flex-1 items-center"
+            className="flex items-center lg:flex-1"
             style={{ minWidth: 0 }}
           >
             <div
@@ -58,6 +58,7 @@ export function PhaseTracker({ current }: PhaseTrackerProps) {
             </div>
             {!isLast && (
               <div
+                className="hidden lg:block"
                 style={{
                   width: 16,
                   height: 1,

@@ -10,6 +10,13 @@ import {
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { StatusPill } from "@/components/ui/StatusPill";
+import {
+  MobileCard,
+  MobileCardActions,
+  MobileCardField,
+  MobileCardHeader,
+  MobileCardList,
+} from "@/components/ui/MobileCard";
 import { formatDate } from "@/app/owner/clients/_lib/format";
 import type { FileRecord } from "@/lib/supabase";
 import {
@@ -293,11 +300,8 @@ export function FilesPanel({ clientId, clientName, files }: FilesPanelProps) {
       }}
     >
       <header
+        className="flex flex-col items-stretch gap-3 px-5 py-4 lg:flex-row lg:items-center lg:justify-between lg:gap-4"
         style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "16px 20px",
           borderBottom: "1px solid var(--border)",
         }}
       >
@@ -330,6 +334,7 @@ export function FilesPanel({ clientId, clientName, files }: FilesPanelProps) {
           <button
             type="button"
             onClick={handleOpenForm}
+            className="w-full min-h-[44px] lg:w-auto lg:min-h-0"
             style={primaryButtonStyle}
           >
             Upload File
@@ -394,6 +399,7 @@ export function FilesPanel({ clientId, clientName, files }: FilesPanelProps) {
                       style={{
                         display: "flex",
                         alignItems: "center",
+                        flexWrap: "wrap",
                         gap: 12,
                         minHeight: 32,
                       }}
@@ -402,7 +408,8 @@ export function FilesPanel({ clientId, clientName, files }: FilesPanelProps) {
                         style={{
                           fontSize: 13,
                           color: "var(--text-body)",
-                          maxWidth: 260,
+                          flex: 1,
+                          minWidth: 0,
                           overflow: "hidden",
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
@@ -541,32 +548,82 @@ export function FilesPanel({ clientId, clientName, files }: FilesPanelProps) {
           No files yet. Upload a file to share it with {clientName}.
         </div>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Filename</th>
-              <th>Type</th>
-              <th>Size</th>
-              <th>Uploaded</th>
-              <th>By</th>
-              <th style={{ textAlign: "right" }} aria-label="Row actions" />
-            </tr>
-          </thead>
-          <tbody>
+        <>
+          <table className="hidden lg:table">
+            <thead>
+              <tr>
+                <th>Filename</th>
+                <th>Type</th>
+                <th>Size</th>
+                <th>Uploaded</th>
+                <th>By</th>
+                <th style={{ textAlign: "right" }} aria-label="Row actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {files.map((file) => (
+                <tr key={file.id}>
+                  <td style={{ color: "var(--text-primary)", fontWeight: 500 }}>
+                    {file.name}
+                  </td>
+                  <td>
+                    <StatusPill tone={fileTypeTone(file.file_type)}>
+                      {fileTypeLabel(file.file_type)}
+                    </StatusPill>
+                  </td>
+                  <td>{formatBytes(file.size_bytes)}</td>
+                  <td>{formatDate(file.uploaded_at)}</td>
+                  <td>{file.uploaded_by}</td>
+                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    <button
+                      type="button"
+                      onClick={() => handleDownload(file.id)}
+                      disabled={downloadingId === file.id}
+                      style={{
+                        ...rowActionStyle,
+                        opacity: downloadingId === file.id ? 0.6 : 1,
+                        cursor:
+                          downloadingId === file.id ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {downloadingId === file.id ? "Opening…" : "Download"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRequestDelete(file.id)}
+                      style={{
+                        ...rowActionStyle,
+                        color: "var(--status-danger)",
+                        marginLeft: 4,
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <MobileCardList className="p-4 lg:hidden">
             {files.map((file) => (
-              <tr key={file.id}>
-                <td style={{ color: "var(--text-primary)", fontWeight: 500 }}>
-                  {file.name}
-                </td>
-                <td>
-                  <StatusPill tone={fileTypeTone(file.file_type)}>
-                    {fileTypeLabel(file.file_type)}
-                  </StatusPill>
-                </td>
-                <td>{formatBytes(file.size_bytes)}</td>
-                <td>{formatDate(file.uploaded_at)}</td>
-                <td>{file.uploaded_by}</td>
-                <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+              <MobileCard key={file.id}>
+                <MobileCardHeader
+                  title={file.name}
+                  badge={
+                    <StatusPill tone={fileTypeTone(file.file_type)}>
+                      {fileTypeLabel(file.file_type)}
+                    </StatusPill>
+                  }
+                />
+                <MobileCardField label="Size">
+                  {formatBytes(file.size_bytes)}
+                </MobileCardField>
+                <MobileCardField label="Uploaded">
+                  {formatDate(file.uploaded_at)}
+                </MobileCardField>
+                <MobileCardField label="By">{file.uploaded_by}</MobileCardField>
+                <MobileCardActions>
                   <button
                     type="button"
                     onClick={() => handleDownload(file.id)}
@@ -586,16 +643,15 @@ export function FilesPanel({ clientId, clientName, files }: FilesPanelProps) {
                     style={{
                       ...rowActionStyle,
                       color: "var(--status-danger)",
-                      marginLeft: 4,
                     }}
                   >
                     Delete
                   </button>
-                </td>
-              </tr>
+                </MobileCardActions>
+              </MobileCard>
             ))}
-          </tbody>
-        </table>
+          </MobileCardList>
+        </>
       )}
 
       {downloadError && (

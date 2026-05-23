@@ -2,6 +2,13 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
+import {
+  MobileCard,
+  MobileCardActions,
+  MobileCardField,
+  MobileCardHeader,
+  MobileCardList,
+} from "@/components/ui/MobileCard";
 import type { TimeLogCategory, TimeLogRecord } from "@/lib/supabase";
 import {
   addTimeLogAction,
@@ -107,56 +114,106 @@ export function TimeTab({ clientId, initialLogs }: TimeTabProps) {
           No time logged yet.
         </p>
       ) : (
-        <div
-          className="border"
-          style={{
-            borderColor: "var(--border)",
-            backgroundColor: "var(--surface-raised)",
-          }}
-        >
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Category</th>
-                <th>Hours</th>
-                <th>Notes</th>
-                <th style={{ textAlign: "right" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {initialLogs.map((log) => (
-                <tr key={log.id}>
-                  <td style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-                    {log.date}
-                  </td>
-                  <td style={{ textTransform: "capitalize" }}>{log.category}</td>
-                  <td>{formatHours(Number(log.hours))}</td>
-                  <td>{log.notes ?? "—"}</td>
-                  <td style={{ textAlign: "right" }}>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(log.id)}
-                      disabled={isPending}
+        <>
+          <div
+            className="hidden border lg:block"
+            style={{
+              borderColor: "var(--border)",
+              backgroundColor: "var(--surface-raised)",
+            }}
+          >
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Category</th>
+                  <th>Hours</th>
+                  <th>Notes</th>
+                  <th style={{ textAlign: "right" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {initialLogs.map((log) => (
+                  <tr key={log.id}>
+                    <td style={{ color: "var(--text-primary)", fontWeight: 600 }}>
+                      {log.date}
+                    </td>
+                    <td style={{ textTransform: "capitalize" }}>{log.category}</td>
+                    <td>{formatHours(Number(log.hours))}</td>
+                    <td>{log.notes ?? "—"}</td>
+                    <td style={{ textAlign: "right" }}>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(log.id)}
+                        disabled={isPending}
+                        style={{
+                          color: "var(--status-danger)",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                          backgroundColor: "transparent",
+                          border: "none",
+                          cursor: isPending ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <MobileCardList className="lg:hidden">
+            {initialLogs.map((log) => (
+              <MobileCard key={log.id}>
+                <MobileCardHeader
+                  title={log.date}
+                  subtitle={
+                    <span
                       style={{
-                        color: "var(--status-danger)",
-                        fontSize: 13,
-                        fontWeight: 600,
+                        fontSize: 11,
+                        letterSpacing: "0.08em",
                         textTransform: "uppercase",
-                        letterSpacing: "0.06em",
-                        backgroundColor: "transparent",
-                        border: "none",
-                        cursor: isPending ? "not-allowed" : "pointer",
+                        color: "var(--text-muted)",
+                        fontWeight: 600,
                       }}
                     >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                      {log.category}
+                    </span>
+                  }
+                />
+                <MobileCardField label="Hours">
+                  {formatHours(Number(log.hours))}
+                </MobileCardField>
+                <MobileCardField label="Notes">
+                  {log.notes ?? "—"}
+                </MobileCardField>
+                <MobileCardActions align="end">
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(log.id)}
+                    disabled={isPending}
+                    style={{
+                      color: "var(--status-danger)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      backgroundColor: "transparent",
+                      border: "none",
+                      cursor: isPending ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Delete
+                  </button>
+                </MobileCardActions>
+              </MobileCard>
+            ))}
+          </MobileCardList>
+        </>
       )}
 
       <div

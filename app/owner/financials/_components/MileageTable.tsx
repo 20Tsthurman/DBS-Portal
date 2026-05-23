@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { MobileTableScroll } from "@/components/ui/MobileTableScroll";
 import { formatCurrency } from "@/app/owner/clients/_lib/format";
 import type { MileageRow } from "../_lib/queries";
 import type { MileageSuggestion } from "../_lib/suggestions";
@@ -148,12 +149,7 @@ export function MileageTable({
 
   return (
     <>
-      <div
-        style={{
-          border: "1px solid var(--border)",
-          backgroundColor: "var(--surface-raised)",
-        }}
-      >
+      <MobileTableScroll minWidth={920}>
         <table>
           <thead>
             <tr>
@@ -425,7 +421,7 @@ export function MileageTable({
             )}
           </tbody>
         </table>
-      </div>
+      </MobileTableScroll>
 
       <ConfirmDialog
         open={confirmRowId !== null}

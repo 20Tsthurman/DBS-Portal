@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DashboardCard } from "@/components/ui/DashboardCard";
+import { MobileTableScroll } from "@/components/ui/MobileTableScroll";
 import { InlineCell } from "@/app/owner/financials/_components/InlineCell";
 import { EXPENSE_CATEGORY_LABELS } from "@/app/owner/financials/_lib/queries";
 import type { CommitResult } from "@/app/owner/financials/_lib/types";
@@ -168,12 +169,7 @@ export function TemplatesTableSection({ initial }: TemplatesTableSectionProps) {
       eyebrow="RECURRING"
       title="Expense Templates"
     >
-      <div
-        style={{
-          border: "1px solid var(--border)",
-          backgroundColor: "var(--surface-raised)",
-        }}
-      >
+      <MobileTableScroll minWidth={780}>
         <table>
           <thead>
             <tr>
@@ -219,7 +215,7 @@ export function TemplatesTableSection({ initial }: TemplatesTableSectionProps) {
             )}
           </tbody>
         </table>
-      </div>
+      </MobileTableScroll>
 
       <p
         style={{
