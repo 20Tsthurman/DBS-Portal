@@ -9,8 +9,11 @@ interface RequestShootCTAProps {
 
 export function RequestShootCTA({ href }: RequestShootCTAProps) {
   return (
-    <div style={bannerStyle}>
-      <div style={iconWrapStyle}>
+    <div
+      className="mb-6 flex flex-col items-start gap-4 px-4 py-6 lg:flex-row lg:flex-wrap lg:items-center lg:gap-5 lg:px-0"
+      style={bannerStyle}
+    >
+      <div className="lg:ml-2" style={iconWrapStyle}>
         <IconCalendarPlus size={32} color="var(--accent)" />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -35,7 +38,11 @@ export function RequestShootCTA({ href }: RequestShootCTAProps) {
           Pick a date and time that works for you.
         </p>
       </div>
-      <Link href={href} className="client-cta-button" style={buttonStyle}>
+      <Link
+        href={href}
+        className="client-cta-button w-full justify-center lg:mr-2 lg:w-auto lg:justify-start"
+        style={buttonStyle}
+      >
         + Request a Shoot
       </Link>
     </div>
@@ -43,12 +50,6 @@ export function RequestShootCTA({ href }: RequestShootCTAProps) {
 }
 
 const bannerStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 20,
-  flexWrap: "wrap",
-  padding: "24px 0",
-  margin: "0 0 24px 0",
   backgroundColor: "rgba(168, 120, 138, 0.04)",
   borderTop: "1px solid var(--border)",
   borderBottom: "1px solid var(--border)",
@@ -60,7 +61,6 @@ const iconWrapStyle: CSSProperties = {
   justifyContent: "center",
   width: 64,
   height: 64,
-  marginLeft: 8,
   backgroundColor: "rgba(168, 120, 138, 0.12)",
   flexShrink: 0,
 };
@@ -69,7 +69,6 @@ const buttonStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   padding: "14px 24px",
-  marginRight: 8,
   backgroundColor: "var(--accent)",
   color: "#FFFFFF",
   fontSize: 14,

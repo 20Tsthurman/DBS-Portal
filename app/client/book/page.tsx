@@ -105,14 +105,7 @@ export default async function ClientBookPage({
 
       <RequestShootCTA href={requestHref} />
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr minmax(0, 320px)",
-          gap: 24,
-          marginBottom: 32,
-        }}
-      >
+      <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_minmax(0,320px)]">
         <div>
           <ClientBookingToolbar monthKey={monthKey} />
           <ClientBookingCalendar
@@ -121,13 +114,7 @@ export default async function ClientBookPage({
             baseHref={baseHref}
           />
         </div>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 16,
-          }}
-        >
+        <div className="flex flex-col gap-4">
           <UpcomingShootCard
             shoots={upcomingShoots}
             baseHref={baseHref}

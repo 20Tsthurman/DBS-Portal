@@ -3,7 +3,7 @@ import { IconBell, IconCheck, IconClock } from "./Icons";
 
 export function BookingFeatureCards() {
   return (
-    <div style={rowStyle}>
+    <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <FeatureCard
         icon={<IconClock size={18} color="var(--accent)" />}
         title="Easy Scheduling"
@@ -40,13 +40,6 @@ function FeatureCard({ icon, title, subline }: FeatureCardProps) {
     </div>
   );
 }
-
-const rowStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(3, 1fr)",
-  gap: 16,
-  marginBottom: 24,
-};
 
 const cardStyle: CSSProperties = {
   display: "flex",

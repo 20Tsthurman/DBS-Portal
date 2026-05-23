@@ -31,16 +31,22 @@ export function ClientBookingToolbar({ monthKey }: ClientBookingToolbarProps) {
       <Link
         href={monthHref(prevKey)}
         aria-label="Previous month"
+        className="w-11 h-11 lg:w-8 lg:h-8"
         style={iconButton}
       >
         ◀
       </Link>
-      <Link href={monthHref(todayMonth)} style={todayPill}>
+      <Link
+        href={monthHref(todayMonth)}
+        className="px-4 py-2.5 lg:px-2.5 lg:py-1"
+        style={todayPill}
+      >
         Today
       </Link>
       <Link
         href={monthHref(nextKey)}
         aria-label="Next month"
+        className="w-11 h-11 lg:w-8 lg:h-8"
         style={iconButton}
       >
         ▶
@@ -65,8 +71,6 @@ const iconButton: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  width: 32,
-  height: 32,
   border: "1px solid var(--border)",
   color: "var(--text-body)",
   fontSize: 12,
@@ -77,7 +81,6 @@ const iconButton: CSSProperties = {
 const todayPill: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
-  padding: "4px 10px",
   border: "1px solid var(--border)",
   color: "var(--text-body)",
   fontSize: 11,
