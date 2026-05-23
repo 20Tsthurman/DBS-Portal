@@ -3,6 +3,7 @@ import { currentUser } from "@clerk/nextjs/server";
 import { type SidebarNavItem } from "@/components/ui/Sidebar";
 import { SidebarWithUnread } from "@/components/ui/SidebarWithUnread";
 import { TopBar } from "@/components/ui/TopBar";
+import { MobileNavProvider } from "@/components/ui/MobileNavProvider";
 
 const ownerNav: SidebarNavItem[] = [
   { label: "Dashboard", href: "/owner/dashboard" },
@@ -32,19 +33,21 @@ export default async function OwnerLayout({
   }
 
   return (
-    <div
-      className="min-h-screen"
-      style={{ backgroundColor: "var(--surface-base)" }}
-    >
-      <SidebarWithUnread
-        eyebrow="Owner Portal"
-        navItems={ownerNav}
-        viewerRole="owner"
-      />
-      <div className="ml-60 flex min-h-screen flex-col">
-        <TopBar navItems={ownerNav} fallbackTitle="Owner Portal" />
-        <main className="flex-1 p-8">{children}</main>
+    <MobileNavProvider>
+      <div
+        className="min-h-screen"
+        style={{ backgroundColor: "var(--surface-base)" }}
+      >
+        <SidebarWithUnread
+          eyebrow="Owner Portal"
+          navItems={ownerNav}
+          viewerRole="owner"
+        />
+        <div className="flex min-h-screen flex-col lg:ml-60">
+          <TopBar navItems={ownerNav} fallbackTitle="Owner Portal" />
+          <main className="flex-1 p-4 lg:p-8">{children}</main>
+        </div>
       </div>
-    </div>
+    </MobileNavProvider>
   );
 }

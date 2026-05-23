@@ -954,6 +954,9 @@ export function FinancialsBoard({
         .fb-row:hover .fb-row-delete { opacity: 1; }
         .fb-row-delete:focus { opacity: 1; outline: none; color: var(--status-danger); }
         .fb-row-delete:hover { color: var(--status-danger); }
+        @media (hover: none) {
+          .fb-row-delete { opacity: 1; }
+        }
 
         /* Suggestion ghost rows. */
         .fb-row-suggestion td {

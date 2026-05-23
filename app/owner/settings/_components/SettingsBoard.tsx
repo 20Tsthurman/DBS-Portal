@@ -60,6 +60,9 @@ export function SettingsBoard({
         .st-row:hover .st-row-delete { opacity: 1; }
         .st-row-delete:focus { opacity: 1; outline: none; color: var(--status-danger); }
         .st-row-delete:hover { color: var(--status-danger); }
+        @media (hover: none) {
+          .st-row-delete { opacity: 1; }
+        }
 
         /*
           InlineCell looks for the financials' class names. Mirror them onto

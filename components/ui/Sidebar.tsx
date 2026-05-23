@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton, useUser } from "@clerk/nextjs";
+import { useMobileNav } from "./MobileNavProvider";
 
 export interface SidebarNavItem {
   label: string;
@@ -18,16 +19,27 @@ interface SidebarProps {
 export function Sidebar({ eyebrow, navItems }: SidebarProps) {
   const pathname = usePathname();
   const { user } = useUser();
+  const { isOpen, close } = useMobileNav();
   const displayName =
     user?.fullName ||
     user?.primaryEmailAddress?.emailAddress ||
     "Signed in";
 
   return (
-    <aside
-      className="fixed left-0 top-0 flex h-screen w-60 flex-col"
-      style={{ backgroundColor: "var(--sidebar-bg)" }}
-    >
+    <>
+      <div
+        onClick={close}
+        aria-hidden="true"
+        className={`fixed inset-0 z-30 bg-black/50 lg:hidden ${
+          isOpen ? "block" : "hidden"
+        }`}
+      />
+      <aside
+        className={`fixed left-0 top-0 z-40 flex h-screen w-60 flex-col transition-transform duration-200 ease-out lg:translate-x-0 ${
+          isOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+        style={{ backgroundColor: "var(--sidebar-bg)" }}
+      >
       <div
         className="px-6 pt-8 pb-10 border-b"
         style={{ borderColor: "rgba(255,255,255,0.08)" }}
@@ -129,6 +141,7 @@ export function Sidebar({ eyebrow, navItems }: SidebarProps) {
           {displayName}
         </span>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }
