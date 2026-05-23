@@ -60,8 +60,11 @@ export function ClientInvoiceRow({ invoice }: ClientInvoiceRowProps) {
   };
 
   return (
-    <li style={rowStyle}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+    <li
+      className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+      style={rowStyle}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={numberStyle}>
             {invoice.invoice_number ?? "(no number)"}
@@ -90,6 +93,7 @@ export function ClientInvoiceRow({ invoice }: ClientInvoiceRowProps) {
           type="button"
           onClick={handlePay}
           disabled={busy !== null}
+          className="w-full min-h-[44px] sm:w-auto sm:min-h-0"
           style={{
             ...primaryButtonStyle,
             opacity: busy !== null ? 0.6 : 1,
@@ -104,6 +108,7 @@ export function ClientInvoiceRow({ invoice }: ClientInvoiceRowProps) {
           type="button"
           onClick={handleDownload}
           disabled={busy !== null}
+          className="w-full min-h-[44px] sm:w-auto sm:min-h-0"
           style={{
             ...secondaryButtonStyle,
             opacity: busy !== null ? 0.6 : 1,
@@ -118,10 +123,6 @@ export function ClientInvoiceRow({ invoice }: ClientInvoiceRowProps) {
 }
 
 const rowStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 16,
   padding: "16px 18px",
   borderBottom: "1px solid var(--border)",
 };

@@ -13,13 +13,9 @@ export default async function ClientMessagesPage() {
         <h1 className="page-title">Messages with Kelsey</h1>
       </header>
       <div
+        className="mx-auto flex flex-col h-[calc(100dvh-180px)] min-h-[420px] lg:h-[calc(100vh-220px)] lg:min-h-[480px]"
         style={{
-          height: "calc(100vh - 220px)",
-          minHeight: 480,
           maxWidth: 800,
-          margin: "0 auto",
-          display: "flex",
-          flexDirection: "column",
           border: "1px solid var(--border)",
         }}
       >

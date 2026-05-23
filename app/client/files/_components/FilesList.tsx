@@ -96,13 +96,10 @@ function Section({ title, files, downloadingId, onDownload }: SectionProps) {
           {files.map((file, idx) => (
             <li
               key={file.id}
+              className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
               style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
                 padding: "14px 18px",
                 borderTop: idx === 0 ? "none" : "1px solid var(--border)",
-                gap: 16,
               }}
             >
               <div style={{ minWidth: 0, flex: 1 }}>
@@ -133,6 +130,7 @@ function Section({ title, files, downloadingId, onDownload }: SectionProps) {
                 type="button"
                 onClick={() => onDownload(file.id)}
                 disabled={downloadingId === file.id}
+                className="w-full min-h-[44px] sm:w-auto sm:min-h-0"
                 style={{
                   ...downloadButtonStyle,
                   opacity: downloadingId === file.id ? 0.6 : 1,

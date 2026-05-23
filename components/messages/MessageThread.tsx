@@ -427,6 +427,7 @@ export function MessageThread({
           onClick={() => void refetch()}
           title="Refresh"
           aria-label="Refresh messages"
+          className="min-h-[44px] min-w-[44px] lg:min-h-0 lg:min-w-0"
           style={refreshButtonStyle}
           onMouseEnter={(e) => {
             e.currentTarget.style.color = "var(--text-primary)";
@@ -518,6 +519,7 @@ export function MessageThread({
             type="button"
             onClick={handleSend}
             disabled={sendDisabled}
+            className="min-h-[44px] lg:min-h-0"
             style={{
               ...sendButtonStyle,
               opacity: sendDisabled ? 0.5 : 1,
@@ -679,6 +681,9 @@ const refreshRowStyle: CSSProperties = {
 };
 
 const refreshButtonStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
   background: "transparent",
   border: "none",
   color: "var(--text-muted)",
@@ -762,6 +767,9 @@ const textareaStyle: CSSProperties = {
 };
 
 const sendButtonStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
   padding: "10px 18px",
   fontSize: 13,
   fontWeight: 600,
