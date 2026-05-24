@@ -22,8 +22,9 @@ interface AgendaViewProps {
   now?: Date;
 }
 
-const LEFT_COL_PX = 96;
-const TIME_COL_PX = 140;
+// Desktop column widths kept for parity at lg+. Mobile uses Tailwind
+// classes that override these via the `lg:!w-[…]` important variant
+// (inline `width:` would otherwise win over plain `w-*` classes).
 
 export function AgendaView({
   startDateKey,
@@ -73,10 +74,9 @@ export function AgendaView({
           >
             {/* Left date block */}
             <div
+              className="w-16 px-2 py-3 lg:w-24 lg:px-3 lg:py-[14px]"
               style={{
-                width: LEFT_COL_PX,
                 flexShrink: 0,
-                padding: "14px 12px",
                 borderRight: "1px solid var(--border)",
                 backgroundColor: isToday
                   ? "rgba(168, 120, 138, 0.12)"
@@ -194,10 +194,9 @@ function AgendaRow({ event, baseHref }: AgendaRowProps) {
       className="agenda-row"
     >
       <div
+        className="w-[100px] px-2.5 lg:w-[140px] lg:px-[14px]"
         style={{
-          width: TIME_COL_PX,
           flexShrink: 0,
-          padding: "0 14px",
           fontSize: 12,
           color: "var(--text-body)",
           fontWeight: 500,

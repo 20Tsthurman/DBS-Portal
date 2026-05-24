@@ -37,12 +37,17 @@ export function AgendaToolbar({ startDateKey, days }: AgendaToolbarProps) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <Link href={hrefForStart(todayKey)} style={pillButton}>
+        <Link
+          href={hrefForStart(todayKey)}
+          className="min-h-[44px] lg:min-h-0"
+          style={pillButton}
+        >
           Today
         </Link>
         <Link
           href={hrefForStart(prevKey)}
           aria-label={`Previous ${days} days`}
+          className="min-h-[44px] min-w-[44px] lg:min-h-0 lg:min-w-0"
           style={iconButton}
         >
           ◀
@@ -50,6 +55,7 @@ export function AgendaToolbar({ startDateKey, days }: AgendaToolbarProps) {
         <Link
           href={hrefForStart(nextKey)}
           aria-label={`Next ${days} days`}
+          className="min-h-[44px] min-w-[44px] lg:min-h-0 lg:min-w-0"
           style={iconButton}
         >
           ▶
@@ -72,6 +78,7 @@ export function AgendaToolbar({ startDateKey, days }: AgendaToolbarProps) {
         <ViewToggle activeStartKey={startDateKey} />
         <Link
           href={`/owner/calendar?view=agenda&start=${startDateKey}&new=time_block`}
+          className="min-h-[44px] lg:min-h-0"
           style={addButton}
         >
           + Add
@@ -122,6 +129,9 @@ function ViewToggle({ activeStartKey }: ViewToggleProps) {
           key={item.label}
           href={item.href}
           aria-pressed={item.active}
+          className={`min-h-[44px] lg:min-h-0 ${
+            item.label === "Week" ? "!hidden lg:!inline-flex" : ""
+          }`}
           style={{
             padding: "8px 16px",
             fontSize: 12,

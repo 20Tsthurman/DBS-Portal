@@ -31,12 +31,17 @@ export function WeekToolbar({ weekStartKey }: WeekToolbarProps) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <Link href={weekHref(todayKey)} style={pillButton}>
+        <Link
+          href={weekHref(todayKey)}
+          className="min-h-[44px] lg:min-h-0"
+          style={pillButton}
+        >
           Today
         </Link>
         <Link
           href={weekHref(prevKey)}
           aria-label="Previous week"
+          className="min-h-[44px] min-w-[44px] lg:min-h-0 lg:min-w-0"
           style={iconButton}
         >
           ◀
@@ -44,6 +49,7 @@ export function WeekToolbar({ weekStartKey }: WeekToolbarProps) {
         <Link
           href={weekHref(nextKey)}
           aria-label="Next week"
+          className="min-h-[44px] min-w-[44px] lg:min-h-0 lg:min-w-0"
           style={iconButton}
         >
           ▶
@@ -66,6 +72,7 @@ export function WeekToolbar({ weekStartKey }: WeekToolbarProps) {
         <ViewToggle activeWeekKey={weekStartKey} />
         <Link
           href={`/owner/calendar?view=week&week=${weekStartKey}&new=time_block`}
+          className="min-h-[44px] lg:min-h-0"
           style={addButton}
         >
           + Add
@@ -105,6 +112,9 @@ function ViewToggle({ activeWeekKey }: ViewToggleProps) {
           key={item.label}
           href={item.href}
           aria-pressed={item.active}
+          className={`min-h-[44px] lg:min-h-0 ${
+            item.label === "Week" ? "!hidden lg:!inline-flex" : ""
+          }`}
           style={{
             padding: "8px 16px",
             fontSize: 12,

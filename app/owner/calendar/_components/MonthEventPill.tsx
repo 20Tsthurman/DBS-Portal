@@ -10,8 +10,6 @@ interface MonthEventPillProps {
   monthKey: string;
 }
 
-const PILL_HEIGHT = 18;
-
 export function MonthEventPill({ event, monthKey }: MonthEventPillProps) {
   const v = visualsForEvent(event);
   const editHref = `/owner/calendar?view=month&month=${monthKey}&date=${event.dateKey}&edit=${event.id}`;
@@ -26,10 +24,6 @@ export function MonthEventPill({ event, monthKey }: MonthEventPillProps) {
   const pillStyle: CSSProperties = {
     position: "relative",
     display: "block",
-    height: PILL_HEIGHT,
-    lineHeight: `${PILL_HEIGHT}px`,
-    paddingLeft: 6,
-    paddingRight: 4,
     borderLeft: v.borderLeft,
     backgroundColor: v.background,
     backgroundImage:
@@ -37,7 +31,6 @@ export function MonthEventPill({ event, monthKey }: MonthEventPillProps) {
         ? stripeBackgroundImage(v.stripeColor)
         : undefined,
     color: v.textColor,
-    fontSize: 11,
     fontWeight: 500,
     whiteSpace: "nowrap",
     overflow: "hidden",
@@ -52,7 +45,12 @@ export function MonthEventPill({ event, monthKey }: MonthEventPillProps) {
   const tooltip = pending ? `${startLabel} ${title} (pending)` : `${startLabel} ${title}`;
 
   return (
-    <Link href={editHref} title={tooltip} style={pillStyle}>
+    <Link
+      href={editHref}
+      title={tooltip}
+      className="h-4 leading-4 pl-1 pr-0.5 text-[10px] lg:h-[18px] lg:leading-[18px] lg:pl-1.5 lg:pr-1 lg:text-[11px]"
+      style={pillStyle}
+    >
       <span style={{ opacity: 0.75, marginRight: 4 }}>{startLabel}</span>
       <span>{title}</span>
       {pending && (

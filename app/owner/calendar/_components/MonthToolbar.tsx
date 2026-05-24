@@ -32,12 +32,17 @@ export function MonthToolbar({ monthKey }: MonthToolbarProps) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <Link href={monthHref(todayMonth)} style={pillButton}>
+        <Link
+          href={monthHref(todayMonth)}
+          className="min-h-[44px] lg:min-h-0"
+          style={pillButton}
+        >
           Today
         </Link>
         <Link
           href={monthHref(prevKey)}
           aria-label="Previous month"
+          className="min-h-[44px] min-w-[44px] lg:min-h-0 lg:min-w-0"
           style={iconButton}
         >
           ◀
@@ -45,6 +50,7 @@ export function MonthToolbar({ monthKey }: MonthToolbarProps) {
         <Link
           href={monthHref(nextKey)}
           aria-label="Next month"
+          className="min-h-[44px] min-w-[44px] lg:min-h-0 lg:min-w-0"
           style={iconButton}
         >
           ▶
@@ -67,6 +73,7 @@ export function MonthToolbar({ monthKey }: MonthToolbarProps) {
         <ViewToggle activeMonthKey={monthKey} />
         <Link
           href={`/owner/calendar?view=month&month=${monthKey}&new=time_block`}
+          className="min-h-[44px] lg:min-h-0"
           style={addButton}
         >
           + Add
@@ -117,6 +124,9 @@ function ViewToggle({ activeMonthKey }: ViewToggleProps) {
           key={item.label}
           href={item.href}
           aria-pressed={item.active}
+          className={`min-h-[44px] lg:min-h-0 ${
+            item.label === "Week" ? "!hidden lg:!inline-flex" : ""
+          }`}
           style={{
             padding: "8px 16px",
             fontSize: 12,

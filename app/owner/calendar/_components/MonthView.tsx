@@ -42,9 +42,8 @@ export function MonthView({ monthKey, events, now = new Date() }: MonthViewProps
     >
       {/* Weekday header row */}
       <div
+        className="grid grid-cols-7"
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(7, 1fr)",
           borderBottom: "1px solid var(--border)",
           backgroundColor: "var(--surface-base)",
         }}
@@ -52,10 +51,9 @@ export function MonthView({ monthKey, events, now = new Date() }: MonthViewProps
         {WEEKDAY_LABELS.map((label, i) => (
           <div
             key={label}
+            className="px-1.5 py-1.5 text-[9px] lg:px-3 lg:py-2.5 lg:text-[10px]"
             style={{
-              padding: "10px 12px",
               borderRight: i < 6 ? "1px solid var(--border)" : undefined,
-              fontSize: 10,
               letterSpacing: "0.08em",
               textTransform: "uppercase",
               color: "var(--text-muted)",
@@ -68,13 +66,7 @@ export function MonthView({ monthKey, events, now = new Date() }: MonthViewProps
       </div>
 
       {/* 6 rows × 7 columns */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(7, 1fr)",
-          gridAutoRows: `minmax(${CELL_MIN_HEIGHT}px, auto)`,
-        }}
-      >
+      <div className="grid grid-cols-7 auto-rows-[minmax(64px,auto)] lg:auto-rows-[minmax(96px,auto)]">
         {grid.map((dk, idx) => {
           const inMonth = dateKeyInMonth(dk, monthKey);
           const isToday = dk === todayKey;
@@ -89,15 +81,14 @@ export function MonthView({ monthKey, events, now = new Date() }: MonthViewProps
           return (
             <div
               key={dk}
+              className="p-0.5 lg:p-1"
               style={{
                 position: "relative",
-                minHeight: CELL_MIN_HEIGHT,
                 borderRight: col < 6 ? "1px solid var(--border)" : undefined,
                 borderBottom: row < 5 ? "1px solid var(--border)" : undefined,
                 backgroundColor: inMonth ? "var(--surface-base)" : "var(--surface-raised)",
                 outline: isToday ? "2px solid var(--accent)" : undefined,
                 outlineOffset: isToday ? "-2px" : undefined,
-                padding: 4,
                 display: "flex",
                 flexDirection: "column",
                 gap: 2,
@@ -116,22 +107,27 @@ export function MonthView({ monthKey, events, now = new Date() }: MonthViewProps
               />
 
               <div
+                className="px-1 py-0.5"
                 style={{
                   position: "relative",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "flex-start",
-                  padding: "2px 4px",
                   zIndex: 2,
                   pointerEvents: "none",
                 }}
               >
                 {isToday ? (
-                  <span style={todayMarkerStyle}>{dayNum}</span>
+                  <span
+                    className="inline-flex items-center justify-center w-5 h-5 text-[11px] lg:w-6 lg:h-6 lg:text-xs"
+                    style={todayMarkerStyle}
+                  >
+                    {dayNum}
+                  </span>
                 ) : (
                   <span
+                    className="text-[11px] lg:text-xs"
                     style={{
-                      fontSize: 12,
                       fontWeight: 600,
                       color: inMonth ? "var(--text-primary)" : "var(--text-muted)",
                       opacity: inMonth ? 1 : 0.6,
@@ -183,14 +179,8 @@ export function MonthView({ monthKey, events, now = new Date() }: MonthViewProps
 }
 
 const todayMarkerStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: 24,
-  height: 24,
   backgroundColor: "var(--accent)",
   color: "#FFFFFF",
-  fontSize: 12,
   fontWeight: 700,
   // globals.css enforces no border-radius; matching the square treatment in WeekView.
 };

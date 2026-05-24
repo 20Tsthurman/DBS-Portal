@@ -24,6 +24,7 @@ import { DayPanel } from "./_components/DayPanel";
 import { TimeBlockFormPanel } from "./_components/TimeBlockFormPanel";
 import { EditShootPanel } from "./_components/EditShootPanel";
 import { PendingRequestsBar } from "./_components/PendingRequestsBar";
+import { WeekMobileFallback } from "./_components/WeekMobileFallback";
 
 export const dynamic = "force-dynamic";
 
@@ -182,8 +183,13 @@ async function renderWeekView(
         <h1 className="page-title">Calendar</h1>
       </header>
       <PendingRequestsBar shoots={pendingShoots} editHrefFor={editHrefFor} />
-      <WeekToolbar weekStartKey={weekStartKey} />
-      <WeekView weekStartKey={weekStartKey} events={events} />
+      <WeekMobileFallback
+        fallbackHref={`/owner/calendar?view=month&month=${weekStartKey.slice(0, 7)}`}
+      />
+      <div className="hidden lg:block">
+        <WeekToolbar weekStartKey={weekStartKey} />
+        <WeekView weekStartKey={weekStartKey} events={events} />
+      </div>
 
       {dateKey && (
         <DayPanel
