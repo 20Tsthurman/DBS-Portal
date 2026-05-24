@@ -29,27 +29,31 @@ export function MessagesInbox({
   const searchParams = useSearchParams();
 
   const [clients, setClients] = useState<InboxClient[]>(initialClients);
-  const [selectedClientId, setSelectedClientId] = useState<string | null>(
-    initialSelectedId
-  );
+  // selectedClientId is derived from the URL — URL is the single source of
+  // truth. Keeping a separate `useState` plus a URL→state sync effect raced
+  // with router.push: setting state to null and pushing the new URL didn't
+  // happen atomically, so the sync effect would re-read the still-stale URL
+  // and revert state back to the old clientId, forcing the user to tap Back
+  // twice. Deriving from URL eliminates the race; browser back/forward
+  // automatically resyncs for free.
+  const selectedClientId = searchParams.get("clientId");
 
   // Auto-select most-recent thread on first mount when no clientId in URL.
+  // On mobile the list and thread share the same screen — auto-selecting would
+  // skip the list entirely, so the auto-select only fires at lg+.
   useEffect(() => {
-    if (selectedClientId === null && initialClients.length > 0) {
-      const firstId = initialClients[0].id;
-      setSelectedClientId(firstId);
-      router.replace(`/owner/messages?clientId=${firstId}`, { scroll: false });
+    if (selectedClientId !== null) return;
+    if (initialClients.length === 0) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.matchMedia("(min-width: 1024px)").matches
+    ) {
+      return;
     }
+    const firstId = initialClients[0].id;
+    router.replace(`/owner/messages?clientId=${firstId}`, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // URL → state sync (back/forward button).
-  useEffect(() => {
-    const urlId = searchParams.get("clientId");
-    if (urlId && urlId !== selectedClientId) {
-      setSelectedClientId(urlId);
-    }
-  }, [searchParams, selectedClientId]);
 
   const refetch = useCallback(async (signal: AbortSignal) => {
     try {
@@ -82,7 +86,6 @@ export function MessagesInbox({
 
   const handleSelect = useCallback(
     (id: string) => {
-      setSelectedClientId(id);
       setClients((prev) =>
         prev.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c))
       );
@@ -91,10 +94,21 @@ export function MessagesInbox({
     [router]
   );
 
+  const handleBackToList = useCallback(() => {
+    router.push(`/owner/messages`, { scroll: false });
+  }, [router]);
+
   const sortedClients = useMemo(() => clients, [clients]);
+  const isThreadActive = selectedClientId !== null;
 
   return (
-    <div style={containerStyle}>
+    <div
+      className="flex h-[calc(100dvh-180px)] min-h-[420px] lg:h-[calc(100vh-220px)] lg:min-h-[480px]"
+      style={{
+        border: "1px solid var(--border)",
+        backgroundColor: "var(--surface-base)",
+      }}
+    >
       <style>{`
         .inbox-row {
           background-color: transparent;
@@ -109,7 +123,15 @@ export function MessagesInbox({
           border-left-color: var(--accent);
         }
       `}</style>
-      <div style={inboxColumnStyle}>
+      <div
+        className={`${
+          isThreadActive ? "hidden lg:block" : "block"
+        } w-full flex-shrink-0 overflow-y-auto lg:w-[320px]`}
+        style={{
+          borderRight: "1px solid var(--border)",
+          backgroundColor: "var(--surface-base)",
+        }}
+      >
         {sortedClients.length === 0 ? (
           <div style={inboxEmptyStyle}>No active clients yet.</div>
         ) : (
@@ -124,9 +146,39 @@ export function MessagesInbox({
         )}
       </div>
 
-      <div style={threadColumnStyle}>
+      <div
+        className={`${
+          isThreadActive ? "flex" : "hidden lg:flex"
+        } min-w-0 min-h-0 flex-1 flex-col`}
+        style={{ backgroundColor: "var(--surface-base)" }}
+      >
+        {isThreadActive && (
+          <button
+            type="button"
+            onClick={handleBackToList}
+            className="flex w-full items-center min-h-[44px] px-4 lg:hidden"
+            style={{
+              borderBottom: "1px solid var(--border)",
+              backgroundColor: "var(--surface-raised)",
+              fontSize: 13,
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: "var(--text-body)",
+              border: "none",
+              borderBottomWidth: "1px",
+              borderBottomStyle: "solid",
+              borderBottomColor: "var(--border)",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              textAlign: "left",
+            }}
+          >
+            ← Back to conversations
+          </button>
+        )}
         {selectedClientId ? (
-          <div style={threadInnerStyle}>
+          <div className="flex flex-1 min-h-0 flex-col">
             <MessageThread
               key={selectedClientId}
               clientId={selectedClientId}
@@ -188,43 +240,11 @@ function InboxRow({
   );
 }
 
-const containerStyle: CSSProperties = {
-  display: "flex",
-  height: "calc(100vh - 220px)",
-  minHeight: 480,
-  border: "1px solid var(--border)",
-  backgroundColor: "var(--surface-base)",
-};
-
-const inboxColumnStyle: CSSProperties = {
-  width: 320,
-  flexShrink: 0,
-  borderRight: "1px solid var(--border)",
-  overflowY: "auto",
-  backgroundColor: "var(--surface-base)",
-};
-
 const inboxEmptyStyle: CSSProperties = {
   padding: "32px 16px",
   textAlign: "center",
   color: "var(--text-muted)",
   fontSize: 13,
-};
-
-const threadColumnStyle: CSSProperties = {
-  flex: 1,
-  display: "flex",
-  flexDirection: "column",
-  minWidth: 0,
-  minHeight: 0,
-  backgroundColor: "var(--surface-base)",
-};
-
-const threadInnerStyle: CSSProperties = {
-  flex: 1,
-  display: "flex",
-  flexDirection: "column",
-  minHeight: 0,
 };
 
 const threadEmptyStyle: CSSProperties = {

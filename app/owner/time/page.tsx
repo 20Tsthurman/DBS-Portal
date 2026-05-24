@@ -98,13 +98,7 @@ export default async function OwnerTimePage() {
                 gap: 24,
               }}
             >
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                  gap: 16,
-                }}
-              >
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <StatCard
                   label="Total hours this week"
                   value={formatTotalHoursLabel(weekly.totalHours)}
@@ -157,13 +151,7 @@ export default async function OwnerTimePage() {
                 gap: 24,
               }}
             >
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                  gap: 16,
-                }}
-              >
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <StatCard
                   label="Total hours this month"
                   value={formatTotalHoursLabel(monthly.totalHours)}
