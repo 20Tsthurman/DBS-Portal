@@ -25,7 +25,7 @@ export default async function SignUpPage({ searchParams }: SignUpPageProps) {
 
   return (
     <main
-      className="flex min-h-screen items-center justify-center px-6 py-16"
+      className="flex min-h-dvh items-center justify-center px-6 py-8"
       style={{ backgroundColor: "var(--sidebar-bg)" }}
     >
       <div
