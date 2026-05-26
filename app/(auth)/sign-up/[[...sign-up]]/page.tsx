@@ -85,7 +85,8 @@ export default async function SignUpPage({ searchParams }: SignUpPageProps) {
             },
             elements: {
               rootBox: "w-full",
-              card: "bg-transparent border-0 p-0 shadow-none",
+              cardBox: "w-full shadow-none border-0",
+              card: "bg-transparent border-0 p-0 shadow-none w-full",
               header: "hidden",
               footer: "hidden",
               formButtonPrimary:
