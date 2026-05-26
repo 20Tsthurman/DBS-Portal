@@ -19,3 +19,10 @@ export type UpdateRecurringExpenseTemplateInput = Partial<
 > & {
   active?: boolean;
 };
+
+export interface UpdatePackageInput {
+  packageId: string;
+  name?: string;
+  monthlyPrice?: number;
+  monthlyHours?: number;
+}

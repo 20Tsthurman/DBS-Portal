@@ -2,24 +2,29 @@
 
 import type {
   AppSettingsRecord,
+  PackageRecord,
   RecurringExpenseTemplateRecord,
 } from "@/lib/supabase";
 import { AppSettingsSection } from "./AppSettingsSection";
+import { PackagesTableSection } from "./PackagesTableSection";
 import { TemplatesTableSection } from "./TemplatesTableSection";
 
 interface SettingsBoardProps {
   initialSettings: AppSettingsRecord;
   initialTemplates: RecurringExpenseTemplateRecord[];
+  initialPackages: PackageRecord[];
 }
 
 export function SettingsBoard({
   initialSettings,
   initialTemplates,
+  initialPackages,
 }: SettingsBoardProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       <AppSettingsSection initial={initialSettings} />
       <TemplatesTableSection initial={initialTemplates} />
+      <PackagesTableSection initial={initialPackages} />
 
       {/*
         Cell + row styles shared with the financials board. Duplicated rather

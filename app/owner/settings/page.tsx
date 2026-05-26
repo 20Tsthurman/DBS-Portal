@@ -13,14 +13,19 @@
  */
 
 import { SettingsBoard } from "./_components/SettingsBoard";
-import { fetchAllTemplates, fetchAppSettings } from "./_lib/queries";
+import {
+  fetchAllTemplates,
+  fetchAppSettings,
+  fetchPackages,
+} from "./_lib/queries";
 
 export const dynamic = "force-dynamic";
 
 export default async function OwnerSettingsPage() {
-  const [settings, templates] = await Promise.all([
+  const [settings, templates, packages] = await Promise.all([
     fetchAppSettings(),
     fetchAllTemplates(),
+    fetchPackages(),
   ]);
 
   return (
@@ -40,6 +45,7 @@ export default async function OwnerSettingsPage() {
       <SettingsBoard
         initialSettings={settings}
         initialTemplates={templates}
+        initialPackages={packages}
       />
     </div>
   );

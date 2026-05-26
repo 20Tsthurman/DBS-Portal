@@ -9,6 +9,12 @@ import {
 // boundaries at every call site.
 export { fetchAppSettings } from "@/app/owner/financials/_lib/queries";
 
+// `fetchActivePackages` lives in the clients module (it powers the package
+// picker on the client form). Re-export here as `fetchPackages` so the
+// settings page reads packages through a feature-local name. The underlying
+// query is the same: select * ordered by monthly_price ascending.
+export { fetchActivePackages as fetchPackages } from "@/app/owner/clients/_lib/queries";
+
 /**
  * Admin-surface read: every recurring expense template, active first, alpha
  * within. Unlike the financials suggestion query (which filters

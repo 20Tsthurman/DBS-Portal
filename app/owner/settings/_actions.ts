@@ -11,11 +11,13 @@ import {
   getSupabaseServiceClient,
   type AppSettingsRecord,
   type ExpenseCategory,
+  type PackageRecord,
   type RecurringExpenseTemplateRecord,
 } from "@/lib/supabase";
 import type {
   CreateRecurringExpenseTemplateInput,
   UpdateAppSettingsInput,
+  UpdatePackageInput,
   UpdateRecurringExpenseTemplateInput,
 } from "./_lib/types";
 
@@ -30,6 +32,17 @@ const EXPENSE_CATEGORIES: ExpenseCategory[] = [
 
 function revalidateBoth() {
   revalidatePath("/owner/settings");
+  revalidatePath("/owner/financials");
+}
+
+// Packages drive the clients list (Monthly Value), the dashboard widgets
+// (Monthly value + Budget Status), and the retainer-suggestion amount on
+// /owner/financials. A change to monthly_price or monthly_hours needs all
+// four surfaces re-fetched.
+function revalidatePackageReaders() {
+  revalidatePath("/owner/settings");
+  revalidatePath("/owner/clients");
+  revalidatePath("/owner/dashboard");
   revalidatePath("/owner/financials");
 }
 
@@ -271,4 +284,71 @@ export async function deleteRecurringExpenseTemplateAction(
   if (error) return { ok: false, error: error.message };
   revalidateBoth();
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// updatePackageAction
+//
+// Partial-update for a packages row from the Settings table. Only fields
+// explicitly provided are written. Tier and deliverables_list are NOT
+// editable here — tier is the stable identity (and its CHECK enum is
+// fixed), deliverables editing is deferred to a future change.
+//
+// Validation lives here rather than as a CHECK constraint so the user sees
+// a readable message instead of a Postgres constraint-violation string.
+// Accepts >= 0 for hours and price (the inline cell itself enforces > 0 in
+// its parser, so 0 isn't reachable from the UI; the action stays lenient).
+// ---------------------------------------------------------------------------
+export async function updatePackageAction(
+  input: UpdatePackageInput
+): Promise<ActionResult<PackageRecord>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  if (!input.packageId) return { ok: false, error: "Missing package id" };
+
+  const patch: Record<string, unknown> = {};
+
+  if (input.name !== undefined) {
+    const trimmed = typeof input.name === "string" ? input.name.trim() : "";
+    if (!trimmed) return { ok: false, error: "Name cannot be empty" };
+    patch.name = trimmed;
+  }
+  if (input.monthlyPrice !== undefined) {
+    if (
+      typeof input.monthlyPrice !== "number" ||
+      !Number.isFinite(input.monthlyPrice) ||
+      input.monthlyPrice < 0
+    ) {
+      return { ok: false, error: "Monthly price must be 0 or greater" };
+    }
+    patch.monthly_price = input.monthlyPrice;
+  }
+  if (input.monthlyHours !== undefined) {
+    if (
+      typeof input.monthlyHours !== "number" ||
+      !Number.isFinite(input.monthlyHours) ||
+      input.monthlyHours < 0
+    ) {
+      return { ok: false, error: "Monthly hours must be 0 or greater" };
+    }
+    patch.monthly_hours = input.monthlyHours;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return { ok: false, error: "Nothing to update" };
+  }
+
+  const supabase = getSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from("packages")
+    .update(patch)
+    .eq("id", input.packageId)
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    return { ok: false, error: error?.message ?? "Failed to update package" };
+  }
+  revalidatePackageReaders();
+  return { ok: true, data: data as PackageRecord };
 }
