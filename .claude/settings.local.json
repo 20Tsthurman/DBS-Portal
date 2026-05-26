@@ -45,7 +45,9 @@
       "Bash(node *)",
       "Bash(git mv *)",
       "Bash(npx tailwindcss *)",
-      "Bash(git log *)"
+      "Bash(git log *)",
+      "Bash(ls C:dbs-portalapp C:dbs-portallib 2 *)",
+      "Bash(npm audit *)"
     ]
   }
 }

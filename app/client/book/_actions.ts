@@ -212,7 +212,8 @@ export async function cancelMyShootRequest(
   const { error: updateError } = await supabase
     .from("shoots")
     .update({ status: "cancelled" })
-    .eq("id", shootId);
+    .eq("id", shootId)
+    .eq("client_id", clientId);
 
   if (updateError) return { ok: false, error: updateError.message };
 

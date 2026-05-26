@@ -110,11 +110,11 @@ export async function POST(request: Request) {
   revalidatePath("/client/messages");
 
   if (!notifyResult.sent && notifyResult.error) {
+    console.error(
+      `[messages] notification failed for message ${inserted.id}: ${notifyResult.error}`
+    );
     return NextResponse.json(
-      {
-        message: inserted,
-        warning: `Notification failed: ${notifyResult.error}`,
-      },
+      { message: inserted, notified: false },
       { status: 207 }
     );
   }

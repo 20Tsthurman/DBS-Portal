@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth, clerkClient, currentUser } from "@clerk/nextjs/server";
+import { clerkClient } from "@clerk/nextjs/server";
 import { Resend } from "resend";
 import {
   getSupabaseServiceClient,
@@ -8,6 +8,7 @@ import {
   type ClientType,
 } from "@/lib/supabase";
 import { escapeHtml } from "@/lib/escapeHtml";
+import { requireOwnerApi } from "@/lib/auth";
 
 interface InviteBody {
   name?: unknown;
@@ -105,6 +106,11 @@ function buildInviteEmailHtml(opts: InviteEmailOpts): string {
 function deriveOrigin(request: Request): string {
   const explicit = process.env.NEXT_PUBLIC_APP_URL;
   if (explicit) return explicit.replace(/\/+$/, "");
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "NEXT_PUBLIC_APP_URL is required in production. Refusing to derive origin from request.url (Host header is spoofable)."
+    );
+  }
   return new URL(request.url).origin;
 }
 
@@ -146,15 +152,8 @@ function logClerkErrorDetails(err: unknown) {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function POST(request: Request) {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const user = await currentUser();
-  if (user?.publicMetadata?.role !== "owner") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const authError = await requireOwnerApi();
+  if (authError) return authError;
 
   let body: InviteBody;
   try {
