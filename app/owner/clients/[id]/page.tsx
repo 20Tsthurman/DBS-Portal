@@ -184,6 +184,7 @@ export default async function OwnerClientDetailPage({ params }: PageProps) {
               type: client.type,
               status: client.status,
               packageId: project?.package_id ?? null,
+              invitedAt: client.invited_at,
             }}
           />
         </div>

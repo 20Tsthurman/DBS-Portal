@@ -25,6 +25,12 @@ export interface ClientInitialValues {
   type: ClientType;
   status: ClientStatus;
   packageId: string | null;
+  /**
+   * NULL = draft client (never invited). When NULL, the edit form allows
+   * email changes; when set, the email field is locked because the Clerk
+   * user's email is the source of truth for sign-in.
+   */
+  invitedAt?: string | null;
 }
 
 interface ClientFormPanelProps {
@@ -41,6 +47,7 @@ const emptyValues: ClientInitialValues = {
   type: "brand",
   status: "onboarding",
   packageId: null,
+  invitedAt: null,
 };
 
 type SubmitMode = "draft" | "invite" | "edit";
@@ -198,13 +205,28 @@ export function ClientFormPanel({
               }
               onFocus={applyFocus}
               onBlur={clearFocus}
-              disabled={mode === "edit"}
+              disabled={mode === "edit" && values.invitedAt != null}
               style={{
                 ...fieldStyle,
-                opacity: mode === "edit" ? 0.6 : 1,
-                cursor: mode === "edit" ? "not-allowed" : "text",
+                opacity:
+                  mode === "edit" && values.invitedAt != null ? 0.6 : 1,
+                cursor:
+                  mode === "edit" && values.invitedAt != null
+                    ? "not-allowed"
+                    : "text",
               }}
             />
+            {mode === "edit" && values.invitedAt != null && (
+              <p
+                style={{
+                  marginTop: 6,
+                  fontSize: 12,
+                  color: "var(--text-muted)",
+                }}
+              >
+                Email is locked once an invite has been sent.
+              </p>
+            )}
           </div>
 
           <div>
