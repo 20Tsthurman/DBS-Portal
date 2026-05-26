@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import {
   getSupabaseServiceClient,
   type ClientRecord,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/supabase";
 import { requireOwner } from "@/lib/auth";
 import { tryBanClerkUser } from "@/lib/clerk";
+import { resolveBaseUrl } from "@/lib/baseUrl";
 import type { ActionResult } from "@/lib/actions";
 
 const VALID_CATEGORIES: TimeLogCategory[] = [
@@ -248,6 +250,100 @@ export async function createDraftClientAction(
 
   revalidatePath("/owner/clients");
   return { ok: true, data: client };
+}
+
+// ---------------------------------------------------------------------------
+// sendInviteAction
+//
+// Triggers an invite for an existing clients row from the profile page. Used
+// by the "Send Invite" / "Resend Invite" button to invite a draft client or
+// re-invite one whose link expired.
+//
+// Delegates to POST /api/invite (which exists for Add Client form). That route's
+// "reuse existing unlinked row by email" branch (app/api/invite/route.ts:299-303)
+// finds this exact row by email and handles the Clerk + Resend + invited_at
+// stamping path identically to a fresh invite. Forwards the owner's session
+// cookies so the route's auth() picks up Kelsey's identity server-side.
+//
+// FOLLOW-UP (not this PR): the Clerk-create + Resend-send + invited_at-stamp
+// block in /api/invite (~lines 443-575) is a clean candidate to extract to a
+// shared `lib/inviteClient.ts` so both this action and the route call into it
+// without the HTTP round-trip. ~200 lines; deserves its own change.
+// ---------------------------------------------------------------------------
+export interface SendInviteInput {
+  clientId: string;
+}
+
+export async function sendInviteAction(
+  input: SendInviteInput
+): Promise<ActionResult> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  if (!input.clientId) return { ok: false, error: "Missing client id" };
+
+  const supabase = getSupabaseServiceClient();
+  const { data: clientRow, error: lookupError } = await supabase
+    .from("clients")
+    .select("*")
+    .eq("id", input.clientId)
+    .maybeSingle();
+  if (lookupError) return { ok: false, error: lookupError.message };
+  const client = clientRow as ClientRecord | null;
+  if (!client) return { ok: false, error: "Client not found" };
+
+  if (client.type === "bride") {
+    return { ok: false, error: "Bride portal is not yet available." };
+  }
+  if (client.status === "inactive") {
+    return { ok: false, error: "Cannot invite an inactive client." };
+  }
+
+  // Recover packageId from the existing project so /api/invite's package-sync
+  // branch leaves the row in a consistent state (no-op since the package_id
+  // already matches).
+  const { data: projectRow } = await supabase
+    .from("projects")
+    .select("package_id")
+    .eq("client_id", client.id)
+    .maybeSingle();
+  const packageId =
+    (projectRow as { package_id: string | null } | null)?.package_id ?? null;
+
+  const cookieStore = await cookies();
+  const cookieHeader = cookieStore
+    .getAll()
+    .map((c) => `${c.name}=${c.value}`)
+    .join("; ");
+
+  const inviteRes = await fetch(`${resolveBaseUrl()}/api/invite`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookieHeader,
+    },
+    body: JSON.stringify({
+      name: client.name,
+      email: client.email,
+      type: client.type,
+      packageId,
+    }),
+    cache: "no-store",
+  });
+
+  const inviteData = (await inviteRes.json().catch(() => ({}))) as {
+    error?: string;
+    warning?: string;
+  };
+
+  // 207 = invite succeeded but Resend email failed; treat as success for the
+  // button (the route already stamped invited_at and the Clerk URL exists).
+  if (!inviteRes.ok && inviteRes.status !== 207) {
+    return { ok: false, error: inviteData.error ?? "Could not send invite." };
+  }
+
+  revalidatePath(`/owner/clients/${client.id}`);
+  revalidatePath("/owner/clients");
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------

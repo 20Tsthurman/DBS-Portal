@@ -11,6 +11,7 @@ import {
 import { TypePill } from "../_components/TypePill";
 import { DeactivateClientButton } from "./_components/DeactivateClientButton";
 import { EditClientButton } from "./_components/EditClientButton";
+import { SendInviteButton } from "./_components/SendInviteButton";
 import { OverviewTab } from "./_components/OverviewTab";
 import { TabNav, type TabDefinition } from "./_components/TabNav";
 import { TimeTab } from "./_components/TimeTab";
@@ -163,6 +164,12 @@ export default async function OwnerClientDetailPage({ params }: PageProps) {
           )}
         </div>
         <div className="flex items-start gap-2">
+          <SendInviteButton
+            clientId={client.id}
+            clientName={client.name}
+            clientType={client.type}
+            invitedAt={client.invited_at}
+          />
           <DeactivateClientButton
             clientId={client.id}
             clientName={client.name}

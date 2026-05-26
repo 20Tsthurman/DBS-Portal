@@ -30,6 +30,12 @@ export async function maybeSendNewMessageEmail(
   const { clientId, senderRole, clientRecord } = params;
   const recipientRole: SenderRole = senderRole === "owner" ? "client" : "owner";
 
+  // Skip outbound email if the recipient is a client who hasn't been invited yet
+  // (draft client, no portal access). client→owner direction is vacuous for drafts.
+  if (recipientRole === "client" && !clientRecord.invited_at) {
+    return { sent: false, suppressed: true };
+  }
+
   let recipientName: string;
   let recipientEmail: string;
   let senderName: string;

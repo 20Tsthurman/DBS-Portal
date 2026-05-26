@@ -81,6 +81,7 @@ async function runReminders(): Promise<ReminderSummary> {
     .from("clients")
     .select("*")
     .neq("status", "inactive")
+    .not("invited_at", "is", null)
     .in("id", Array.from(candidateIds));
   if (clientsError) {
     throw new Error(`Failed to fetch clients: ${clientsError.message}`);

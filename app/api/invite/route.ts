@@ -553,6 +553,22 @@ export async function POST(request: Request) {
     );
   }
 
+  // Clerk invitation creation succeeded (every catch path returns early, so
+  // reaching here implies success). Stamp invited_at for BOTH the new-row and
+  // reused-row paths in one place. Intentionally outside the try/catch so a
+  // stamp DB error doesn't get caught and trigger the new-row rollback above.
+  const { error: stampError } = await supabase
+    .from("clients")
+    .update({ invited_at: new Date().toISOString() })
+    .eq("id", client.id);
+  if (stampError) {
+    console.error(
+      `[invite] failed to stamp invited_at on ${client.id}:`,
+      stampError.message
+    );
+    // don't fail the request — the invite itself succeeded
+  }
+
   const resendKey = process.env.RESEND_API_KEY;
   if (resendKey) {
     const resend = new Resend(resendKey);
