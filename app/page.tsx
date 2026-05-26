@@ -19,5 +19,6 @@ export default async function RootPage() {
     redirect("/client/dashboard");
   }
 
-  redirect("/sign-in");
+  // Roleless authed user → /finalizing handles the rejection. Sending to /sign-in would loop with <SignIn />'s auto-redirect.
+  redirect("/finalizing");
 }

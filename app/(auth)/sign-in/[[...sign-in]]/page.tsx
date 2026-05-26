@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+import { auth } from "@clerk/nextjs/server";
 import { SignIn } from "@clerk/nextjs";
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -15,6 +17,12 @@ interface SignInPageProps {
 }
 
 export default async function SignInPage({ searchParams }: SignInPageProps) {
+  // Bounce signed-in users so <SignIn /> doesn't mount and auto-redirect; / routes them by role.
+  const { userId } = await auth();
+  if (userId) {
+    redirect("/");
+  }
+
   const params = await searchParams;
   const { error } = params;
   const errorMessage = error ? ERROR_MESSAGES[error] : null;
