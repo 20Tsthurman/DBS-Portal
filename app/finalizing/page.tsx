@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUser, useClerk } from "@clerk/nextjs";
 
@@ -18,6 +18,13 @@ export default function FinalizingPage() {
   const { signOut } = useClerk();
   const startedAtRef = useRef<number | null>(null);
   const rejectedRef = useRef(false);
+  // Tick state forces the effect to re-run every poll interval even when
+  // Clerk's User instance is mutated in place on reload() (which leaves
+  // the user reference unchanged, so the [user] dep alone wouldn't fire).
+  // Without this, the elapsed-time check below is evaluated exactly once
+  // on mount and the timeout branch never fires — symptom: spinner spins
+  // forever for OAuth-fresh users on production Clerk.
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -58,15 +65,18 @@ export default function FinalizingPage() {
       return;
     }
 
-    // No role yet — schedule one reload, then let the effect re-run when
-    // useUser surfaces the updated user object.
+    // No role yet — schedule one reload, then force the effect to re-run
+    // by bumping `tick`. Relying on `user` reference change alone is not
+    // safe: Clerk mutates the User resource in place, so the reference
+    // stays the same across reload() calls.
     const t = setTimeout(() => {
       user.reload().catch(() => {
         // ignore — try again on next tick
       });
+      setTick((n) => n + 1);
     }, POLL_INTERVAL_MS);
     return () => clearTimeout(t);
-  }, [isLoaded, user, router, signOut]);
+  }, [isLoaded, user, router, signOut, tick]);
 
   return (
     <main
