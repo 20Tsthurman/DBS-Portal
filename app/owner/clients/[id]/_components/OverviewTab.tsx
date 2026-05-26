@@ -7,6 +7,7 @@ import type {
 import { formatDateTime, formatHours } from "../../_lib/format";
 import { StatCard } from "@/components/ui/StatCard";
 import { PhaseTracker } from "./PhaseTracker";
+import { effectiveMonthlyHours } from "@/lib/pricing";
 
 interface OverviewTabProps {
   project: ProjectRecord | null;
@@ -23,7 +24,7 @@ export function OverviewTab({
   recentLogs,
   nextShoot,
 }: OverviewTabProps) {
-  const budget = pkg?.monthly_hours ?? null;
+  const budget = effectiveMonthlyHours(project, pkg);
   const remaining =
     budget !== null ? Number((budget - hoursThisMonth).toFixed(2)) : null;
   const remainingDanger = remaining !== null && remaining < 0;

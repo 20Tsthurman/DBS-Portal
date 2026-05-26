@@ -28,6 +28,7 @@ import {
   type ShootRecord,
 } from "@/lib/supabase";
 import { fetchAppSettings } from "./queries";
+import { effectiveMonthlyPrice } from "@/lib/pricing";
 
 // ---------------------------------------------------------------------------
 // Public suggestion shapes — each one carries the originating record's id
@@ -138,14 +139,14 @@ export function computeIncomeSuggestions({
   monthKey,
   dismissed,
 }: ComputeIncomeInput): IncomeSuggestion[] {
-  const eligible = clients.filter(
-    (r) =>
-      r.client.type === "brand" &&
-      (r.client.status === "active" || r.client.status === "onboarding") &&
-      r.pkg !== null &&
-      typeof r.pkg.monthly_price === "number" &&
-      r.pkg.monthly_price > 0
-  );
+  const eligible = clients.filter((r) => {
+    if (r.client.type !== "brand") return false;
+    if (r.client.status !== "active" && r.client.status !== "onboarding") {
+      return false;
+    }
+    const price = effectiveMonthlyPrice(r.project, r.pkg);
+    return price !== null && price > 0;
+  });
 
   // Pre-bucket: client_id of any brand_retainer payment in this month.
   const satisfiedClientIds = new Set<string>();
@@ -161,8 +162,8 @@ export function computeIncomeSuggestions({
   for (const r of eligible) {
     if (satisfiedClientIds.has(r.client.id)) continue;
     if (dismissed.has(`income_retainer:${r.client.id}`)) continue;
-    // Eligibility filter guarantees pkg + monthly_price.
-    const monthlyPrice = Number(r.pkg!.monthly_price);
+    // Eligibility filter guarantees the effective price is a number > 0.
+    const monthlyPrice = effectiveMonthlyPrice(r.project, r.pkg)!;
     out.push({
       type: "income_retainer",
       referenceId: r.client.id,

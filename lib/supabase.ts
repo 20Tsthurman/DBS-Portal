@@ -70,6 +70,8 @@ export interface ProjectRecord {
   notes: string | null;
   status: ProjectStatus;
   created_at: string;
+  monthly_price_override: number | null;
+  monthly_hours_override: number | null;
 }
 
 export interface ShootRecord {

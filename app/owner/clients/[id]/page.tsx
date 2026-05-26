@@ -24,6 +24,7 @@ import {
   fetchClientsForPicker,
   fetchInvoices,
 } from "@/app/owner/invoices/_lib/queries";
+import { effectiveMonthlyPrice } from "@/lib/pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -114,10 +115,11 @@ export default async function OwnerClientDetailPage({ params }: PageProps) {
     },
   ];
 
+  const effectivePrice = effectiveMonthlyPrice(project, pkg);
   const metaParts = [
     pkg?.name ?? null,
     project?.start_date ? formatDate(project.start_date) : null,
-    pkg ? `${formatCurrency(pkg.monthly_price)}/mo` : null,
+    effectivePrice !== null ? `${formatCurrency(effectivePrice)}/mo` : null,
   ].filter((part): part is string => Boolean(part));
 
   return (
@@ -185,6 +187,8 @@ export default async function OwnerClientDetailPage({ params }: PageProps) {
               status: client.status,
               packageId: project?.package_id ?? null,
               invitedAt: client.invited_at,
+              monthlyPriceOverride: project?.monthly_price_override ?? null,
+              monthlyHoursOverride: project?.monthly_hours_override ?? null,
             }}
           />
         </div>

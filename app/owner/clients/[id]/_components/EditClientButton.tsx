@@ -9,7 +9,10 @@ import {
 } from "../../_components/ClientFormPanel";
 
 interface EditClientButtonProps {
-  packages: Pick<PackageRecord, "id" | "name" | "tier" | "monthly_price">[];
+  packages: Pick<
+    PackageRecord,
+    "id" | "name" | "tier" | "monthly_price" | "monthly_hours"
+  >[];
   initialValues: ClientInitialValues;
 }
 

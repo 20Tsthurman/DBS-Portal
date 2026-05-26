@@ -20,6 +20,7 @@ import {
 } from "./_lib/format";
 import { AddClientButton } from "./_components/AddClientButton";
 import { TypePill } from "./_components/TypePill";
+import { effectiveMonthlyPrice } from "@/lib/pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -96,7 +97,7 @@ export default async function OwnerClientsPage() {
                       </StatusPill>
                     </td>
                     <td>{formatDate(project?.start_date)}</td>
-                    <td>{formatCurrency(pkg?.monthly_price)}</td>
+                    <td>{formatCurrency(effectiveMonthlyPrice(project, pkg))}</td>
                     <td>{formatHours(hoursThisMonth)}</td>
                     <td style={{ textAlign: "right" }}>
                       <Link
@@ -137,7 +138,7 @@ export default async function OwnerClientsPage() {
                   {formatDate(project?.start_date)}
                 </MobileCardField>
                 <MobileCardField label="Monthly Value">
-                  {formatCurrency(pkg?.monthly_price)}
+                  {formatCurrency(effectiveMonthlyPrice(project, pkg))}
                 </MobileCardField>
                 <MobileCardField label="Hours This Month">
                   {formatHours(hoursThisMonth)}

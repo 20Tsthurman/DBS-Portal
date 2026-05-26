@@ -16,7 +16,10 @@ import {
   fieldStyle,
   labelStyle,
 } from "./formStyles";
-import { createDraftClientAction } from "../_actions";
+import {
+  createDraftClientAction,
+  updateProjectPricingAction,
+} from "../_actions";
 
 export interface ClientInitialValues {
   id?: string;
@@ -31,13 +34,18 @@ export interface ClientInitialValues {
    * user's email is the source of truth for sign-in.
    */
   invitedAt?: string | null;
+  monthlyPriceOverride?: number | null;
+  monthlyHoursOverride?: number | null;
 }
 
 interface ClientFormPanelProps {
   open: boolean;
   onClose: () => void;
   mode: "add" | "edit";
-  packages: Pick<PackageRecord, "id" | "name" | "tier" | "monthly_price">[];
+  packages: Pick<
+    PackageRecord,
+    "id" | "name" | "tier" | "monthly_price" | "monthly_hours"
+  >[];
   initialValues?: ClientInitialValues;
 }
 
@@ -48,6 +56,8 @@ const emptyValues: ClientInitialValues = {
   status: "onboarding",
   packageId: null,
   invitedAt: null,
+  monthlyPriceOverride: null,
+  monthlyHoursOverride: null,
 };
 
 type SubmitMode = "draft" | "invite" | "edit";
@@ -66,12 +76,50 @@ export function ClientFormPanel({
   const [loadingButton, setLoadingButton] = useState<SubmitMode | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Custom-pricing UI state (edit mode only). Inputs are kept as strings so
+  // mid-typing ("2." / "") doesn't get rewritten by Number() coercion. Parsed
+  // on submit.
+  const initialCustomOn =
+    (initialValues?.monthlyPriceOverride ?? null) !== null ||
+    (initialValues?.monthlyHoursOverride ?? null) !== null;
+  const [customPricingOn, setCustomPricingOn] = useState(initialCustomOn);
+  const [priceInput, setPriceInput] = useState(
+    initialValues?.monthlyPriceOverride != null
+      ? String(initialValues.monthlyPriceOverride)
+      : ""
+  );
+  const [hoursInput, setHoursInput] = useState(
+    initialValues?.monthlyHoursOverride != null
+      ? String(initialValues.monthlyHoursOverride)
+      : ""
+  );
+
   useEffect(() => {
     if (open) {
       setValues(initialValues ?? emptyValues);
       setError(null);
+      const customOn =
+        (initialValues?.monthlyPriceOverride ?? null) !== null ||
+        (initialValues?.monthlyHoursOverride ?? null) !== null;
+      setCustomPricingOn(customOn);
+      setPriceInput(
+        initialValues?.monthlyPriceOverride != null
+          ? String(initialValues.monthlyPriceOverride)
+          : ""
+      );
+      setHoursInput(
+        initialValues?.monthlyHoursOverride != null
+          ? String(initialValues.monthlyHoursOverride)
+          : ""
+      );
     }
   }, [open, initialValues]);
+
+  // Package default lookup for placeholders. In edit mode the package picker
+  // is hidden, so `values.packageId` only changes from initialValues.
+  const selectedPackage = values.packageId
+    ? packages.find((p) => p.id === values.packageId)
+    : undefined;
 
   const submit = async (submitMode: SubmitMode) => {
     setError(null);
@@ -129,6 +177,30 @@ export function ClientFormPanel({
           });
         }
       } else if (submitMode === "edit" && values.id) {
+        // Parse and validate the custom-pricing inputs BEFORE writing anything.
+        // Toggle off => both nulls (clears prior overrides on server). Toggle
+        // on => blank input = null, otherwise parse and validate >= 0.
+        let priceOverride: number | null = null;
+        let hoursOverride: number | null = null;
+        if (customPricingOn) {
+          if (priceInput.trim() !== "") {
+            const n = Number(priceInput);
+            if (!Number.isFinite(n) || n < 0) {
+              setError("Monthly price override must be a non-negative number.");
+              return;
+            }
+            priceOverride = n;
+          }
+          if (hoursInput.trim() !== "") {
+            const n = Number(hoursInput);
+            if (!Number.isFinite(n) || n < 0) {
+              setError("Monthly hours override must be a non-negative number.");
+              return;
+            }
+            hoursOverride = n;
+          }
+        }
+
         const res = await fetch(`/api/clients/${values.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -142,6 +214,16 @@ export function ClientFormPanel({
         const data = (await res.json()) as { error?: string };
         if (!res.ok) {
           setError(data.error ?? "Failed to update client.");
+          return;
+        }
+
+        const pricingRes = await updateProjectPricingAction({
+          clientId: values.id,
+          monthlyPriceOverride: priceOverride,
+          monthlyHoursOverride: hoursOverride,
+        });
+        if (!pricingRes.ok) {
+          setError(pricingRes.error ?? "Failed to save custom pricing.");
           return;
         }
       }
@@ -320,6 +402,102 @@ export function ClientFormPanel({
               )}
             </select>
           </div>
+
+          {mode === "edit" && (
+            <div
+              style={{
+                borderTop: "1px solid var(--border)",
+                paddingTop: 20,
+              }}
+            >
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                  fontSize: 14,
+                  color: "var(--text-primary)",
+                  fontWeight: 500,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={customPricingOn}
+                  onChange={(e) => setCustomPricingOn(e.target.checked)}
+                />
+                This client has custom pricing
+              </label>
+
+              {customPricingOn && (
+                <div style={{ marginTop: 16 }} className="space-y-4">
+                  <div>
+                    <label htmlFor="client-price-override" style={labelStyle}>
+                      Monthly price override
+                    </label>
+                    <input
+                      id="client-price-override"
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      step="0.01"
+                      value={priceInput}
+                      onChange={(e) => setPriceInput(e.target.value)}
+                      onFocus={applyFocus}
+                      onBlur={clearFocus}
+                      placeholder={
+                        selectedPackage
+                          ? `Default: $${Number(selectedPackage.monthly_price).toLocaleString()}`
+                          : "e.g. 2000"
+                      }
+                      style={fieldStyle}
+                    />
+                    <p
+                      style={{
+                        marginTop: 6,
+                        fontSize: 12,
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      Leave blank to use the package default.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label htmlFor="client-hours-override" style={labelStyle}>
+                      Monthly hours override
+                    </label>
+                    <input
+                      id="client-hours-override"
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      step="0.5"
+                      value={hoursInput}
+                      onChange={(e) => setHoursInput(e.target.value)}
+                      onFocus={applyFocus}
+                      onBlur={clearFocus}
+                      placeholder={
+                        selectedPackage
+                          ? `Default: ${Number(selectedPackage.monthly_hours)} hrs/mo`
+                          : "e.g. 24"
+                      }
+                      style={fieldStyle}
+                    />
+                    <p
+                      style={{
+                        marginTop: 6,
+                        fontSize: 12,
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      Leave blank to use the package default.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {error && <div style={errorStyle}>{error}</div>}
         </div>

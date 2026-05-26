@@ -5,6 +5,7 @@ import {
   dateKeyInTimezone,
   PORTAL_TIMEZONE,
 } from "@/app/owner/calendar/_lib/timezone";
+import { effectiveMonthlyHours } from "@/lib/pricing";
 
 const MAX_VISIBLE = 8;
 
@@ -42,28 +43,28 @@ interface BudgetRow {
 export async function BudgetStatusWidget() {
   const all = await fetchClientsWithRelations();
 
-  const eligible = all.filter(
-    (r) =>
-      (r.client.status === "active" || r.client.status === "onboarding") &&
-      r.pkg !== null &&
-      typeof r.pkg.monthly_hours === "number" &&
-      r.pkg.monthly_hours > 0
-  );
+  const eligible = all.filter((r) => {
+    if (r.client.status !== "active" && r.client.status !== "onboarding") {
+      return false;
+    }
+    const hours = effectiveMonthlyHours(r.project, r.pkg);
+    return hours !== null && hours > 0;
+  });
 
   const { dayOfMonth, daysInMonth } = currentDayAndLengthInPortalTz();
   const monthProgress = dayOfMonth / daysInMonth;
 
   const rows: BudgetRow[] = eligible.map((r) => {
-    // Filter above guarantees pkg exists with monthly_hours > 0.
-    const pkg = r.pkg!;
-    const monthlyHours = pkg.monthly_hours;
+    // Filter above guarantees an effective hours value > 0.
+    const monthlyHours = effectiveMonthlyHours(r.project, r.pkg)!;
     const hoursThisMonth = r.hoursThisMonth;
     const budgetConsumed = hoursThisMonth / monthlyHours;
     const tone = computeTone(budgetConsumed, monthProgress);
+    const labelPrefix = r.pkg?.name ?? "Custom rate";
     return {
       clientId: r.client.id,
       clientName: r.client.name,
-      packageLabel: `${pkg.name} · ${formatBudgetHours(monthlyHours)} hrs/mo`,
+      packageLabel: `${labelPrefix} · ${formatBudgetHours(monthlyHours)} hrs/mo`,
       hoursThisMonth,
       monthlyHours,
       budgetConsumed,

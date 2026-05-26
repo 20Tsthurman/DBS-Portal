@@ -253,6 +253,92 @@ export async function createDraftClientAction(
 }
 
 // ---------------------------------------------------------------------------
+// updateProjectPricingAction
+//
+// Persists per-client price/hours overrides onto the client's most recent
+// projects row. NULL = inherit the package default. Mirrors the lookup
+// pattern in `updateNotesAction` above (same most-recent-by-start_date pick).
+// If the client has no projects row yet, one is inserted with the same
+// onboarding defaults the invite path uses (current_phase='onboarding',
+// status='active', no package_id) so the overrides land somewhere.
+//
+// The clients PATCH route (app/api/clients/[id]/route.ts) intentionally
+// stays scoped to the clients table — projects writes route through here.
+// ---------------------------------------------------------------------------
+export interface UpdateProjectPricingInput {
+  clientId: string;
+  monthlyPriceOverride: number | null;
+  monthlyHoursOverride: number | null;
+}
+
+export async function updateProjectPricingAction(
+  input: UpdateProjectPricingInput
+): Promise<ActionResult> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  if (!input.clientId) return { ok: false, error: "Missing client id" };
+
+  if (input.monthlyPriceOverride !== null) {
+    if (
+      !Number.isFinite(input.monthlyPriceOverride) ||
+      input.monthlyPriceOverride < 0
+    ) {
+      return {
+        ok: false,
+        error: "Monthly price override must be a non-negative number",
+      };
+    }
+  }
+  if (input.monthlyHoursOverride !== null) {
+    if (
+      !Number.isFinite(input.monthlyHoursOverride) ||
+      input.monthlyHoursOverride < 0
+    ) {
+      return {
+        ok: false,
+        error: "Monthly hours override must be a non-negative number",
+      };
+    }
+  }
+
+  const supabase = getSupabaseServiceClient();
+
+  const { data: existingRow, error: lookupError } = await supabase
+    .from("projects")
+    .select("*")
+    .eq("client_id", input.clientId)
+    .order("start_date", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  if (lookupError) return { ok: false, error: lookupError.message };
+
+  if (!existingRow) {
+    const { error: insertError } = await supabase.from("projects").insert({
+      client_id: input.clientId,
+      current_phase: "onboarding",
+      status: "active",
+      monthly_price_override: input.monthlyPriceOverride,
+      monthly_hours_override: input.monthlyHoursOverride,
+    });
+    if (insertError) return { ok: false, error: insertError.message };
+  } else {
+    const project = existingRow as ProjectRecord;
+    const { error: updateError } = await supabase
+      .from("projects")
+      .update({
+        monthly_price_override: input.monthlyPriceOverride,
+        monthly_hours_override: input.monthlyHoursOverride,
+      })
+      .eq("id", project.id);
+    if (updateError) return { ok: false, error: updateError.message };
+  }
+
+  revalidatePath(`/owner/clients/${input.clientId}`);
+  revalidatePath("/owner/clients");
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
 // sendInviteAction
 //
 // Triggers an invite for an existing clients row from the profile page. Used

@@ -6,7 +6,10 @@ import type { PackageRecord } from "@/lib/supabase";
 import { ClientFormPanel } from "./ClientFormPanel";
 
 interface AddClientButtonProps {
-  packages: Pick<PackageRecord, "id" | "name" | "tier" | "monthly_price">[];
+  packages: Pick<
+    PackageRecord,
+    "id" | "name" | "tier" | "monthly_price" | "monthly_hours"
+  >[];
   label?: string;
 }
 

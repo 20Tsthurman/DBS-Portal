@@ -2,6 +2,7 @@ import { StatCard } from "@/components/ui/StatCard";
 import { fetchClientsWithRelations } from "@/app/owner/clients/_lib/queries";
 import { formatCurrency } from "@/app/owner/clients/_lib/format";
 import { DashboardCard } from "@/components/ui/DashboardCard";
+import { effectiveMonthlyPrice } from "@/lib/pricing";
 
 /**
  * Snapshot of the client roster: counts by status + monthly billing value.
@@ -28,9 +29,9 @@ export async function ClientRosterWidget() {
   let monthlyValue = 0;
   let missingPackage = 0;
   for (const r of billingPool) {
-    const price = r.pkg?.monthly_price;
-    if (typeof price === "number") {
-      monthlyValue += Number(price);
+    const price = effectiveMonthlyPrice(r.project, r.pkg);
+    if (price !== null) {
+      monthlyValue += price;
     } else {
       missingPackage += 1;
     }
