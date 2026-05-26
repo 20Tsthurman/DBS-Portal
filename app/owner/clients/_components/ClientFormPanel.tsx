@@ -16,6 +16,7 @@ import {
   fieldStyle,
   labelStyle,
 } from "./formStyles";
+import { createDraftClientAction } from "../_actions";
 
 export interface ClientInitialValues {
   id?: string;
@@ -42,6 +43,8 @@ const emptyValues: ClientInitialValues = {
   packageId: null,
 };
 
+type SubmitMode = "draft" | "invite" | "edit";
+
 export function ClientFormPanel({
   open,
   onClose,
@@ -53,7 +56,7 @@ export function ClientFormPanel({
   const [values, setValues] = useState<ClientInitialValues>(
     initialValues ?? emptyValues
   );
-  const [submitting, setSubmitting] = useState(false);
+  const [loadingButton, setLoadingButton] = useState<SubmitMode | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -63,8 +66,7 @@ export function ClientFormPanel({
     }
   }, [open, initialValues]);
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const submit = async (submitMode: SubmitMode) => {
     setError(null);
 
     if (!values.name.trim()) {
@@ -76,9 +78,21 @@ export function ClientFormPanel({
       return;
     }
 
-    setSubmitting(true);
+    setLoadingButton(submitMode);
     try {
-      if (mode === "add") {
+      if (submitMode === "draft") {
+        const result = await createDraftClientAction({
+          name: values.name.trim(),
+          email: values.email.trim(),
+          type: values.type,
+          packageId: values.packageId,
+          status: values.status,
+        });
+        if (!result.ok) {
+          setError(result.error ?? "Failed to save draft.");
+          return;
+        }
+      } else if (submitMode === "invite") {
         const inviteRes = await fetch("/api/invite", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -107,7 +121,7 @@ export function ClientFormPanel({
             body: JSON.stringify({ status: values.status }),
           });
         }
-      } else if (mode === "edit" && values.id) {
+      } else if (submitMode === "edit" && values.id) {
         const res = await fetch(`/api/clients/${values.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -129,12 +143,20 @@ export function ClientFormPanel({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unexpected error.");
     } finally {
-      setSubmitting(false);
+      setLoadingButton(null);
     }
   };
 
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    // Default form submission (Enter / primary button) goes through the
+    // invite flow in add mode, or the PATCH flow in edit mode.
+    // "Save as draft" is a type="button" path that calls submit("draft")
+    // directly and bypasses this handler.
+    submit(mode === "add" ? "invite" : "edit");
+  };
+
   const title = mode === "add" ? "Add Client" : "Edit Client";
-  const submitLabel = mode === "add" ? "Send Invite" : "Save Changes";
 
   return (
     <SlidePanel open={open} onClose={onClose} title={title}>
@@ -280,15 +302,40 @@ export function ClientFormPanel({
           {error && <div style={errorStyle}>{error}</div>}
         </div>
 
-        <div className="pt-6">
-          <Button
-            type="submit"
-            disabled={submitting}
-            className="w-full"
-            style={{ width: "100%" }}
-          >
-            {submitting ? "Working…" : submitLabel}
-          </Button>
+        <div className="pt-6 flex flex-col gap-3">
+          {mode === "add" ? (
+            <>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={loadingButton !== null}
+                className="w-full"
+                style={{ width: "100%" }}
+              >
+                {loadingButton === "invite" ? "Working…" : "Save & send invite"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => submit("draft")}
+                disabled={loadingButton !== null}
+                className="w-full"
+                style={{ width: "100%" }}
+              >
+                {loadingButton === "draft" ? "Working…" : "Save as draft"}
+              </Button>
+            </>
+          ) : (
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={loadingButton !== null}
+              className="w-full"
+              style={{ width: "100%" }}
+            >
+              {loadingButton === "edit" ? "Working…" : "Save Changes"}
+            </Button>
+          )}
         </div>
       </form>
     </SlidePanel>

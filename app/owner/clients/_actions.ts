@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import {
   getSupabaseServiceClient,
   type ClientRecord,
+  type ClientStatus,
+  type ClientType,
   type ProjectRecord,
   type TimeLogCategory,
   type TimeLogRecord,
@@ -125,6 +127,127 @@ export async function updateNotesAction(
 
   revalidatePath(`/owner/clients/${input.clientId}`);
   return { ok: true, data: { savedAt: new Date().toISOString() } };
+}
+
+const VALID_CLIENT_TYPES: ClientType[] = ["brand", "bride"];
+const VALID_CLIENT_STATUSES: ClientStatus[] = [
+  "active",
+  "onboarding",
+  "inactive",
+  "lead",
+];
+
+export interface CreateDraftClientInput {
+  name: string;
+  email: string;
+  type: ClientType;
+  packageId: string | null;
+  status: ClientStatus;
+}
+
+// ---------------------------------------------------------------------------
+// createDraftClientAction
+//
+// Inserts a clients row WITHOUT sending a Clerk invitation or Resend email.
+// `invited_at` and `clerk_user_id` both stay NULL — the row is a "draft
+// client" with no portal access until the owner later sends the invite from
+// the profile page (which routes through /api/invite, whose existing
+// "reuse unlinked row by email" branch — see app/api/invite/route.ts:299-303
+// — picks this row up automatically and stamps invited_at at that point).
+//
+// Mirrors the column names and defaults used by /api/invite's insert path
+// (app/api/invite/route.ts:341-441) so the two creation paths stay schema-
+// compatible: same trim/normalize for name+email, same projects defaults
+// (current_phase='onboarding', status='active'), same rollback-on-failure
+// for the brand-new clients row if the projects insert errors.
+// ---------------------------------------------------------------------------
+export async function createDraftClientAction(
+  input: CreateDraftClientInput
+): Promise<ActionResult<ClientRecord>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  if (!name) return { ok: false, error: "Name is required" };
+
+  const email = typeof input.email === "string" ? input.email.trim() : "";
+  if (!email || !email.includes("@")) {
+    return { ok: false, error: "A valid email address is required" };
+  }
+  const normalizedEmail = email.toLowerCase();
+
+  if (!VALID_CLIENT_TYPES.includes(input.type)) {
+    return { ok: false, error: "type must be 'brand' or 'bride'" };
+  }
+  if (!VALID_CLIENT_STATUSES.includes(input.status)) {
+    return {
+      ok: false,
+      error: "status must be active, onboarding, inactive, or lead",
+    };
+  }
+  if (
+    input.packageId !== null &&
+    input.packageId !== undefined &&
+    typeof input.packageId !== "string"
+  ) {
+    return { ok: false, error: "packageId must be a string or null" };
+  }
+
+  const supabase = getSupabaseServiceClient();
+
+  const { data: insertedRow, error: insertError } = await supabase
+    .from("clients")
+    .insert({
+      name,
+      email: normalizedEmail,
+      type: input.type,
+      status: input.status,
+      clerk_user_id: null,
+      invited_at: null,
+    })
+    .select("*")
+    .single();
+
+  if (insertError || !insertedRow) {
+    if (insertError?.code === "23505") {
+      return { ok: false, error: "A client with this email already exists." };
+    }
+    return {
+      ok: false,
+      error: insertError?.message ?? "Failed to create client",
+    };
+  }
+  const client = insertedRow as ClientRecord;
+
+  if (typeof input.packageId === "string" && input.packageId.length > 0) {
+    const { error: projectError } = await supabase.from("projects").insert({
+      client_id: client.id,
+      package_id: input.packageId,
+      current_phase: "onboarding",
+      status: "active",
+    });
+    if (projectError) {
+      // Roll back the just-inserted clients row so a retry is clean.
+      // Mirrors the invite route's brand-new-row rollback (route.ts:404-415).
+      const { error: rollbackErr } = await supabase
+        .from("clients")
+        .delete()
+        .eq("id", client.id);
+      if (rollbackErr) {
+        console.error(
+          `[clients] draft project insert failed AND rollback failed for clients.id=${client.id}:`,
+          rollbackErr.message
+        );
+      }
+      return {
+        ok: false,
+        error: `Could not link package: ${projectError.message}. Please try again.`,
+      };
+    }
+  }
+
+  revalidatePath("/owner/clients");
+  return { ok: true, data: client };
 }
 
 // ---------------------------------------------------------------------------

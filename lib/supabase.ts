@@ -44,6 +44,7 @@ export interface ClientRecord {
   type: ClientType;
   status: ClientStatus;
   created_at: string;
+  invited_at: string | null;
   owner_last_new_msg_email_at: string | null;
   client_last_new_msg_email_at: string | null;
   owner_last_reminder_email_at: string | null;
