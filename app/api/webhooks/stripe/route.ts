@@ -19,7 +19,11 @@ import Stripe from "stripe";
 import { Resend } from "resend";
 import { getSupabaseServiceClient } from "@/lib/supabase";
 import { buildInvoicePaymentConfirmationEmailHtml } from "@/lib/invoiceEmails";
+import { renderReceiptPdfBuffer } from "@/lib/receiptPdf";
 import { resolveBaseUrl } from "@/lib/baseUrl";
+
+const BUSINESS_NAME_FOR_PDF = "Digital Bloom Socials";
+const BUSINESS_EMAIL_FOR_PDF = "digitalbloomsocials@gmail.com";
 
 export async function POST(request: Request) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -101,7 +105,7 @@ async function handleCheckoutSessionCompleted(
   const { data: invoice, error: fetchError } = await supabase
     .from("invoices")
     .select(
-      "id, client_id, status, line_items, amount, invoice_number, income_type"
+      "id, client_id, status, line_items, amount, invoice_number, income_type, memo"
     )
     .eq("id", invoiceId)
     .maybeSingle();
@@ -130,10 +134,11 @@ async function handleCheckoutSessionCompleted(
   }
 
   // Look up the client to snapshot the name onto the income row and
-  // (later) address the confirmation email.
+  // (later) address the confirmation email. `clerk_user_id` is pulled
+  // so the email builder can decide whether to include the portal CTA.
   const { data: client, error: clientError } = await supabase
     .from("clients")
-    .select("id, name, email")
+    .select("id, name, email, clerk_user_id")
     .eq("id", invoice.client_id)
     .maybeSingle();
 
@@ -204,15 +209,13 @@ async function handleCheckoutSessionCompleted(
   }
 
   // Confirmation email is best-effort — Stripe shouldn't retry on email
-  // hiccups, so we log and continue.
+  // hiccups, so we log and continue. The receipt PDF is rendered inside
+  // the try/catch for the same reason.
   const recipientEmail = client?.email;
+  const hasPortalAccess = client?.clerk_user_id != null;
   const resendKey = process.env.RESEND_API_KEY;
   if (resendKey && recipientEmail && invoice.invoice_number) {
     try {
-      const resend = new Resend(resendKey);
-      const fromAddress =
-        process.env.RESEND_FROM_EMAIL ||
-        "Digital Bloom Socials <onboarding@resend.dev>";
       const amountFormatted = new Intl.NumberFormat("en-US", {
         style: "currency",
         currency: "USD",
@@ -226,6 +229,36 @@ async function handleCheckoutSessionCompleted(
           timeZone: "UTC",
         }
       );
+
+      const lineItems = (invoice.line_items ?? []) as Array<{
+        description: string;
+        amount: number;
+      }>;
+      const lineItemTotal = lineItems.reduce(
+        (sum, li) => sum + Number(li.amount),
+        0
+      );
+      const receiptBuffer = await renderReceiptPdfBuffer({
+        invoiceNumber: invoice.invoice_number,
+        paidDate,
+        paymentMethod: "stripe",
+        billToName: clientNameSnapshot,
+        billToEmail: recipientEmail,
+        lineItems,
+        // Prefer the line-items sum so the table footer reconciles with
+        // the line items shown above. In normal Checkout flow this
+        // equals the Stripe-charged amount; if they ever drift, the
+        // receipt reflects what was invoiced.
+        totalAmount: lineItemTotal,
+        memo: (invoice.memo as string | null) ?? null,
+        businessName: BUSINESS_NAME_FOR_PDF,
+        businessEmail: BUSINESS_EMAIL_FOR_PDF,
+      });
+
+      const resend = new Resend(resendKey);
+      const fromAddress =
+        process.env.RESEND_FROM_EMAIL ||
+        "Digital Bloom Socials <onboarding@resend.dev>";
       const portalUrl = `${resolveBaseUrl()}/client/invoices`;
       const { error: sendError } = await resend.emails.send({
         from: fromAddress,
@@ -237,7 +270,15 @@ async function handleCheckoutSessionCompleted(
           amountFormatted,
           paidDate,
           portalInvoiceUrl: portalUrl,
+          hasPortalAccess,
         }),
+        attachments: [
+          {
+            filename: `Receipt-${invoice.invoice_number}.pdf`,
+            content: receiptBuffer.toString("base64"),
+            contentType: "application/pdf",
+          },
+        ],
       });
       if (sendError) {
         console.error(

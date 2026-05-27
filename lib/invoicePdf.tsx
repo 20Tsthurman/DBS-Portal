@@ -41,7 +41,10 @@ export interface InvoicePdfProps {
   businessEmail: string;
 }
 
-const COLORS = {
+// Exported so `lib/receiptPdf.tsx` (and any future PDF generator) can
+// share the same palette, fonts, currency formatter, and base layout
+// without re-defining them.
+export const PDF_COLORS = {
   background: "#E8E4D8",
   forest: "#1B3827",
   forestDark: "#1A2B1C",
@@ -49,24 +52,40 @@ const COLORS = {
   muted: "#4B5C4E",
   hairline: "#D8D4C8",
   subtle: "#7A8B7C",
+  // DBS design-system success token (--status-success). Used for the
+  // RECEIPT "PAID" badge fill.
+  success: "#2D6A4F",
 };
 
-const SERIF = "Times-Roman";
-const SERIF_BOLD = "Times-Bold";
-const SANS = "Helvetica";
-const SANS_BOLD = "Helvetica-Bold";
-const SANS_OBLIQUE = "Helvetica-Oblique";
+// Local alias kept so existing references in this file stay short.
+const COLORS = PDF_COLORS;
+
+export const PDF_FONTS = {
+  serif: "Times-Roman",
+  serifBold: "Times-Bold",
+  sans: "Helvetica",
+  sansBold: "Helvetica-Bold",
+  sansOblique: "Helvetica-Oblique",
+};
+
+const SERIF = PDF_FONTS.serif;
+const SERIF_BOLD = PDF_FONTS.serifBold;
+const SANS = PDF_FONTS.sans;
+const SANS_BOLD = PDF_FONTS.sansBold;
+const SANS_OBLIQUE = PDF_FONTS.sansOblique;
 
 const CURRENCY = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
 });
 
-function formatAmount(value: number): string {
+export function formatPdfAmount(value: number): string {
   return CURRENCY.format(value);
 }
 
-const styles = StyleSheet.create({
+const formatAmount = formatPdfAmount;
+
+export const pdfSharedStyles = StyleSheet.create({
   page: {
     backgroundColor: COLORS.background,
     paddingTop: 54,
@@ -252,6 +271,8 @@ const styles = StyleSheet.create({
     color: COLORS.subtle,
   },
 });
+
+const styles = pdfSharedStyles;
 
 export function InvoicePdfDocument(props: InvoicePdfProps): JSX.Element {
   return (

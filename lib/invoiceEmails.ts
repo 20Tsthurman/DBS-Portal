@@ -1,7 +1,7 @@
 import { buildShell } from "@/lib/messageEmails";
 import { escapeHtml } from "@/lib/escapeHtml";
 
-function firstNameOf(fullName: string): string {
+export function firstNameOf(fullName: string): string {
   const trimmed = fullName.trim();
   if (!trimmed) return trimmed;
   const [first] = trimmed.split(/\s+/);
@@ -55,17 +55,35 @@ export function buildInvoicePaymentConfirmationEmailHtml(input: {
   amountFormatted: string;
   paidDate: string;
   portalInvoiceUrl: string;
+  hasPortalAccess: boolean;
 }): string {
+  const safeFirstName = escapeHtml(firstNameOf(input.recipientName));
   const safeNumber = escapeHtml(input.invoiceNumber);
   const safeAmount = escapeHtml(input.amountFormatted);
   const safePaidDate = escapeHtml(input.paidDate);
-  const body = `Thank you — we received your payment of <strong>${safeAmount}</strong> for invoice <strong>${safeNumber}</strong> on ${safePaidDate}. You can download a paid receipt from your portal at any time.`;
+
+  if (input.hasPortalAccess) {
+    const body = `Hi ${safeFirstName}, thank you — we received your payment of <strong>${safeAmount}</strong> for invoice <strong>${safeNumber}</strong> on ${safePaidDate}. A paid receipt is attached, and you can also download it from your portal anytime.`;
+    return buildShell({
+      titleTag: `Payment received — ${input.invoiceNumber}`,
+      headline: "Payment received — thank you!",
+      bodyParagraph: body,
+      portalUrl: input.portalInvoiceUrl,
+      recipientName: input.recipientName,
+      showGreeting: false,
+    });
+  }
+
+  const body = `Hi ${safeFirstName}, thank you — we received your payment of <strong>${safeAmount}</strong> for invoice <strong>${safeNumber}</strong> on ${safePaidDate}. A paid receipt is attached for your records.`;
   return buildShell({
     titleTag: `Payment received — ${input.invoiceNumber}`,
     headline: "Payment received — thank you!",
     bodyParagraph: body,
     portalUrl: input.portalInvoiceUrl,
     recipientName: input.recipientName,
+    showEyebrow: false,
+    showGreeting: false,
+    showButton: false,
   });
 }
 

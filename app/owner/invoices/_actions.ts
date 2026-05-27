@@ -16,6 +16,7 @@ import {
   uploadServerBuffer,
 } from "@/lib/storage";
 import { renderInvoicePdfBuffer } from "@/lib/invoicePdf";
+import { renderReceiptPdfBuffer } from "@/lib/receiptPdf";
 import {
   buildInvoicePaymentConfirmationEmailHtml,
   buildInvoiceSentEmailHtml,
@@ -540,10 +541,26 @@ export async function markInvoicePaidAction(
     }
 
     // Confirmation email is best-effort — the payment is already
-    // recorded, so a Resend hiccup shouldn't reverse the action.
+    // recorded, so a Resend hiccup shouldn't reverse the action. The
+    // receipt PDF is generated inside the try/catch for the same
+    // reason: a renderer failure shouldn't roll back the payment.
     const resendKey = process.env.RESEND_API_KEY;
     if (resendKey && invoice.client_email && invoice.invoice_number) {
       try {
+        const paidDateFormatted = formatDateLong(input.paymentDate);
+        const receiptBuffer = await renderReceiptPdfBuffer({
+          invoiceNumber: invoice.invoice_number,
+          paidDate: paidDateFormatted,
+          paymentMethod: input.paymentMethod,
+          billToName: invoice.client_name,
+          billToEmail: invoice.client_email,
+          lineItems: invoice.line_items,
+          totalAmount: total,
+          memo: invoice.memo,
+          businessName: BUSINESS_NAME,
+          businessEmail: BUSINESS_EMAIL,
+        });
+
         const resend = new Resend(resendKey);
         const fromAddress =
           process.env.RESEND_FROM_EMAIL ||
@@ -557,9 +574,17 @@ export async function markInvoicePaidAction(
             recipientName: invoice.client_name,
             invoiceNumber: invoice.invoice_number,
             amountFormatted: formatAmount(total),
-            paidDate: formatDateLong(input.paymentDate),
+            paidDate: paidDateFormatted,
             portalInvoiceUrl: portalUrl,
+            hasPortalAccess: invoice.client_clerk_user_id != null,
           }),
+          attachments: [
+            {
+              filename: `Receipt-${invoice.invoice_number}.pdf`,
+              content: receiptBuffer.toString("base64"),
+              contentType: "application/pdf",
+            },
+          ],
         });
         if (sendError) {
           console.error(
