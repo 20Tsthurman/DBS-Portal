@@ -11,6 +11,14 @@ interface FinancialsToolbarProps {
   yearLabel: string;
 }
 
+/**
+ * Mobile-first layout:
+ *   row 1: [Today] [◀]   <Month YYYY>   [▶]    — month nav, label centered, full width
+ *   row 2: [   Month   |   YTD   ]              — range toggle, full width
+ *
+ * Desktop (≥lg): both rows collapse into the existing single-row layout
+ * (month nav cluster on the left, range toggle on the right).
+ */
 export function FinancialsToolbar({
   range,
   monthKey,
@@ -23,22 +31,12 @@ export function FinancialsToolbar({
   const monthHref = (k: string) =>
     `/owner/financials?range=month&month=${k}`;
   const todayHref = "/owner/financials";
-  const ytdHref = "/owner/financials?range=ytd";
 
   const centerLabel = isYtd ? yearLabel : formatMonthLabel(monthKey);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 16,
-        marginBottom: 24,
-        flexWrap: "wrap",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <div className="flex w-full flex-col gap-3 lg:w-auto lg:flex-row lg:items-center lg:gap-3">
+      <div className="flex items-center gap-2">
         {isYtd ? (
           <span style={disabledStyle(pillButton)} aria-disabled="true">
             Today
@@ -68,13 +66,15 @@ export function FinancialsToolbar({
         )}
 
         <h2
+          className="flex-1 text-center lg:flex-initial lg:px-2 lg:text-left"
           style={{
-            marginLeft: 4,
             fontFamily: "var(--font-playfair), serif",
             fontSize: 20,
             fontWeight: 500,
             color: "var(--text-primary)",
             letterSpacing: "-0.01em",
+            margin: 0,
+            minWidth: 0,
           }}
         >
           {centerLabel}
@@ -82,7 +82,7 @@ export function FinancialsToolbar({
 
         {isYtd ? (
           <span
-            style={{ ...disabledStyle(iconButton), marginLeft: 4 }}
+            style={disabledStyle(iconButton)}
             aria-disabled="true"
             aria-label="Next month (disabled in YTD view)"
           >
@@ -92,7 +92,7 @@ export function FinancialsToolbar({
           <Link
             href={monthHref(nextKey)}
             aria-label="Next month"
-            style={{ ...iconButton, marginLeft: 4 }}
+            style={iconButton}
           >
             ▶
           </Link>
@@ -124,14 +124,15 @@ function RangeToggle({ range, monthKey }: RangeToggleProps) {
   ];
 
   return (
-    <div style={{ display: "inline-flex" }}>
+    <div className="flex w-full lg:inline-flex lg:w-auto">
       {items.map((item, i) => (
         <Link
           key={item.label}
           href={item.href}
           aria-pressed={item.active}
+          className="flex-1 justify-center lg:flex-initial"
           style={{
-            padding: "8px 16px",
+            padding: "10px 16px",
             fontSize: 12,
             fontWeight: 600,
             textTransform: "uppercase",
@@ -167,6 +168,7 @@ function disabledStyle(base: CSSProperties): CSSProperties {
 const pillButton: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
+  flexShrink: 0,
   height: 36,
   padding: "0 14px",
   border: "1px solid var(--border)",
@@ -182,6 +184,7 @@ const iconButton: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
+  flexShrink: 0,
   width: 36,
   height: 36,
   border: "1px solid var(--border)",

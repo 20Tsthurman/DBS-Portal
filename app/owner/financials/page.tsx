@@ -149,24 +149,16 @@ export default async function FinancialsPage({
 
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 16,
-          marginBottom: 24,
-        }}
-      >
+      <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
         <h1
           style={{
             fontFamily: "var(--font-playfair), serif",
-            fontSize: 32,
             fontWeight: 500,
             color: "var(--text-primary)",
             letterSpacing: "-0.01em",
             margin: 0,
           }}
+          className="text-[26px] lg:text-[32px]"
         >
           Financials
         </h1>
