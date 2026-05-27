@@ -28,9 +28,11 @@ import {
   monthRangeForKey,
   yearToDateRange,
 } from "@/app/owner/calendar/_lib/timezone";
+import { fetchClientsWithRelations } from "@/app/owner/clients/_lib/queries";
 import { FinancialsBoard } from "./_components/FinancialsBoard";
 import { FinancialsToolbar } from "./_components/FinancialsToolbar";
 import {
+  fetchAppSettings,
   fetchFinancialsForRange,
   type FinancialsRange,
 } from "./_lib/queries";
@@ -95,7 +97,11 @@ export default async function FinancialsPage({
 
   // Suggestions are month-scoped; suppress entirely in YTD view.
   // Otherwise fetch the display rows and suggestion inputs in parallel.
-  const [data, suggestionInputs] = await Promise.all([
+  // Also fetch the clients roster + app_settings for the mobile sheet
+  // (client datalist + readonly IRS rate). Both queries are React-cache
+  // memoized inside fetchSuggestionInputs / fetchFinancialsForRange, so
+  // the extra calls here only do work on the YTD path.
+  const [data, suggestionInputs, clientsRel, appSettings] = await Promise.all([
     fetchFinancialsForRange(fetchRange),
     range === "month"
       ? fetchSuggestionInputs(
@@ -103,7 +109,17 @@ export default async function FinancialsPage({
           monthKey
         )
       : Promise.resolve(null),
+    fetchClientsWithRelations(),
+    fetchAppSettings(),
   ]);
+
+  const clientNames = clientsRel
+    .filter(
+      (r) => r.client.status === "active" || r.client.status === "onboarding"
+    )
+    .map((r) => r.client.name)
+    .sort((a, b) => a.localeCompare(b));
+  const mileageRatePerMile = Number(appSettings.mileage_rate_per_mile);
 
   let incomeSuggestions: IncomeSuggestion[] = [];
   let expenseSuggestions: ExpenseSuggestion[] = [];
@@ -171,6 +187,8 @@ export default async function FinancialsPage({
         incomeSuggestions={incomeSuggestions}
         expenseSuggestions={expenseSuggestions}
         mileageSuggestions={mileageSuggestions}
+        clientNames={clientNames}
+        mileageRatePerMile={mileageRatePerMile}
       />
     </div>
   );

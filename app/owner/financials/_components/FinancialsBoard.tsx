@@ -40,6 +40,10 @@ import {
 import { ExpenseTable } from "./ExpenseTable";
 import { IncomeTable } from "./IncomeTable";
 import { MileageTable } from "./MileageTable";
+import { ExpenseCardList } from "./ExpenseCardList";
+import { IncomeCardList } from "./IncomeCardList";
+import { MileageCardList } from "./MileageCardList";
+import { CardRowStyles } from "./cardShared";
 import {
   IconExpenses,
   IconIncome,
@@ -150,6 +154,12 @@ interface FinancialsBoardProps {
   incomeSuggestions: IncomeSuggestion[];
   expenseSuggestions: ExpenseSuggestion[];
   mileageSuggestions: MileageSuggestion[];
+  /** Active client names used by the mobile income sheet's datalist. The
+   * Client field still accepts free text — this is suggestion-only. */
+  clientNames: string[];
+  /** Current IRS rate from app_settings, displayed read-only inside the
+   * mobile mileage sheet so Kelsey can sanity-check the deduction preview. */
+  mileageRatePerMile: number | null;
 }
 
 // Mirrors queries.ts:229-235 — keep the formulas identical, since this is
@@ -191,6 +201,8 @@ export function FinancialsBoard({
   incomeSuggestions,
   expenseSuggestions,
   mileageSuggestions,
+  clientNames,
+  mileageRatePerMile,
 }: FinancialsBoardProps) {
   const [incomeRows, setIncomeRows] = useState(initialIncomeRows);
   const [expenseRows, setExpenseRows] = useState(initialExpenseRows);
@@ -346,6 +358,47 @@ export function FinancialsBoard({
     [incomeDraft, incomeDraftSaving]
   );
 
+  // Mobile sheet "Save" path. Mirrors the success branch of
+  // handleIncomeDraftFieldChange but takes the whole draft at once and
+  // never auto-fires per-field. The desktop draft-row flow is unchanged.
+  const handleIncomeCreate = useCallback(
+    async (draft: DraftIncomeRow): Promise<CommitResult> => {
+      if (
+        draft.date === null ||
+        draft.clientName === null ||
+        draft.clientName.trim() === "" ||
+        draft.amount === null ||
+        draft.amount <= 0 ||
+        draft.incomeType === null
+      ) {
+        return { ok: false, error: "Missing required fields" };
+      }
+      const res = await addIncomePaymentAction({
+        payment_date: draft.date,
+        client_name_snapshot: draft.clientName.trim(),
+        amount: draft.amount,
+        income_type: draft.incomeType,
+        payment_method: draft.paymentMethod ?? null,
+        notes: draft.notes ?? null,
+      });
+      if (!res.ok || !res.data) {
+        return { ok: false, error: res.error ?? "Failed to save" };
+      }
+      const newRow: IncomeRow = {
+        id: res.data.id,
+        date: res.data.payment_date,
+        clientName: res.data.client_name_snapshot,
+        incomeType: res.data.income_type,
+        amount: Number(res.data.amount),
+        paymentMethod: res.data.payment_method,
+        notes: res.data.notes,
+      };
+      setIncomeRows((rows) => sortByDateDesc([...rows, newRow]));
+      return { ok: true };
+    },
+    []
+  );
+
   // ---------- expenses ----------
 
   const handleExpenseUpdate = useCallback(
@@ -450,6 +503,40 @@ export function FinancialsBoard({
     [expenseDraft, expenseDraftSaving]
   );
 
+  const handleExpenseCreate = useCallback(
+    async (draft: DraftExpenseRow): Promise<CommitResult> => {
+      if (
+        draft.date === null ||
+        draft.category === null ||
+        draft.amount === null ||
+        draft.amount <= 0
+      ) {
+        return { ok: false, error: "Missing required fields" };
+      }
+      const res = await addExpenseAction({
+        date: draft.date,
+        category: draft.category,
+        amount: draft.amount,
+        description: draft.description ?? null,
+        notes: draft.notes ?? null,
+      });
+      if (!res.ok || !res.data) {
+        return { ok: false, error: res.error ?? "Failed to save" };
+      }
+      const newRow: ExpenseRow = {
+        id: res.data.id,
+        date: res.data.date,
+        category: res.data.category,
+        description: res.data.description,
+        amount: Number(res.data.amount),
+        notes: res.data.notes,
+      };
+      setExpenseRows((rows) => sortByDateDesc([...rows, newRow]));
+      return { ok: true };
+    },
+    []
+  );
+
   // ---------- mileage ----------
 
   const handleMileageUpdate = useCallback(
@@ -520,6 +607,46 @@ export function FinancialsBoard({
       return { ok: true };
     },
     [mileageRows]
+  );
+
+  const handleMileageCreate = useCallback(
+    async (draft: DraftMileageRow): Promise<CommitResult> => {
+      if (
+        draft.date === null ||
+        draft.fromAddress === null ||
+        draft.fromAddress.trim() === "" ||
+        draft.toAddress === null ||
+        draft.toAddress.trim() === "" ||
+        draft.miles === null ||
+        draft.miles <= 0
+      ) {
+        return { ok: false, error: "Missing required fields" };
+      }
+      const res = await addMileageLogAction({
+        trip_date: draft.date,
+        from_address: draft.fromAddress.trim(),
+        to_address: draft.toAddress.trim(),
+        miles: draft.miles,
+      });
+      if (!res.ok || !res.data) {
+        return { ok: false, error: res.error ?? "Failed to save" };
+      }
+      const miles = Number(res.data.miles);
+      const ratePerMile = Number(res.data.rate_per_mile);
+      const newRow: MileageRow = {
+        id: res.data.id,
+        date: res.data.trip_date,
+        fromAddress: res.data.from_address,
+        toAddress: res.data.to_address,
+        miles,
+        ratePerMile,
+        deduction: miles * ratePerMile,
+        clientName: null,
+      };
+      setMileageRows((rows) => sortByDateDesc([...rows, newRow]));
+      return { ok: true };
+    },
+    []
   );
 
   // ---------- suggestion accept / dismiss ----------
@@ -754,6 +881,7 @@ export function FinancialsBoard({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+      <CardRowStyles />
       {sugError && (
         <div
           role="alert"
@@ -822,51 +950,92 @@ export function FinancialsBoard({
 
       <div className="financials-main-grid">
         <DashboardCard eyebrow="INCOME" title="Payments received">
-          <IncomeTable
-            rows={incomeRows}
-            onUpdate={handleIncomeUpdate}
-            onDelete={handleIncomeDelete}
-            draft={incomeDraft}
-            draftKey={incomeDraftKey}
-            draftSaving={incomeDraftSaving}
-            draftError={incomeDraftError}
-            onDraftFieldChange={handleIncomeDraftFieldChange}
-            suggestions={incomeSugState}
-            onSuggestionAccept={handleIncomeSuggestionAccept}
-            onSuggestionDismiss={handleIncomeSuggestionDismiss}
-          />
+          <div className="hidden lg:block">
+            <IncomeTable
+              rows={incomeRows}
+              onUpdate={handleIncomeUpdate}
+              onDelete={handleIncomeDelete}
+              draft={incomeDraft}
+              draftKey={incomeDraftKey}
+              draftSaving={incomeDraftSaving}
+              draftError={incomeDraftError}
+              onDraftFieldChange={handleIncomeDraftFieldChange}
+              suggestions={incomeSugState}
+              onSuggestionAccept={handleIncomeSuggestionAccept}
+              onSuggestionDismiss={handleIncomeSuggestionDismiss}
+            />
+          </div>
+          <div className="lg:hidden">
+            <IncomeCardList
+              rows={incomeRows}
+              onUpdate={handleIncomeUpdate}
+              onDelete={handleIncomeDelete}
+              onCreate={handleIncomeCreate}
+              suggestions={incomeSugState}
+              onSuggestionAccept={handleIncomeSuggestionAccept}
+              onSuggestionDismiss={handleIncomeSuggestionDismiss}
+              clientNames={clientNames}
+            />
+          </div>
         </DashboardCard>
 
         <DashboardCard eyebrow="EXPENSES" title="Expenses logged">
-          <ExpenseTable
-            rows={expenseRows}
-            onUpdate={handleExpenseUpdate}
-            onDelete={handleExpenseDelete}
-            draft={expenseDraft}
-            draftKey={expenseDraftKey}
-            draftSaving={expenseDraftSaving}
-            draftError={expenseDraftError}
-            onDraftFieldChange={handleExpenseDraftFieldChange}
-            suggestions={expenseSugState}
-            onSuggestionAccept={handleExpenseSuggestionAccept}
-            onSuggestionDismiss={handleExpenseSuggestionDismiss}
-          />
+          <div className="hidden lg:block">
+            <ExpenseTable
+              rows={expenseRows}
+              onUpdate={handleExpenseUpdate}
+              onDelete={handleExpenseDelete}
+              draft={expenseDraft}
+              draftKey={expenseDraftKey}
+              draftSaving={expenseDraftSaving}
+              draftError={expenseDraftError}
+              onDraftFieldChange={handleExpenseDraftFieldChange}
+              suggestions={expenseSugState}
+              onSuggestionAccept={handleExpenseSuggestionAccept}
+              onSuggestionDismiss={handleExpenseSuggestionDismiss}
+            />
+          </div>
+          <div className="lg:hidden">
+            <ExpenseCardList
+              rows={expenseRows}
+              onUpdate={handleExpenseUpdate}
+              onDelete={handleExpenseDelete}
+              onCreate={handleExpenseCreate}
+              suggestions={expenseSugState}
+              onSuggestionAccept={handleExpenseSuggestionAccept}
+              onSuggestionDismiss={handleExpenseSuggestionDismiss}
+            />
+          </div>
         </DashboardCard>
 
         <DashboardCard eyebrow="MILEAGE" title="Trips logged">
-          <MileageTable
-            rows={mileageRows}
-            onUpdate={handleMileageUpdate}
-            onDelete={handleMileageDelete}
-            draft={mileageDraft}
-            draftKey={mileageDraftKey}
-            draftSaving={mileageDraftSaving}
-            draftError={mileageDraftError}
-            onDraftFieldChange={handleMileageDraftFieldChange}
-            suggestions={mileageSugState}
-            onSuggestionAccept={handleMileageSuggestionAccept}
-            onSuggestionDismiss={handleMileageSuggestionDismiss}
-          />
+          <div className="hidden lg:block">
+            <MileageTable
+              rows={mileageRows}
+              onUpdate={handleMileageUpdate}
+              onDelete={handleMileageDelete}
+              draft={mileageDraft}
+              draftKey={mileageDraftKey}
+              draftSaving={mileageDraftSaving}
+              draftError={mileageDraftError}
+              onDraftFieldChange={handleMileageDraftFieldChange}
+              suggestions={mileageSugState}
+              onSuggestionAccept={handleMileageSuggestionAccept}
+              onSuggestionDismiss={handleMileageSuggestionDismiss}
+            />
+          </div>
+          <div className="lg:hidden">
+            <MileageCardList
+              rows={mileageRows}
+              onUpdate={handleMileageUpdate}
+              onDelete={handleMileageDelete}
+              onCreate={handleMileageCreate}
+              suggestions={mileageSugState}
+              onSuggestionAccept={handleMileageSuggestionAccept}
+              onSuggestionDismiss={handleMileageSuggestionDismiss}
+              currentRatePerMile={mileageRatePerMile}
+            />
+          </div>
         </DashboardCard>
 
         <div className="financials-insights-pair">
