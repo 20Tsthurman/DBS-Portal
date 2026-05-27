@@ -7,6 +7,7 @@ import {
 export interface InvoiceWithClient extends InvoiceRecord {
   client_name: string;
   client_email: string;
+  client_clerk_user_id: string | null;
   /**
    * Computed at read time. Equal to `status` unless `status === 'sent'`
    * and `due_date` is non-null and in the past — in which case the
@@ -25,10 +26,16 @@ export interface InvoiceWithClient extends InvoiceRecord {
 export type InvoiceListStatusFilter = "all" | "open" | "draft" | "sent" | "paid";
 
 const INVOICE_SELECT =
-  "id, client_id, amount, due_date, paid_at, sent_at, status, stripe_payment_link, line_items, created_at, invoice_number, income_type, memo, clients!inner(name, email)";
+  "id, client_id, amount, due_date, paid_at, sent_at, status, stripe_payment_link, line_items, created_at, invoice_number, income_type, memo, clients!inner(name, email, clerk_user_id)";
+
+type RawInvoiceClient = {
+  name: string;
+  email: string;
+  clerk_user_id: string | null;
+};
 
 type RawInvoiceRow = InvoiceRecord & {
-  clients: { name: string; email: string } | { name: string; email: string }[];
+  clients: RawInvoiceClient | RawInvoiceClient[];
 };
 
 function todayKey(): string {
@@ -49,6 +56,7 @@ function flattenRow(row: RawInvoiceRow): InvoiceWithClient {
   const joined = Array.isArray(row.clients) ? row.clients[0] : row.clients;
   const clientName = joined?.name ?? "";
   const clientEmail = joined?.email ?? "";
+  const clientClerkUserId = joined?.clerk_user_id ?? null;
   return {
     id: row.id,
     client_id: row.client_id,
@@ -65,6 +73,7 @@ function flattenRow(row: RawInvoiceRow): InvoiceWithClient {
     memo: row.memo,
     client_name: clientName,
     client_email: clientEmail,
+    client_clerk_user_id: clientClerkUserId,
     effective_status: computeEffectiveStatus(row.status, row.due_date),
   };
 }

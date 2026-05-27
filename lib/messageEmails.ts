@@ -12,12 +12,41 @@ export function buildShell(opts: {
   portalUrl: string;
   recipientName: string;
   titleTag: string;
+  showEyebrow?: boolean;
+  showGreeting?: boolean;
+  showButton?: boolean;
+  extraBodyHtml?: string;
 }): string {
   const safeRecipient = escapeHtml(opts.recipientName);
   const safeHeadline = escapeHtml(opts.headline);
   const safeBody = opts.bodyParagraph;
   const safeUrl = escapeHtml(opts.portalUrl);
   const safeTitle = escapeHtml(opts.titleTag);
+  const showEyebrow = opts.showEyebrow ?? true;
+  const showGreeting = opts.showGreeting ?? true;
+  const showButton = opts.showButton ?? true;
+
+  const eyebrowHtml = showEyebrow
+    ? `<p style="margin:0 0 6px;color:rgba(255,255,255,0.55);font-size:11px;letter-spacing:0.18em;text-transform:uppercase;font-family:'DM Sans',Arial,sans-serif;">Client Portal</p>`
+    : "";
+  const greetingHtml = showGreeting
+    ? `<p style="margin:0 0 4px;font-size:13px;line-height:1.5;color:#7A8B7C;font-family:'DM Sans',Arial,sans-serif;">Hi ${safeRecipient},</p>`
+    : "";
+  // When the greeting is suppressed, the body paragraph becomes the
+  // first element after the headline — drop its top margin so it
+  // doesn't gap awkwardly against the h2.
+  const bodyTopMargin = showGreeting ? "16px" : "0";
+  const bodyBottomMargin = showButton ? "24px" : "0";
+  const buttonHtml = showButton
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:8px auto 0;">
+                  <tr>
+                    <td align="center" style="background-color:#A8788A;">
+                      <a href="${safeUrl}" style="display:inline-block;background-color:#A8788A;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-size:13px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-family:'DM Sans',Arial,sans-serif;">Open Portal</a>
+                    </td>
+                  </tr>
+                </table>`
+    : "";
+  const extraBodyHtml = opts.extraBodyHtml ?? "";
 
   return `<!doctype html>
 <html lang="en">
@@ -36,22 +65,17 @@ export function buildShell(opts: {
           <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;border:1px solid #D8D4C8;">
             <tr>
               <td style="background-color:#1B3827;padding:28px 40px;">
-                <p style="margin:0 0 6px;color:rgba(255,255,255,0.55);font-size:11px;letter-spacing:0.18em;text-transform:uppercase;font-family:'DM Sans',Arial,sans-serif;">Client Portal</p>
+                ${eyebrowHtml}
                 <h1 style="margin:0;font-family:'Playfair Display',Georgia,'Times New Roman',serif;color:#FFFFFF;font-size:22px;font-weight:500;line-height:1.2;">Digital Bloom Socials</h1>
               </td>
             </tr>
             <tr>
               <td style="background-color:#F2EDE4;padding:40px;">
                 <h2 style="margin:0 0 12px;font-family:'Playfair Display',Georgia,'Times New Roman',serif;color:#1B3827;font-size:24px;font-weight:500;line-height:1.3;">${safeHeadline}</h2>
-                <p style="margin:0 0 4px;font-size:13px;line-height:1.5;color:#7A8B7C;font-family:'DM Sans',Arial,sans-serif;">Hi ${safeRecipient},</p>
-                <p style="margin:16px 0 24px;font-size:15px;line-height:1.6;color:#4B5C4E;font-family:'DM Sans',Arial,sans-serif;">${safeBody}</p>
-                <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:8px auto 0;">
-                  <tr>
-                    <td align="center" style="background-color:#A8788A;">
-                      <a href="${safeUrl}" style="display:inline-block;background-color:#A8788A;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-size:13px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-family:'DM Sans',Arial,sans-serif;">Open Portal</a>
-                    </td>
-                  </tr>
-                </table>
+                ${greetingHtml}
+                <p style="margin:${bodyTopMargin} 0 ${bodyBottomMargin};font-size:15px;line-height:1.6;color:#4B5C4E;font-family:'DM Sans',Arial,sans-serif;">${safeBody}</p>
+                ${extraBodyHtml}
+                ${buttonHtml}
               </td>
             </tr>
             <tr>

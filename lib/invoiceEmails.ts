@@ -1,25 +1,51 @@
 import { buildShell } from "@/lib/messageEmails";
 import { escapeHtml } from "@/lib/escapeHtml";
 
+function firstNameOf(fullName: string): string {
+  const trimmed = fullName.trim();
+  if (!trimmed) return trimmed;
+  const [first] = trimmed.split(/\s+/);
+  return first ?? trimmed;
+}
+
 export function buildInvoiceSentEmailHtml(input: {
   recipientName: string;
   invoiceNumber: string;
   amountFormatted: string;
   dueDate: string | null;
   portalInvoiceUrl: string;
+  hasPortalAccess: boolean;
 }): string {
-  const safeNumber = escapeHtml(input.invoiceNumber);
+  const safeFirstName = escapeHtml(firstNameOf(input.recipientName));
   const safeAmount = escapeHtml(input.amountFormatted);
   const dueClause = input.dueDate
-    ? ` It's due on ${escapeHtml(input.dueDate)}.`
+    ? ` and due ${escapeHtml(input.dueDate)}`
     : "";
-  const body = `A new invoice (<strong>${safeNumber}</strong>) for <strong>${safeAmount}</strong> is ready for you.${dueClause} View and pay it in your portal — the PDF is attached for your records.`;
+
+  if (input.hasPortalAccess) {
+    const body = `Hi ${safeFirstName}, your invoice for <strong>${safeAmount}</strong> is attached${dueClause}. You can view and pay it in your portal, or use the payment details in the attached PDF.`;
+    return buildShell({
+      titleTag: `Invoice ${input.invoiceNumber}`,
+      headline: `Invoice ${input.invoiceNumber}`,
+      bodyParagraph: body,
+      portalUrl: input.portalInvoiceUrl,
+      recipientName: input.recipientName,
+      showGreeting: false,
+    });
+  }
+
+  const body = `Hi ${safeFirstName}, your invoice for <strong>${safeAmount}</strong> is attached${dueClause}. Payment details are included in the attached PDF — reach out if you have any questions.`;
+  const extraBodyHtml = `<p style="margin:16px 0 0;font-size:13px;line-height:1.5;color:#4B5C4E;font-family:'DM Sans',Arial,sans-serif;">Want a client portal for invoices, content, and messaging? Just let Kelsey know.</p>`;
   return buildShell({
     titleTag: `Invoice ${input.invoiceNumber}`,
     headline: `Invoice ${input.invoiceNumber}`,
     bodyParagraph: body,
     portalUrl: input.portalInvoiceUrl,
     recipientName: input.recipientName,
+    showEyebrow: false,
+    showGreeting: false,
+    showButton: false,
+    extraBodyHtml,
   });
 }
 

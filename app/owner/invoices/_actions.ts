@@ -440,6 +440,7 @@ export async function sendInvoiceAction(
         amountFormatted: formatAmount(total),
         dueDate: invoice.due_date ? formatDateLong(invoice.due_date) : null,
         portalInvoiceUrl: portalUrl,
+        hasPortalAccess: invoice.client_clerk_user_id != null,
       }),
       attachments: [
         {
