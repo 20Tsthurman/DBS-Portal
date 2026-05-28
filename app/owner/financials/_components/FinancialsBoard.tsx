@@ -1065,13 +1065,10 @@ export function FinancialsBoard({
         @media (max-width: 480px) {
           .financials-summary-grid { grid-template-columns: 1fr; }
         }
-        .financials-main-grid {
+.financials-main-grid {
           display: grid;
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: 1fr;
           gap: 24px;
-        }
-        @media (max-width: 1280px) {
-          .financials-main-grid { grid-template-columns: 1fr; }
         }
         .financials-insights-pair {
           display: grid;
