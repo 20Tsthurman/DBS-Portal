@@ -16,6 +16,14 @@ import { tryBanClerkUser } from "@/lib/clerk";
 import { resolveBaseUrl } from "@/lib/baseUrl";
 import type { ActionResult } from "@/lib/actions";
 
+async function forwardCookieHeader(): Promise<string> {
+  const cookieStore = await cookies();
+  return cookieStore
+    .getAll()
+    .map((c) => `${c.name}=${c.value}`)
+    .join("; ");
+}
+
 const VALID_CATEGORIES: TimeLogCategory[] = [
   "editing",
   "planning",
@@ -139,33 +147,49 @@ const VALID_CLIENT_STATUSES: ClientStatus[] = [
   "lead",
 ];
 
-export interface CreateDraftClientInput {
+export interface CreateClientInput {
   name: string;
   email: string;
   type: ClientType;
   packageId: string | null;
   status: ClientStatus;
+  /**
+   * When true, route through /api/invite (Clerk invitation + Resend email)
+   * and stamp invited_at. When false, insert a "draft client" row with
+   * clerk_user_id and invited_at left NULL — Kelsey can send the invite
+   * later from the client detail page.
+   */
+  sendInvite: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// createDraftClientAction
+// createClientAction
 //
-// Inserts a clients row WITHOUT sending a Clerk invitation or Resend email.
-// `invited_at` and `clerk_user_id` both stay NULL — the row is a "draft
-// client" with no portal access until the owner later sends the invite from
-// the profile page (which routes through /api/invite, whose existing
-// "reuse unlinked row by email" branch — see app/api/invite/route.ts:299-303
-// — picks this row up automatically and stamps invited_at at that point).
+// Single entry point for the Add Client form. Branches on `sendInvite`:
 //
-// Mirrors the column names and defaults used by /api/invite's insert path
-// (app/api/invite/route.ts:341-441) so the two creation paths stay schema-
-// compatible: same trim/normalize for name+email, same projects defaults
-// (current_phase='onboarding', status='active'), same rollback-on-failure
-// for the brand-new clients row if the projects insert errors.
+// sendInvite=false → inserts a clients row WITHOUT a Clerk invitation or
+//   Resend email. `invited_at` and `clerk_user_id` stay NULL. The row picks
+//   up its portal access later when Kelsey clicks "Send Invite" on the
+//   client detail page, which routes through /api/invite's "reuse unlinked
+//   row by email" branch (app/api/invite/route.ts:299-303).
+//
+// sendInvite=true → delegates to /api/invite which handles the Clerk-create
+//   + Resend-send + invited_at-stamp work end-to-end (it also does its own
+//   clients/projects insert with status='onboarding'). Cookies are forwarded
+//   so the route's auth() picks up Kelsey server-side. Mirrors the pattern
+//   in `sendInviteAction` below; see that function's FOLLOW-UP comment for
+//   the shared-helper extraction this whole branch is waiting on.
+//
+// The draft-insert path mirrors the column names and defaults used by
+// /api/invite's insert path (app/api/invite/route.ts:341-441) so the two
+// creation paths stay schema-compatible: same trim/normalize for name+email,
+// same projects defaults (current_phase='onboarding', status='active'),
+// same rollback-on-failure for the brand-new clients row if the projects
+// insert errors.
 // ---------------------------------------------------------------------------
-export async function createDraftClientAction(
-  input: CreateDraftClientInput
-): Promise<ActionResult<ClientRecord>> {
+export async function createClientAction(
+  input: CreateClientInput
+): Promise<ActionResult<{ id: string }>> {
   const guard = await requireOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
 
@@ -193,6 +217,42 @@ export async function createDraftClientAction(
     typeof input.packageId !== "string"
   ) {
     return { ok: false, error: "packageId must be a string or null" };
+  }
+
+  if (input.sendInvite) {
+    const cookieHeader = await forwardCookieHeader();
+    const inviteRes = await fetch(`${resolveBaseUrl()}/api/invite`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader,
+      },
+      body: JSON.stringify({
+        name,
+        email: normalizedEmail,
+        type: input.type,
+        packageId: input.packageId,
+      }),
+      cache: "no-store",
+    });
+
+    const inviteData = (await inviteRes.json().catch(() => ({}))) as {
+      client?: { id: string };
+      error?: string;
+      warning?: string;
+    };
+
+    // 207 = invite succeeded but Resend email failed; the row exists and
+    // invited_at was stamped, so we treat it as success for the form.
+    if (!inviteRes.ok && inviteRes.status !== 207) {
+      return { ok: false, error: inviteData.error ?? "Failed to create client." };
+    }
+    const newId = inviteData.client?.id;
+    if (!newId) {
+      return { ok: false, error: "Invite succeeded but no client id returned." };
+    }
+    revalidatePath("/owner/clients");
+    return { ok: true, data: { id: newId } };
   }
 
   const supabase = getSupabaseServiceClient();
@@ -249,7 +309,7 @@ export async function createDraftClientAction(
   }
 
   revalidatePath("/owner/clients");
-  return { ok: true, data: client };
+  return { ok: true, data: { id: client.id } };
 }
 
 // ---------------------------------------------------------------------------
@@ -395,11 +455,7 @@ export async function sendInviteAction(
   const packageId =
     (projectRow as { package_id: string | null } | null)?.package_id ?? null;
 
-  const cookieStore = await cookies();
-  const cookieHeader = cookieStore
-    .getAll()
-    .map((c) => `${c.name}=${c.value}`)
-    .join("; ");
+  const cookieHeader = await forwardCookieHeader();
 
   const inviteRes = await fetch(`${resolveBaseUrl()}/api/invite`, {
     method: "POST",

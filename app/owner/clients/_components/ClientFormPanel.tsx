@@ -17,7 +17,7 @@ import {
   labelStyle,
 } from "./formStyles";
 import {
-  createDraftClientAction,
+  createClientAction,
   updateProjectPricingAction,
 } from "../_actions";
 
@@ -60,7 +60,7 @@ const emptyValues: ClientInitialValues = {
   monthlyHoursOverride: null,
 };
 
-type SubmitMode = "draft" | "invite" | "edit";
+type SubmitMode = "create" | "edit";
 
 export function ClientFormPanel({
   open,
@@ -75,6 +75,9 @@ export function ClientFormPanel({
   );
   const [loadingButton, setLoadingButton] = useState<SubmitMode | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Opt-in invite. Stays false across re-opens so an accidental click on a
+  // previously-checked panel can't quietly fire another invite email.
+  const [sendInvite, setSendInvite] = useState(false);
 
   // Custom-pricing UI state (edit mode only). Inputs are kept as strings so
   // mid-typing ("2." / "") doesn't get rewritten by Number() coercion. Parsed
@@ -98,6 +101,7 @@ export function ClientFormPanel({
     if (open) {
       setValues(initialValues ?? emptyValues);
       setError(null);
+      setSendInvite(false);
       const customOn =
         (initialValues?.monthlyPriceOverride ?? null) !== null ||
         (initialValues?.monthlyHoursOverride ?? null) !== null;
@@ -135,46 +139,23 @@ export function ClientFormPanel({
 
     setLoadingButton(submitMode);
     try {
-      if (submitMode === "draft") {
-        const result = await createDraftClientAction({
+      if (submitMode === "create") {
+        // Status is auto-derived from the invite checkbox: checked clients
+        // jump straight to 'onboarding' to match the existing invite flow,
+        // unchecked clients land as 'lead' for Kelsey to advance manually
+        // from the detail page.
+        const derivedStatus: ClientStatus = sendInvite ? "onboarding" : "lead";
+        const result = await createClientAction({
           name: values.name.trim(),
           email: values.email.trim(),
           type: values.type,
           packageId: values.packageId,
-          status: values.status,
+          status: derivedStatus,
+          sendInvite,
         });
         if (!result.ok) {
-          setError(result.error ?? "Failed to save draft.");
+          setError(result.error ?? "Failed to save client.");
           return;
-        }
-      } else if (submitMode === "invite") {
-        const inviteRes = await fetch("/api/invite", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: values.name.trim(),
-            email: values.email.trim(),
-            type: values.type,
-            packageId: values.packageId,
-            status: values.status,
-          }),
-        });
-        const inviteData = (await inviteRes.json()) as {
-          client?: { id: string };
-          error?: string;
-          warning?: string;
-        };
-        if (!inviteRes.ok && inviteRes.status !== 207) {
-          setError(inviteData.error ?? "Failed to create client.");
-          return;
-        }
-        const newId = inviteData.client?.id;
-        if (newId && values.status !== "onboarding") {
-          await fetch(`/api/clients/${newId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: values.status }),
-          });
         }
       } else if (submitMode === "edit" && values.id) {
         // Parse and validate the custom-pricing inputs BEFORE writing anything.
@@ -238,11 +219,22 @@ export function ClientFormPanel({
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    // Default form submission (Enter / primary button) goes through the
-    // invite flow in add mode, or the PATCH flow in edit mode.
-    // "Save as draft" is a type="button" path that calls submit("draft")
-    // directly and bypasses this handler.
-    submit(mode === "add" ? "invite" : "edit");
+    if (mode === "edit") {
+      submit("edit");
+      return;
+    }
+    // Add mode: gate the invite path behind a window.confirm so an
+    // accidental Enter / button click can't silently fire a Clerk + Resend
+    // email. The unchecked path saves the client as a lead with no portal
+    // access — fully reversible from the detail page.
+    if (sendInvite) {
+      const trimmedEmail = values.email.trim();
+      const ok = window.confirm(
+        `Send a portal invite email to ${trimmedEmail}? They'll receive a link to set up their account.`
+      );
+      if (!ok) return;
+    }
+    submit("create");
   };
 
   const title = mode === "add" ? "Add Client" : "Edit Client";
@@ -362,46 +354,48 @@ export function ClientFormPanel({
             </div>
           )}
 
-          <div>
-            <label htmlFor="client-status" style={labelStyle}>
-              Status
-            </label>
-            <select
-              id="client-status"
-              value={values.status}
-              onChange={(e) =>
-                setValues((v) => ({
-                  ...v,
-                  status: e.target.value as ClientStatus,
-                }))
-              }
-              onFocus={applyFocus}
-              onBlur={clearFocus}
-              style={fieldStyle}
-            >
-              <option value="lead">Lead</option>
-              <option value="onboarding">Onboarding</option>
-              <option value="active">Active</option>
-              {/*
-                "Inactive" is intentionally NOT a user-selectable option here:
-                deactivation routes through the dedicated "Deactivate Client"
-                button on the detail page so the gravity of the action is
-                visible and the Clerk ban fires reliably (see
-                app/owner/clients/[id]/_components/DeactivateClientButton.tsx).
+          {mode === "edit" && (
+            <div>
+              <label htmlFor="client-status" style={labelStyle}>
+                Status
+              </label>
+              <select
+                id="client-status"
+                value={values.status}
+                onChange={(e) =>
+                  setValues((v) => ({
+                    ...v,
+                    status: e.target.value as ClientStatus,
+                  }))
+                }
+                onFocus={applyFocus}
+                onBlur={clearFocus}
+                style={fieldStyle}
+              >
+                <option value="lead">Lead</option>
+                <option value="onboarding">Onboarding</option>
+                <option value="active">Active</option>
+                {/*
+                  "Inactive" is intentionally NOT a user-selectable option here:
+                  deactivation routes through the dedicated "Deactivate Client"
+                  button on the detail page so the gravity of the action is
+                  visible and the Clerk ban fires reliably (see
+                  app/owner/clients/[id]/_components/DeactivateClientButton.tsx).
 
-                The option is rendered here ONLY when the client is already
-                inactive — otherwise the controlled <select> would silently
-                coerce the value to the first listed option, losing state.
-                Picking active/onboarding/lead from this dropdown for an
-                already-inactive client reactivates them via the PATCH
-                handler's existing unban branch
-                (app/api/clients/[id]/route.ts:160-170).
-              */}
-              {values.status === "inactive" && (
-                <option value="inactive">Inactive</option>
-              )}
-            </select>
-          </div>
+                  The option is rendered here ONLY when the client is already
+                  inactive — otherwise the controlled <select> would silently
+                  coerce the value to the first listed option, losing state.
+                  Picking active/onboarding/lead from this dropdown for an
+                  already-inactive client reactivates them via the PATCH
+                  handler's existing unban branch
+                  (app/api/clients/[id]/route.ts:160-170).
+                */}
+                {values.status === "inactive" && (
+                  <option value="inactive">Inactive</option>
+                )}
+              </select>
+            </div>
+          )}
 
           {mode === "edit" && (
             <div
@@ -502,29 +496,68 @@ export function ClientFormPanel({
           {error && <div style={errorStyle}>{error}</div>}
         </div>
 
+        {mode === "add" && (
+          <div
+            style={{
+              marginTop: 24,
+              borderTop: "1px solid var(--border)",
+              paddingTop: 24,
+            }}
+          >
+            <div style={labelStyle}>Portal Access</div>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                cursor: "pointer",
+                fontSize: 14,
+                color: "var(--text-primary)",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={sendInvite}
+                onChange={(e) => setSendInvite(e.target.checked)}
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: 0,
+                  accentColor: "var(--accent)",
+                  cursor: "pointer",
+                }}
+              />
+              Send portal invite when saving
+            </label>
+            <p
+              style={{
+                marginTop: 4,
+                fontSize: 12,
+                color: "var(--text-muted)",
+              }}
+            >
+              They&apos;ll receive an email with a link to set up their
+              account. You can also invite them later from the client&apos;s
+              page.
+            </p>
+          </div>
+        )}
+
         <div className="pt-6 flex flex-col gap-3">
           {mode === "add" ? (
-            <>
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={loadingButton !== null}
-                className="w-full"
-                style={{ width: "100%" }}
-              >
-                {loadingButton === "invite" ? "Working…" : "Save & send invite"}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => submit("draft")}
-                disabled={loadingButton !== null}
-                className="w-full"
-                style={{ width: "100%" }}
-              >
-                {loadingButton === "draft" ? "Working…" : "Save as draft"}
-              </Button>
-            </>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={loadingButton !== null}
+              className="w-full"
+              style={{ width: "100%" }}
+            >
+              {loadingButton === "create"
+                ? "Working…"
+                : sendInvite
+                  ? "Save & send invite"
+                  : "Save client"}
+            </Button>
           ) : (
             <Button
               type="submit"
