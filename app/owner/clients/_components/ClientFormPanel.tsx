@@ -60,7 +60,9 @@ const emptyValues: ClientInitialValues = {
   email: "",
   phone: "",
   type: "brand",
-  status: "onboarding",
+  // Add form default — overridable via the Status selector. (Edit mode always
+  // receives initialValues, so this only governs the Add Client form.)
+  status: "lead",
   packageId: null,
   invitedAt: null,
   monthlyPriceOverride: null,
@@ -194,18 +196,17 @@ export function ClientFormPanel({
     setLoadingButton(submitMode);
     try {
       if (submitMode === "create") {
-        // Status is auto-derived from the invite checkbox: checked clients
-        // jump straight to 'onboarding' to match the existing invite flow,
-        // unchecked clients land as 'lead' for Kelsey to advance manually
-        // from the detail page.
-        const derivedStatus: ClientStatus = sendInvite ? "onboarding" : "lead";
+        // Status comes straight from the Status selector and is independent of
+        // the portal-invite checkbox. (On the invite path the /api/invite route
+        // still owns its own insert with status='onboarding'; the draft-insert
+        // path persists this value.)
         const result = await createClientAction({
           name: trimmedName,
           email: hasEmail ? trimmedEmail : null,
           phone: phoneResult.value,
           type: values.type,
           packageId: values.packageId,
-          status: derivedStatus,
+          status: values.status,
           sendInvite,
         });
         if (!result.ok) {
@@ -423,6 +424,31 @@ export function ClientFormPanel({
               <option value="bride">Bride</option>
             </select>
           </div>
+
+          {mode === "add" && (
+            <div>
+              <label htmlFor="client-add-status" style={labelStyle}>
+                Status
+              </label>
+              <select
+                id="client-add-status"
+                value={values.status}
+                onChange={(e) =>
+                  setValues((v) => ({
+                    ...v,
+                    status: e.target.value as ClientStatus,
+                  }))
+                }
+                onFocus={applyFocus}
+                onBlur={clearFocus}
+                style={fieldStyle}
+              >
+                <option value="lead">Lead</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+          )}
 
           {mode === "add" && (
             <div>

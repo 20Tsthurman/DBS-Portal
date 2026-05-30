@@ -50,7 +50,8 @@
       "Bash(npm audit *)",
       "Bash(sed 's/=$//')",
       "Bash(command -v psql)",
-      "Bash(command -v supabase)"
+      "Bash(command -v supabase)",
+      "mcp__ide__getDiagnostics"
     ]
   }
 }
