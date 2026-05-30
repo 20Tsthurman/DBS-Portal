@@ -140,6 +140,10 @@ export function ClientsTable({ clients }: ClientsTableProps) {
             style={{
               borderColor: "var(--border)",
               backgroundColor: "var(--surface-raised)",
+              // Safety net for narrow laptops (~1024px, where the sidebar still
+              // claims 240px): the 8-column table scrolls horizontally instead
+              // of crushing its cells.
+              overflowX: "auto",
             }}
           >
             <table>
@@ -332,10 +336,37 @@ export function ClientsTable({ clients }: ClientsTableProps) {
           flex-wrap: wrap;
           gap: 12px;
           align-items: center;
+          min-width: 0;
         }
-        @media (max-width: 640px) {
+        /* Each segmented group keeps its connected look but becomes a
+           horizontal-swipe strip when it can't fit (e.g. the long Status row
+           on an iPhone). Scrollbar hidden for an iOS-native feel; on screens
+           where it fits, nothing scrolls. */
+        .clients-pillgroup {
+          display: inline-flex;
+          max-width: 100%;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .clients-pillgroup::-webkit-scrollbar {
+          display: none;
+        }
+        /* Below the lg breakpoint (where the sidebar collapses and space is
+           tight) let the search and each filter group take the full row so
+           they stack cleanly instead of overflowing. */
+        @media (max-width: 1023px) {
           .clients-toolbar-search {
             flex-basis: 100%;
+          }
+          .clients-toolbar-filters {
+            width: 100%;
+            flex-direction: column;
+            align-items: stretch;
+          }
+          .clients-pillgroup {
+            width: 100%;
           }
         }
       `}</style>
@@ -359,7 +390,7 @@ function PillGroup<T extends string>({
   ariaLabel: string;
 }) {
   return (
-    <div style={{ display: "inline-flex" }} role="group" aria-label={ariaLabel}>
+    <div className="clients-pillgroup" role="group" aria-label={ariaLabel}>
       {options.map((item, i) => {
         const isActive = item.value === active;
         return (
@@ -405,4 +436,8 @@ const pillStyle: CSSProperties = {
   cursor: "pointer",
   display: "inline-flex",
   alignItems: "center",
+  // Keep each segment at its natural size inside the (scrollable) group so
+  // labels never wrap to two lines or get squished on narrow screens.
+  flex: "0 0 auto",
+  whiteSpace: "nowrap",
 };
