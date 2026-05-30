@@ -6,7 +6,6 @@ import type {
 } from "@/lib/supabase";
 import { formatDateTime, formatHours } from "../../_lib/format";
 import { StatCard } from "@/components/ui/StatCard";
-import { PhaseTracker } from "./PhaseTracker";
 import { effectiveMonthlyHours } from "@/lib/pricing";
 
 interface OverviewTabProps {
@@ -31,8 +30,6 @@ export function OverviewTab({
 
   return (
     <div className="space-y-8">
-      <PhaseTracker current={project?.current_phase ?? null} />
-
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Hours This Month"
