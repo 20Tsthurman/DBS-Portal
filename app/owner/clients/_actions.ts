@@ -364,6 +364,33 @@ export async function createClientAction(
 }
 
 // ---------------------------------------------------------------------------
+// togglePinClient
+//
+// Flips clients.pinned for a single row. Drives the "Pin"/"Pinned" affordance
+// on the clients roster (ClientsTable), which sorts pinned rows to the top.
+// Auth via the same requireOwner() guard the rest of this file uses; returns
+// the shared ActionResult envelope and never throws to the caller.
+// ---------------------------------------------------------------------------
+export async function togglePinClient(
+  clientId: string,
+  pinned: boolean
+): Promise<ActionResult<null>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  if (!clientId) return { ok: false, error: "Missing client id" };
+
+  const supabase = getSupabaseServiceClient();
+  const { error } = await supabase
+    .from("clients")
+    .update({ pinned })
+    .eq("id", clientId);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/owner/clients");
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
 // updateProjectPricingAction
 //
 // Persists per-client price/hours overrides onto the client's most recent

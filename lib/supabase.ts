@@ -50,6 +50,8 @@ export interface ClientRecord {
   clerk_user_id: string | null;
   type: ClientType;
   status: ClientStatus;
+  /** Owner-pinned to the top of the clients roster. Added in migration 005. */
+  pinned: boolean;
   created_at: string;
   invited_at: string | null;
   owner_last_new_msg_email_at: string | null;
