@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
-import { auth, currentUser } from "@clerk/nextjs/server";
 import {
   getSupabaseServiceClient,
   type ClientRecord,
   type MessageRecord,
   type SenderRole,
 } from "@/lib/supabase";
-import { getCurrentClient } from "@/lib/currentClient";
+import { requireOwnerOrClientApi } from "@/lib/auth";
 import { maybeSendNewMessageEmail } from "@/lib/messageNotifications";
 
 interface SendBody {
@@ -16,15 +15,9 @@ interface SendBody {
 }
 
 export async function POST(request: Request) {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const user = await currentUser();
-  const role = user?.publicMetadata?.role;
-  if (role !== "owner" && role !== "client") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const gate = await requireOwnerOrClientApi();
+  if (gate instanceof NextResponse) return gate;
+  const { role } = gate;
 
   let payload: SendBody;
   try {
@@ -50,13 +43,9 @@ export async function POST(request: Request) {
   let clientRecord: ClientRecord;
 
   if (role === "client") {
-    const current = await getCurrentClient();
-    if (!current) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-    clientId = current.id;
+    clientId = gate.client.id;
     senderRole = "client";
-    clientRecord = current;
+    clientRecord = gate.client;
   } else {
     if (typeof payload.clientId !== "string" || payload.clientId.length === 0) {
       return NextResponse.json(
@@ -123,26 +112,16 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const user = await currentUser();
-  const role = user?.publicMetadata?.role;
-  if (role !== "owner" && role !== "client") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const gate = await requireOwnerOrClientApi();
+  if (gate instanceof NextResponse) return gate;
+  const { role } = gate;
 
   const url = new URL(request.url);
   const since = url.searchParams.get("since");
 
   let clientId: string;
   if (role === "client") {
-    const clientRecord = await getCurrentClient();
-    if (!clientRecord) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-    clientId = clientRecord.id;
+    clientId = gate.client.id;
   } else {
     const queryClientId = url.searchParams.get("clientId");
     if (!queryClientId) {

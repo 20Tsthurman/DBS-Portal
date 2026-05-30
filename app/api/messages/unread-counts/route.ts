@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
 import { getSupabaseServiceClient } from "@/lib/supabase";
-import { getCurrentClient } from "@/lib/currentClient";
+import { requireOwnerOrClientApi } from "@/lib/auth";
 import {
   fetchUnreadCountsForOwner,
   type OwnerUnreadCounts,
@@ -24,15 +23,9 @@ export type UnreadCountsResponse =
 export type { UnreadClient };
 
 export async function GET() {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const user = await currentUser();
-  const role = user?.publicMetadata?.role;
-  if (role !== "owner" && role !== "client") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const gate = await requireOwnerOrClientApi();
+  if (gate instanceof NextResponse) return gate;
+  const { role } = gate;
 
   const supabase = getSupabaseServiceClient();
 
@@ -46,15 +39,10 @@ export async function GET() {
     }
   }
 
-  const clientRecord = await getCurrentClient();
-  if (!clientRecord) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
   const { count, error } = await supabase
     .from("messages")
     .select("*", { count: "exact", head: true })
-    .eq("client_id", clientRecord.id)
+    .eq("client_id", gate.client.id)
     .eq("sender_role", "owner")
     .is("read_at", null);
 

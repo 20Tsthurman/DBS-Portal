@@ -1,35 +1,24 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
 import {
   getSupabaseServiceClient,
   type SenderRole,
 } from "@/lib/supabase";
-import { getCurrentClient } from "@/lib/currentClient";
+import { requireOwnerOrClientApi } from "@/lib/auth";
 
 interface ReadBody {
   clientId?: unknown;
 }
 
 export async function PATCH(request: Request) {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const user = await currentUser();
-  const role = user?.publicMetadata?.role;
-  if (role !== "owner" && role !== "client") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const gate = await requireOwnerOrClientApi();
+  if (gate instanceof NextResponse) return gate;
+  const { role } = gate;
 
   let clientId: string;
   let otherRole: SenderRole;
 
   if (role === "client") {
-    const clientRecord = await getCurrentClient();
-    if (!clientRecord) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-    clientId = clientRecord.id;
+    clientId = gate.client.id;
     otherRole = "owner";
   } else {
     let payload: ReadBody;
