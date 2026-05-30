@@ -13,18 +13,24 @@ import {
   applyFocus,
   clearFocus,
   errorStyle,
+  fieldErrorStyle,
   fieldStyle,
+  helperStyle,
   labelStyle,
 } from "./formStyles";
 import {
   createClientAction,
   updateProjectPricingAction,
 } from "../_actions";
+import { normalizePhone } from "@/lib/phone";
 
 export interface ClientInitialValues {
   id?: string;
   name: string;
-  email: string;
+  /** Nullable since migration 004 — a client may have a phone instead. */
+  email: string | null;
+  /** Bare 10-digit string or null. Normalized on submit. */
+  phone: string | null;
   type: ClientType;
   status: ClientStatus;
   packageId: string | null;
@@ -52,6 +58,7 @@ interface ClientFormPanelProps {
 const emptyValues: ClientInitialValues = {
   name: "",
   email: "",
+  phone: "",
   type: "brand",
   status: "onboarding",
   packageId: null,
@@ -61,6 +68,11 @@ const emptyValues: ClientInitialValues = {
 };
 
 type SubmitMode = "create" | "edit";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function isValidEmail(value: string): boolean {
+  return EMAIL_RE.test(value);
+}
 
 export function ClientFormPanel({
   open,
@@ -78,6 +90,16 @@ export function ClientFormPanel({
   // Opt-in invite. Stays false across re-opens so an accidental click on a
   // previously-checked panel can't quietly fire another invite email.
   const [sendInvite, setSendInvite] = useState(false);
+  // Inline-validation display gating: a field's error only renders once the
+  // field has been touched (blurred) or a submit has been attempted, so a
+  // pristine form doesn't shout. The submit button, by contrast, is disabled
+  // from the start whenever validation errors exist.
+  const [touched, setTouched] = useState<{
+    name?: boolean;
+    email?: boolean;
+    phone?: boolean;
+  }>({});
+  const [showErrors, setShowErrors] = useState(false);
 
   // Custom-pricing UI state (edit mode only). Inputs are kept as strings so
   // mid-typing ("2." / "") doesn't get rewritten by Number() coercion. Parsed
@@ -102,6 +124,8 @@ export function ClientFormPanel({
       setValues(initialValues ?? emptyValues);
       setError(null);
       setSendInvite(false);
+      setTouched({});
+      setShowErrors(false);
       const customOn =
         (initialValues?.monthlyPriceOverride ?? null) !== null ||
         (initialValues?.monthlyHoursOverride ?? null) !== null;
@@ -125,18 +149,48 @@ export function ClientFormPanel({
     ? packages.find((p) => p.id === values.packageId)
     : undefined;
 
+  const isEmailLocked = mode === "edit" && values.invitedAt != null;
+
+  // ---- Derived validation (recomputed every render) -----------------------
+  const trimmedName = values.name.trim();
+  const trimmedEmail = (values.email ?? "").trim();
+  const rawPhone = (values.phone ?? "").trim();
+  const phoneResult = normalizePhone(rawPhone);
+  const hasEmail = trimmedEmail.length > 0;
+  const hasPhone = rawPhone.length > 0;
+
+  const nameError = !trimmedName ? "Name is required." : null;
+  const emailFormatError =
+    hasEmail && !isValidEmail(trimmedEmail)
+      ? "Please enter a valid email address."
+      : null;
+  const phoneError =
+    hasPhone && !phoneResult.ok
+      ? "Please enter a valid 10-digit phone number."
+      : null;
+  const inviteNeedsEmail =
+    mode === "add" && sendInvite && !hasEmail
+      ? "An email address is required to send a portal invite."
+      : null;
+  // At-least-one is suppressed when invite-needs-email is showing (the invite
+  // path already requires an email, so the combined message would be noise).
+  const atLeastOneError =
+    !hasEmail && !hasPhone && !inviteNeedsEmail
+      ? "Please provide either an email address or a phone number."
+      : null;
+
+  const hasValidationErrors = Boolean(
+    nameError ||
+      emailFormatError ||
+      phoneError ||
+      inviteNeedsEmail ||
+      atLeastOneError
+  );
+
+  const contactTouched = showErrors || touched.email || touched.phone;
+
   const submit = async (submitMode: SubmitMode) => {
     setError(null);
-
-    if (!values.name.trim()) {
-      setError("Name is required.");
-      return;
-    }
-    if (!values.email.trim() || !values.email.includes("@")) {
-      setError("A valid email address is required.");
-      return;
-    }
-
     setLoadingButton(submitMode);
     try {
       if (submitMode === "create") {
@@ -146,8 +200,9 @@ export function ClientFormPanel({
         // from the detail page.
         const derivedStatus: ClientStatus = sendInvite ? "onboarding" : "lead";
         const result = await createClientAction({
-          name: values.name.trim(),
-          email: values.email.trim(),
+          name: trimmedName,
+          email: hasEmail ? trimmedEmail : null,
+          phone: phoneResult.value,
           type: values.type,
           packageId: values.packageId,
           status: derivedStatus,
@@ -186,8 +241,11 @@ export function ClientFormPanel({
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            name: values.name.trim(),
-            email: values.email.trim(),
+            name: trimmedName,
+            // Locked email is sent unchanged; an unlocked draft can be cleared
+            // to null as long as a phone remains (server enforces at-least-one).
+            email: hasEmail ? trimmedEmail : null,
+            phone: phoneResult.value,
             type: values.type,
             status: values.status,
           }),
@@ -219,6 +277,11 @@ export function ClientFormPanel({
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    // Reveal any inline errors and refuse to submit while they exist (the
+    // disabled button already blocks the common path; this guards Enter).
+    setShowErrors(true);
+    if (hasValidationErrors) return;
+
     if (mode === "edit") {
       submit("edit");
       return;
@@ -228,7 +291,6 @@ export function ClientFormPanel({
     // email. The unchecked path saves the client as a lead with no portal
     // access — fully reversible from the detail page.
     if (sendInvite) {
-      const trimmedEmail = values.email.trim();
       const ok = window.confirm(
         `Send a portal invite email to ${trimmedEmail}? They'll receive a link to set up their account.`
       );
@@ -260,9 +322,15 @@ export function ClientFormPanel({
                 setValues((v) => ({ ...v, name: e.target.value }))
               }
               onFocus={applyFocus}
-              onBlur={clearFocus}
+              onBlur={(e) => {
+                clearFocus(e);
+                setTouched((t) => ({ ...t, name: true }));
+              }}
               style={fieldStyle}
             />
+            {nameError && (showErrors || touched.name) && (
+              <p style={fieldErrorStyle}>{nameError}</p>
+            )}
           </div>
 
           <div>
@@ -272,34 +340,64 @@ export function ClientFormPanel({
             <input
               id="client-email"
               type="email"
-              required
-              value={values.email}
+              value={values.email ?? ""}
               onChange={(e) =>
                 setValues((v) => ({ ...v, email: e.target.value }))
               }
               onFocus={applyFocus}
-              onBlur={clearFocus}
-              disabled={mode === "edit" && values.invitedAt != null}
+              onBlur={(e) => {
+                clearFocus(e);
+                setTouched((t) => ({ ...t, email: true }));
+              }}
+              disabled={isEmailLocked}
               style={{
                 ...fieldStyle,
-                opacity:
-                  mode === "edit" && values.invitedAt != null ? 0.6 : 1,
-                cursor:
-                  mode === "edit" && values.invitedAt != null
-                    ? "not-allowed"
-                    : "text",
+                opacity: isEmailLocked ? 0.6 : 1,
+                cursor: isEmailLocked ? "not-allowed" : "text",
               }}
             />
-            {mode === "edit" && values.invitedAt != null && (
-              <p
-                style={{
-                  marginTop: 6,
-                  fontSize: 12,
-                  color: "var(--text-muted)",
-                }}
-              >
+            {isEmailLocked ? (
+              <p style={helperStyle}>
                 Email is locked once an invite has been sent.
               </p>
+            ) : (
+              <p style={helperStyle}>
+                Optional, but required to send a portal invite or email
+                invoices.
+              </p>
+            )}
+            {emailFormatError && (showErrors || touched.email) && (
+              <p style={fieldErrorStyle}>{emailFormatError}</p>
+            )}
+            {!emailFormatError && inviteNeedsEmail && contactTouched && (
+              <p style={fieldErrorStyle}>{inviteNeedsEmail}</p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="client-phone" style={labelStyle}>
+              Phone Number
+            </label>
+            <input
+              id="client-phone"
+              type="tel"
+              value={values.phone ?? ""}
+              onChange={(e) =>
+                setValues((v) => ({ ...v, phone: e.target.value }))
+              }
+              onFocus={applyFocus}
+              onBlur={(e) => {
+                clearFocus(e);
+                setTouched((t) => ({ ...t, phone: true }));
+              }}
+              style={fieldStyle}
+            />
+            <p style={helperStyle}>Optional. Format: any (will be normalized).</p>
+            {phoneError && (showErrors || touched.phone) && (
+              <p style={fieldErrorStyle}>{phoneError}</p>
+            )}
+            {!phoneError && atLeastOneError && contactTouched && (
+              <p style={fieldErrorStyle}>{atLeastOneError}</p>
             )}
           </div>
 
@@ -446,13 +544,7 @@ export function ClientFormPanel({
                       }
                       style={fieldStyle}
                     />
-                    <p
-                      style={{
-                        marginTop: 6,
-                        fontSize: 12,
-                        color: "var(--text-muted)",
-                      }}
-                    >
+                    <p style={helperStyle}>
                       Leave blank to use the package default.
                     </p>
                   </div>
@@ -478,13 +570,7 @@ export function ClientFormPanel({
                       }
                       style={fieldStyle}
                     />
-                    <p
-                      style={{
-                        marginTop: 6,
-                        fontSize: 12,
-                        color: "var(--text-muted)",
-                      }}
-                    >
+                    <p style={helperStyle}>
                       Leave blank to use the package default.
                     </p>
                   </div>
@@ -548,7 +634,7 @@ export function ClientFormPanel({
             <Button
               type="submit"
               variant="primary"
-              disabled={loadingButton !== null}
+              disabled={loadingButton !== null || hasValidationErrors}
               className="w-full"
               style={{ width: "100%" }}
             >
@@ -562,7 +648,7 @@ export function ClientFormPanel({
             <Button
               type="submit"
               variant="primary"
-              disabled={loadingButton !== null}
+              disabled={loadingButton !== null || hasValidationErrors}
               className="w-full"
               style={{ width: "100%" }}
             >

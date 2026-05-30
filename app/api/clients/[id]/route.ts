@@ -7,10 +7,12 @@ import {
 } from "@/lib/supabase";
 import { requireOwnerApi } from "@/lib/auth";
 import { tryBanClerkUser, tryUnbanClerkUser } from "@/lib/clerk";
+import { normalizePhone } from "@/lib/phone";
 
 interface PatchBody {
   name?: unknown;
   email?: unknown;
+  phone?: unknown;
   type?: unknown;
   status?: unknown;
 }
@@ -55,13 +57,44 @@ export async function PATCH(
   }
 
   if (body.email !== undefined) {
-    if (typeof body.email !== "string" || !body.email.includes("@")) {
+    // null or empty string clears the email (allowed for non-invited rows);
+    // a non-empty value must look like an address.
+    if (
+      body.email === null ||
+      (typeof body.email === "string" && body.email.trim() === "")
+    ) {
+      updates.email = null;
+    } else if (typeof body.email === "string" && body.email.includes("@")) {
+      updates.email = body.email.trim().toLowerCase();
+    } else {
       return NextResponse.json(
         { error: "email must be a valid address" },
         { status: 400 }
       );
     }
-    updates.email = body.email.trim().toLowerCase();
+  }
+
+  if (body.phone !== undefined) {
+    if (
+      body.phone === null ||
+      (typeof body.phone === "string" && body.phone.trim() === "")
+    ) {
+      updates.phone = null;
+    } else if (typeof body.phone === "string") {
+      const result = normalizePhone(body.phone);
+      if (!result.ok) {
+        return NextResponse.json(
+          { error: "phone must be a valid 10-digit number" },
+          { status: 400 }
+        );
+      }
+      updates.phone = result.value;
+    } else {
+      return NextResponse.json(
+        { error: "phone must be a string or null" },
+        { status: 400 }
+      );
+    }
   }
 
   if (body.type !== undefined) {
@@ -100,10 +133,11 @@ export async function PATCH(
   const supabase = getSupabaseServiceClient();
 
   // Read prior state so we can detect a status transition out of
-  // 'inactive' and unban the Clerk user accordingly.
+  // 'inactive' (to unban the Clerk user) and enforce the at-least-one-contact
+  // rule against the post-update email/phone.
   const { data: priorRow, error: priorError } = await supabase
     .from("clients")
-    .select("id, status, clerk_user_id")
+    .select("id, status, clerk_user_id, email, phone")
     .eq("id", id)
     .maybeSingle();
   if (priorError) {
@@ -111,8 +145,19 @@ export async function PATCH(
   }
   const prior = priorRow as Pick<
     ClientRecord,
-    "id" | "status" | "clerk_user_id"
+    "id" | "status" | "clerk_user_id" | "email" | "phone"
   > | null;
+
+  // At least one contact method must remain after the update. Computed from
+  // the fields actually being changed, falling back to the stored values.
+  const effectiveEmail = "email" in updates ? updates.email : prior?.email ?? null;
+  const effectivePhone = "phone" in updates ? updates.phone : prior?.phone ?? null;
+  if (!effectiveEmail && !effectivePhone) {
+    return NextResponse.json(
+      { error: "A client must have either an email address or a phone number." },
+      { status: 400 }
+    );
+  }
 
   const { data, error } = await supabase
     .from("clients")

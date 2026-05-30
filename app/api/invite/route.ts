@@ -575,8 +575,11 @@ export async function POST(request: Request) {
       process.env.RESEND_FROM_EMAIL ??
       "Digital Bloom Socials <onboarding@resend.dev>";
     const { error: emailError } = await resend.emails.send({
+      // Use the request's normalized email (a non-null string) rather than
+      // client.email, which is nullable since migration 004. They are equal
+      // here — the invite path always has a validated email.
+      to: normalizedEmail,
       from: fromAddress,
-      to: client.email,
       subject: "You're invited to your client portal — Digital Bloom Socials",
       html: buildInviteEmailHtml({
         name: client.name,

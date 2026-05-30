@@ -14,6 +14,7 @@ import {
 import { requireOwner } from "@/lib/auth";
 import { tryBanClerkUser } from "@/lib/clerk";
 import { resolveBaseUrl } from "@/lib/baseUrl";
+import { normalizePhone } from "@/lib/phone";
 import type { ActionResult } from "@/lib/actions";
 
 async function forwardCookieHeader(): Promise<string> {
@@ -149,7 +150,10 @@ const VALID_CLIENT_STATUSES: ClientStatus[] = [
 
 export interface CreateClientInput {
   name: string;
-  email: string;
+  /** Optional since migration 004 — at least one of email/phone is required. */
+  email: string | null;
+  /** Optional. Any format accepted; normalized to a bare 10-digit string. */
+  phone: string | null;
   type: ClientType;
   packageId: string | null;
   status: ClientStatus;
@@ -196,11 +200,38 @@ export async function createClientAction(
   const name = typeof input.name === "string" ? input.name.trim() : "";
   if (!name) return { ok: false, error: "Name is required" };
 
+  // Email is optional, but must be a valid address when present.
   const email = typeof input.email === "string" ? input.email.trim() : "";
-  if (!email || !email.includes("@")) {
-    return { ok: false, error: "A valid email address is required" };
+  let normalizedEmail: string | null = null;
+  if (email) {
+    if (!email.includes("@")) {
+      return { ok: false, error: "Please enter a valid email address." };
+    }
+    normalizedEmail = email.toLowerCase();
   }
-  const normalizedEmail = email.toLowerCase();
+
+  // Phone is optional; normalize to the canonical 10-digit form when present.
+  const phoneResult = normalizePhone(input.phone);
+  if (!phoneResult.ok) {
+    return { ok: false, error: "Please enter a valid 10-digit phone number." };
+  }
+  const phone = phoneResult.value;
+
+  // At least one contact method (enforced here, not at the DB layer).
+  if (!normalizedEmail && !phone) {
+    return {
+      ok: false,
+      error: "Please provide either an email address or a phone number.",
+    };
+  }
+
+  // The invite path (Clerk + Resend) is keyed on an email address.
+  if (input.sendInvite && !normalizedEmail) {
+    return {
+      ok: false,
+      error: "An email address is required to send a portal invite.",
+    };
+  }
 
   if (!VALID_CLIENT_TYPES.includes(input.type)) {
     return { ok: false, error: "type must be 'brand' or 'bride'" };
@@ -251,6 +282,25 @@ export async function createClientAction(
     if (!newId) {
       return { ok: false, error: "Invite succeeded but no client id returned." };
     }
+
+    // /api/invite owns the row insert and has no phone column in its body, so
+    // stamp the phone here once the row exists. Best-effort: the invite already
+    // succeeded (invited_at stamped), so a phone-write hiccup shouldn't fail
+    // the form — log and continue.
+    if (phone) {
+      const supabase = getSupabaseServiceClient();
+      const { error: phoneError } = await supabase
+        .from("clients")
+        .update({ phone })
+        .eq("id", newId);
+      if (phoneError) {
+        console.error(
+          `[clients] invite succeeded but phone update failed for clients.id=${newId}:`,
+          phoneError.message
+        );
+      }
+    }
+
     revalidatePath("/owner/clients");
     return { ok: true, data: { id: newId } };
   }
@@ -262,6 +312,7 @@ export async function createClientAction(
     .insert({
       name,
       email: normalizedEmail,
+      phone,
       type: input.type,
       status: input.status,
       clerk_user_id: null,

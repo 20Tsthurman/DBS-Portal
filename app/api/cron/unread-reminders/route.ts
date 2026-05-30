@@ -141,6 +141,9 @@ async function runReminders(): Promise<ReminderSummary> {
       );
       if (cooldownActive) {
         summary.suppressed += 1;
+      } else if (!record.email) {
+        // Phone-only client (no email since migration 004) — nothing to email.
+        summary.suppressed += 1;
       } else {
         const ok = await sendReminder({
           resend,

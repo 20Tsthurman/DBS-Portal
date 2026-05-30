@@ -44,8 +44,10 @@ function flattenRow(row: RawInvoiceRow): InvoiceWithClient {
     memo: row.memo,
     client_name: clientName,
     client_email: clientEmail,
-    // Field is only consumed by the owner-side invoice-send flow;
-    // the client surface doesn't need to know about the join column.
+    // client_phone and client_clerk_user_id are only consumed by the
+    // owner-side invoice-send flow; the client surface doesn't need the
+    // join columns, so they're not selected and default here.
+    client_phone: null,
     client_clerk_user_id: null,
     effective_status: effective,
   };

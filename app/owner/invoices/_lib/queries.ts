@@ -7,6 +7,7 @@ import {
 export interface InvoiceWithClient extends InvoiceRecord {
   client_name: string;
   client_email: string;
+  client_phone: string | null;
   client_clerk_user_id: string | null;
   /**
    * Computed at read time. Equal to `status` unless `status === 'sent'`
@@ -26,11 +27,12 @@ export interface InvoiceWithClient extends InvoiceRecord {
 export type InvoiceListStatusFilter = "all" | "open" | "draft" | "sent" | "paid";
 
 const INVOICE_SELECT =
-  "id, client_id, amount, due_date, paid_at, sent_at, status, stripe_payment_link, line_items, created_at, invoice_number, income_type, memo, clients!inner(name, email, clerk_user_id)";
+  "id, client_id, amount, due_date, paid_at, sent_at, status, stripe_payment_link, line_items, created_at, invoice_number, income_type, memo, clients!inner(name, email, phone, clerk_user_id)";
 
 type RawInvoiceClient = {
   name: string;
-  email: string;
+  email: string | null;
+  phone: string | null;
   clerk_user_id: string | null;
 };
 
@@ -56,6 +58,7 @@ function flattenRow(row: RawInvoiceRow): InvoiceWithClient {
   const joined = Array.isArray(row.clients) ? row.clients[0] : row.clients;
   const clientName = joined?.name ?? "";
   const clientEmail = joined?.email ?? "";
+  const clientPhone = joined?.phone ?? null;
   const clientClerkUserId = joined?.clerk_user_id ?? null;
   return {
     id: row.id,
@@ -73,6 +76,7 @@ function flattenRow(row: RawInvoiceRow): InvoiceWithClient {
     memo: row.memo,
     client_name: clientName,
     client_email: clientEmail,
+    client_phone: clientPhone,
     client_clerk_user_id: clientClerkUserId,
     effective_status: computeEffectiveStatus(row.status, row.due_date),
   };
@@ -107,7 +111,8 @@ export async function fetchInvoices(filters?: {
 export interface ClientPickerOption {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
+  phone: string | null;
 }
 
 /**
@@ -119,7 +124,7 @@ export async function fetchClientsForPicker(): Promise<ClientPickerOption[]> {
   const supabase = getSupabaseServiceClient();
   const { data, error } = await supabase
     .from("clients")
-    .select("id, name, email")
+    .select("id, name, email, phone")
     .neq("status", "inactive")
     .order("name", { ascending: true });
   if (error) throw new Error(error.message);
@@ -127,6 +132,7 @@ export async function fetchClientsForPicker(): Promise<ClientPickerOption[]> {
     id: row.id,
     name: row.name,
     email: row.email,
+    phone: row.phone,
   }));
 }
 

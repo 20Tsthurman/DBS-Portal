@@ -25,6 +25,21 @@ export const fieldFocusStyle: CSSProperties = {
   borderColor: "var(--accent)",
 };
 
+// Muted helper copy shown directly below a field's input.
+export const helperStyle: CSSProperties = {
+  marginTop: 6,
+  fontSize: "12px",
+  color: "var(--text-muted)",
+};
+
+// Inline, per-field validation error. Uses the DBS danger token
+// (--status-danger; there is no --danger token in the palette).
+export const fieldErrorStyle: CSSProperties = {
+  marginTop: 4,
+  fontSize: "12px",
+  color: "var(--status-danger)",
+};
+
 export const errorStyle: CSSProperties = {
   marginTop: 12,
   padding: "10px 12px",

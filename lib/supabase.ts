@@ -39,7 +39,14 @@ export type TimeBlockCategory = "sonography" | "work_block" | "blocked";
 export interface ClientRecord {
   id: string;
   name: string;
-  email: string;
+  /**
+   * Nullable since migration 004 — a client can be created with a phone
+   * number instead of an email. At least one of email/phone is required,
+   * enforced at the application layer (Add Client action + clients PATCH).
+   */
+  email: string | null;
+  /** Bare 10-digit string, e.g. "5125551234". NULL when no phone on file. */
+  phone: string | null;
   clerk_user_id: string | null;
   type: ClientType;
   status: ClientStatus;

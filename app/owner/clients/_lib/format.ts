@@ -62,6 +62,25 @@ export function formatHours(value: number | null | undefined): string {
   });
 }
 
+/**
+ * Render a stored phone number for display. Phone is persisted as a bare
+ * 10-digit string (see migration 004 / normalizePhone), so a clean 10-digit
+ * value formats as (XXX) XXX-XXXX. Anything unexpected is returned as-is so
+ * we never hide a value we can't parse.
+ */
+export function formatPhone(value: string | null | undefined): string {
+  if (!value) return "—";
+  const digits = value.replace(/\D/g, "");
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  if (digits.length === 11 && digits.startsWith("1")) {
+    const d = digits.slice(1);
+    return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+  }
+  return value;
+}
+
 export function clientTypeLabel(type: ClientType): string {
   return type === "brand" ? "Brand" : "Bride";
 }

@@ -47,7 +47,10 @@
       "Bash(npx tailwindcss *)",
       "Bash(git log *)",
       "Bash(ls C:dbs-portalapp C:dbs-portallib 2 *)",
-      "Bash(npm audit *)"
+      "Bash(npm audit *)",
+      "Bash(sed 's/=$//')",
+      "Bash(command -v psql)",
+      "Bash(command -v supabase)"
     ]
   }
 }

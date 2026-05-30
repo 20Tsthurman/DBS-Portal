@@ -54,6 +54,11 @@ export async function createPaymentSessionAction(
   if (!invoice.invoice_number) {
     return { ok: false, error: "Invoice is missing a number" };
   }
+  // A signed-in client always has a Clerk email (portal access requires an
+  // invite, which requires an email). Guard the nullable type defensively.
+  if (!client.email) {
+    return { ok: false, error: "Your account has no email address on file." };
+  }
 
   const base = resolveBaseUrl();
   const successUrl = `${base}/client/invoices?paid=1&invoice=${encodeURIComponent(

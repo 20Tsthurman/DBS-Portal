@@ -45,6 +45,11 @@ export async function maybeSendNewMessageEmail(
   let recipientLastNotifiedAt: string | null;
 
   if (recipientRole === "client") {
+    // Invited clients always have an email; this guards the phone-only case
+    // (no email since migration 004) and narrows the nullable type.
+    if (!clientRecord.email) {
+      return { sent: false, suppressed: true };
+    }
     recipientName = clientRecord.name;
     recipientEmail = clientRecord.email;
     senderName = OWNER_DISPLAY_NAME;

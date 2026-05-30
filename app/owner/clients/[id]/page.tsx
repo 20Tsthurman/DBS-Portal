@@ -9,6 +9,7 @@ import {
   formatDate,
 } from "../_lib/format";
 import { TypePill } from "../_components/TypePill";
+import { ClientContactInfo } from "./_components/ClientContactInfo";
 import { DeactivateClientButton } from "./_components/DeactivateClientButton";
 import { EditClientButton } from "./_components/EditClientButton";
 import { SendInviteButton } from "./_components/SendInviteButton";
@@ -164,6 +165,11 @@ export default async function OwnerClientDetailPage({ params }: PageProps) {
               {metaParts.join("  |  ")}
             </p>
           )}
+          <ClientContactInfo
+            clientId={client.id}
+            email={client.email}
+            phone={client.phone}
+          />
         </div>
         <div className="flex items-start gap-2">
           <SendInviteButton
@@ -183,6 +189,7 @@ export default async function OwnerClientDetailPage({ params }: PageProps) {
               id: client.id,
               name: client.name,
               email: client.email,
+              phone: client.phone,
               type: client.type,
               status: client.status,
               packageId: project?.package_id ?? null,
