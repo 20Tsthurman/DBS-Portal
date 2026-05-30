@@ -51,7 +51,10 @@
       "Bash(sed 's/=$//')",
       "Bash(command -v psql)",
       "Bash(command -v supabase)",
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(Select-Object Name, FullName, PSIsContainer)",
+      "PowerShell(npx next lint --dir app/client/dashboard --max-warnings=0)",
+      "PowerShell(Remove-Item *)"
     ]
   }
 }

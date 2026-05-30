@@ -3,8 +3,7 @@ import { requireCurrentClient } from "@/lib/currentClient";
 import { fetchMyUpcomingShoots } from "@/app/client/book/_lib/queries";
 import { fetchMyInvoices } from "@/app/client/invoices/_lib/queries";
 import { fetchMyFiles } from "@/app/client/files/_lib/queries";
-import { fetchMyProject, fetchMyLastMessage } from "./_lib/queries";
-import { PhaseTracker } from "./_components/PhaseTracker";
+import { fetchMyLastMessage } from "./_lib/queries";
 import { NextShoot } from "./_components/NextShoot";
 import { ActivityFeed } from "./_components/ActivityFeed";
 
@@ -15,14 +14,12 @@ export default async function ClientDashboardPage() {
 
   // fetchMyUpcomingShoots scopes by the signed-in client itself; the others
   // take client.id directly. All run concurrently.
-  const [project, upcomingShoots, invoices, files, lastMessage] =
-    await Promise.all([
-      fetchMyProject(client.id),
-      fetchMyUpcomingShoots(),
-      fetchMyInvoices(client.id),
-      fetchMyFiles(client.id),
-      fetchMyLastMessage(client.id),
-    ]);
+  const [upcomingShoots, invoices, files, lastMessage] = await Promise.all([
+    fetchMyUpcomingShoots(),
+    fetchMyInvoices(client.id),
+    fetchMyFiles(client.id),
+    fetchMyLastMessage(client.id),
+  ]);
 
   const firstName = client.name.trim().split(/\s+/)[0] || client.name;
   const nextShoot = upcomingShoots[0] ?? null;
@@ -37,11 +34,6 @@ export default async function ClientDashboardPage() {
       </header>
 
       <div style={sectionsStyle}>
-        <section>
-          <h2 style={sectionTitleStyle}>Project Phase</h2>
-          <PhaseTracker currentPhase={project?.current_phase ?? null} />
-        </section>
-
         <section>
           <h2 style={sectionTitleStyle}>Next Shoot</h2>
           <NextShoot shoot={nextShoot} />
