@@ -1,29 +1,37 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
-import type { SidebarNavItem } from "./Sidebar";
+import type { SidebarNavSection } from "./Sidebar";
 import { useMobileNav } from "./MobileNavProvider";
 
 interface TopBarProps {
-  navItems: SidebarNavItem[];
+  navSections: SidebarNavSection[];
   fallbackTitle: string;
+  /**
+   * Optional widget rendered just before the UserButton. The owner layout
+   * passes the persistent <TimerPill/> here; the client layout omits it.
+   */
+  rightSlot?: ReactNode;
 }
 
 function resolveTitle(
   pathname: string,
-  navItems: SidebarNavItem[],
+  navSections: SidebarNavSection[],
   fallbackTitle: string
 ): string {
+  // Flatten sections → items so the title still derives from the current path.
+  const items = navSections.flatMap((section) => section.items);
   const match =
-    navItems.find((item) => pathname === item.href) ||
-    navItems.find((item) => pathname.startsWith(`${item.href}/`));
+    items.find((item) => pathname === item.href) ||
+    items.find((item) => pathname.startsWith(`${item.href}/`));
   return match?.label ?? fallbackTitle;
 }
 
-export function TopBar({ navItems, fallbackTitle }: TopBarProps) {
+export function TopBar({ navSections, fallbackTitle, rightSlot }: TopBarProps) {
   const pathname = usePathname();
-  const title = resolveTitle(pathname, navItems, fallbackTitle);
+  const title = resolveTitle(pathname, navSections, fallbackTitle);
   const { open } = useMobileNav();
 
   return (
@@ -75,13 +83,16 @@ export function TopBar({ navItems, fallbackTitle }: TopBarProps) {
           {title}
         </span>
       </div>
-      <UserButton
-        appearance={{
-          elements: {
-            avatarBox: "h-8 w-8",
-          },
-        }}
-      />
+      <div className="flex items-center gap-3 pl-3">
+        {rightSlot}
+        <UserButton
+          appearance={{
+            elements: {
+              avatarBox: "h-8 w-8",
+            },
+          }}
+        />
+      </div>
     </header>
   );
 }

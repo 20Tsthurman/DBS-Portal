@@ -10,6 +10,7 @@ import { UpcomingWeekWidget } from "./_components/UpcomingWeekWidget";
 import { HoursThisWeekWidget } from "./_components/HoursThisWeekWidget";
 import { BudgetStatusWidget } from "./_components/BudgetStatusWidget";
 import { ClientRosterWidget } from "./_components/ClientRosterWidget";
+import { TasksDueWidget } from "./_components/TasksDueWidget";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,9 @@ export default async function OwnerDashboardPage() {
         <div className="dashboard-cell dashboard-cell-week">
           <UpcomingWeekWidget />
         </div>
+        <div className="dashboard-cell dashboard-cell-tasks">
+          <TasksDueWidget />
+        </div>
         <div className="dashboard-cell dashboard-cell-hours">
           <HoursThisWeekWidget />
         </div>
@@ -77,7 +81,8 @@ export default async function OwnerDashboardPage() {
         }
         .dashboard-cell-today { grid-column: span 8; }
         .dashboard-cell-unread { grid-column: span 4; }
-        .dashboard-cell-week { grid-column: span 12; }
+        .dashboard-cell-week { grid-column: span 8; }
+        .dashboard-cell-tasks { grid-column: span 4; }
         .dashboard-cell-hours { grid-column: span 4; }
         .dashboard-cell-budget { grid-column: span 8; }
         .dashboard-cell-roster { grid-column: span 12; }

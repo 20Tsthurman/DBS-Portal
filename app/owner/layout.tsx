@@ -1,20 +1,39 @@
 import { redirect } from "next/navigation";
 import { currentUser } from "@clerk/nextjs/server";
-import { type SidebarNavItem } from "@/components/ui/Sidebar";
+import { type SidebarNavSection } from "@/components/ui/Sidebar";
 import { SidebarWithUnread } from "@/components/ui/SidebarWithUnread";
 import { TopBar } from "@/components/ui/TopBar";
+import { TimerPill } from "@/components/ui/TimerPill";
 import { MobileNavProvider } from "@/components/ui/MobileNavProvider";
+import { getActiveTimer } from "@/app/owner/tasks/_actions";
 
-const ownerNav: SidebarNavItem[] = [
-  { label: "Dashboard", href: "/owner/dashboard" },
-  { label: "Clients", href: "/owner/clients" },
-  { label: "Shoots", href: "/owner/shoots" },
-  { label: "Calendar", href: "/owner/calendar" },
-  { label: "Time Tracker", href: "/owner/time" },
-  { label: "Financials", href: "/owner/financials" },
-  { label: "Invoices", href: "/owner/invoices" },
-  { label: "Messages", href: "/owner/messages" },
-  { label: "Settings", href: "/owner/settings" },
+const ownerNav: SidebarNavSection[] = [
+  { heading: "Overview", items: [{ label: "Dashboard", href: "/owner/dashboard" }] },
+  {
+    heading: "Clients",
+    items: [
+      { label: "Clients", href: "/owner/clients" },
+      { label: "Calendar", href: "/owner/calendar" },
+      { label: "Shoots", href: "/owner/shoots" },
+      { label: "Messages", href: "/owner/messages" },
+    ],
+  },
+  {
+    heading: "Work",
+    items: [
+      { label: "Tasks", href: "/owner/tasks" },
+      { label: "Time Tracker", href: "/owner/time" },
+    ],
+  },
+  {
+    heading: "Finances",
+    items: [
+      { label: "Financials", href: "/owner/financials" },
+      { label: "Invoices", href: "/owner/invoices" },
+    ],
+  },
+  // Trailing headingless group: divider separates Settings, no header label.
+  { items: [{ label: "Settings", href: "/owner/settings" }] },
 ];
 
 export default async function OwnerLayout({
@@ -32,6 +51,10 @@ export default async function OwnerLayout({
     redirect("/");
   }
 
+  // Seed the persistent top-bar timer from the DB; the pill takes over ticking
+  // client-side. Mounted once here so it survives navigation across owner pages.
+  const activeTimer = await getActiveTimer();
+
   return (
     <MobileNavProvider>
       <div
@@ -40,11 +63,15 @@ export default async function OwnerLayout({
       >
         <SidebarWithUnread
           eyebrow="Owner Portal"
-          navItems={ownerNav}
+          navSections={ownerNav}
           viewerRole="owner"
         />
         <div className="flex min-h-screen flex-col lg:ml-60">
-          <TopBar navItems={ownerNav} fallbackTitle="Owner Portal" />
+          <TopBar
+            navSections={ownerNav}
+            fallbackTitle="Owner Portal"
+            rightSlot={<TimerPill initialTimer={activeTimer} />}
+          />
           <main className="flex-1 p-4 lg:p-8">{children}</main>
         </div>
       </div>

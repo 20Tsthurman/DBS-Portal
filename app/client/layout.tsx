@@ -1,16 +1,21 @@
 import { redirect } from "next/navigation";
 import { currentUser } from "@clerk/nextjs/server";
-import { type SidebarNavItem } from "@/components/ui/Sidebar";
+import { type SidebarNavSection } from "@/components/ui/Sidebar";
 import { SidebarWithUnread } from "@/components/ui/SidebarWithUnread";
 import { TopBar } from "@/components/ui/TopBar";
 import { MobileNavProvider } from "@/components/ui/MobileNavProvider";
 
-const clientNav: SidebarNavItem[] = [
-  { label: "My Project", href: "/client/dashboard" },
-  { label: "Messages", href: "/client/messages" },
-  { label: "Book a Shoot", href: "/client/book" },
-  { label: "Files & Content", href: "/client/files" },
-  { label: "Invoices", href: "/client/invoices" },
+// Single headingless section → renders flat, exactly as before (no header, no divider).
+const clientNav: SidebarNavSection[] = [
+  {
+    items: [
+      { label: "My Project", href: "/client/dashboard" },
+      { label: "Messages", href: "/client/messages" },
+      { label: "Book a Shoot", href: "/client/book" },
+      { label: "Files & Content", href: "/client/files" },
+      { label: "Invoices", href: "/client/invoices" },
+    ],
+  },
 ];
 
 export default async function ClientLayout({
@@ -36,11 +41,11 @@ export default async function ClientLayout({
       >
         <SidebarWithUnread
           eyebrow="Client Portal"
-          navItems={clientNav}
+          navSections={clientNav}
           viewerRole="client"
         />
         <div className="flex min-h-screen flex-col lg:ml-60">
-          <TopBar navItems={clientNav} fallbackTitle="Client Portal" />
+          <TopBar navSections={clientNav} fallbackTitle="Client Portal" />
           <main className="flex-1 p-4 lg:p-8">{children}</main>
         </div>
       </div>

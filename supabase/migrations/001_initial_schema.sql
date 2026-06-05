@@ -241,17 +241,74 @@ create unique index if not exists invoices_invoice_number_idx
   where invoice_number is not null;
 
 -- ----------------------------------------------------------------------------
+-- todos — owner task list (owner-only feature). Optional client_id ties a task
+-- to a client and is what makes the Start-timer button available. category
+-- mirrors time_logs.category exactly so it maps 1:1 on auto-log. status +
+-- completed_at: app sets completed_at = now() when flipping to 'done', nulls it
+-- on un-complete. Defined ahead of time_logs because time_logs.source_todo_id
+-- and active_timer.todo_id both reference it.
+-- ----------------------------------------------------------------------------
+create table if not exists todos (
+  id            uuid primary key default gen_random_uuid(),
+  title         text not null,
+  client_id     uuid references clients(id) on delete set null,
+  category      text,
+  due_date      date,
+  status        text not null default 'open',
+  completed_at  timestamptz,
+  created_at    timestamptz not null default now()
+);
+
+alter table todos drop constraint if exists todos_category_check;
+alter table todos add constraint todos_category_check
+  check (category in ('editing', 'planning', 'filming', 'admin', 'communication'));
+
+alter table todos drop constraint if exists todos_status_check;
+alter table todos add constraint todos_status_check
+  check (status in ('open', 'done'));
+
+create index if not exists todos_client_id_idx on todos (client_id);
+
+-- ----------------------------------------------------------------------------
+-- active_timer — the single running timer (0 or 1 row). UNIQUE(singleton)
+-- enforces at most one running timer at a time (same pattern as app_settings).
+-- todo_id CASCADE: deleting the underlying task clears the timer row. client_id
+-- / category are SNAPSHOTS captured at Start so the auto-log stays correct even
+-- if the task is edited mid-run. No row = nothing running; elapsed = now() −
+-- started_at.
+-- ----------------------------------------------------------------------------
+create table if not exists active_timer (
+  id          uuid primary key default gen_random_uuid(),
+  singleton   boolean not null default true,
+  todo_id     uuid not null references todos(id) on delete cascade,
+  client_id   uuid references clients(id) on delete set null,
+  category    text,
+  started_at  timestamptz not null default now(),
+  created_at  timestamptz not null default now(),
+  constraint active_timer_singleton_unique unique (singleton)
+);
+
+alter table active_timer drop constraint if exists active_timer_category_check;
+alter table active_timer add constraint active_timer_category_check
+  check (category in ('editing', 'planning', 'filming', 'admin', 'communication'));
+
+-- ----------------------------------------------------------------------------
 -- time_logs
+--
+-- source_todo_id is provenance for timer auto-logs (matching the source_shoot_id
+-- / source_template_id pattern): lets a task sum its logged time, and lets logs
+-- survive task deletion (SET NULL rather than cascade).
 -- ----------------------------------------------------------------------------
 create table if not exists time_logs (
-  id          uuid primary key default gen_random_uuid(),
-  client_id   uuid not null references clients(id) on delete cascade,
-  logged_by   text not null,
-  date        date not null,
-  hours       numeric not null,
-  category    text not null,
-  notes       text,
-  created_at  timestamptz not null default now()
+  id              uuid primary key default gen_random_uuid(),
+  client_id       uuid not null references clients(id) on delete cascade,
+  logged_by       text not null,
+  date            date not null,
+  hours           numeric not null,
+  category        text not null,
+  notes           text,
+  created_at      timestamptz not null default now(),
+  source_todo_id  uuid references todos(id) on delete set null
 );
 
 alter table time_logs drop constraint if exists time_logs_category_check;
@@ -260,6 +317,8 @@ alter table time_logs add constraint time_logs_category_check
 
 create index if not exists time_logs_client_id_idx on time_logs (client_id);
 create index if not exists time_logs_date_idx on time_logs (date);
+create index if not exists time_logs_source_todo_id_idx
+  on time_logs (source_todo_id) where source_todo_id is not null;
 
 -- ----------------------------------------------------------------------------
 -- expenses
@@ -539,7 +598,8 @@ where not exists (select 1 from app_settings);
 -- ============================================================================
 -- ROW-LEVEL SECURITY
 --
--- RLS is enabled — with NO policies — on the 9 client-facing tables below.
+-- RLS is enabled — with NO policies — on the 11 tables below: the 9 client-facing
+-- tables plus the 2 owner-only tasks/timer tables (todos, active_timer).
 -- With no policy present, RLS is fail-closed: any role WITHOUT the BYPASSRLS
 -- attribute sees zero rows. The app accesses these tables exclusively through
 -- the Supabase service-role key, which HAS BYPASSRLS, so this is behaviorally
@@ -562,3 +622,5 @@ alter table invoices  enable row level security;
 alter table expenses  enable row level security;
 alter table messages  enable row level security;
 alter table files     enable row level security;
+alter table todos        enable row level security;
+alter table active_timer enable row level security;

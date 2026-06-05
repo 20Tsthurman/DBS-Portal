@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Sidebar, type SidebarNavItem } from "@/components/ui/Sidebar";
+import { Sidebar, type SidebarNavSection } from "@/components/ui/Sidebar";
 import {
   DEFAULT_POLL_INTERVAL_MS,
   useVisibilityPolling,
@@ -9,7 +9,7 @@ import {
 
 interface SidebarWithUnreadProps {
   eyebrow: string;
-  navItems: SidebarNavItem[];
+  navSections: SidebarNavSection[];
   viewerRole: "owner" | "client";
 }
 
@@ -23,7 +23,7 @@ interface ClientUnreadCountsResponse {
 
 export function SidebarWithUnread({
   eyebrow,
-  navItems,
+  navSections,
   viewerRole,
 }: SidebarWithUnreadProps) {
   const [unreadCount, setUnreadCount] = useState(0);
@@ -71,15 +71,18 @@ export function SidebarWithUnread({
   const messagesHref =
     viewerRole === "owner" ? "/owner/messages" : "/client/messages";
 
-  const navItemsWithUnread = useMemo(
+  const navSectionsWithUnread = useMemo(
     () =>
-      navItems.map((item) =>
-        item.href === messagesHref
-          ? { ...item, badge: unreadCount > 0 ? unreadCount : undefined }
-          : item
-      ),
-    [messagesHref, navItems, unreadCount]
+      navSections.map((section) => ({
+        ...section,
+        items: section.items.map((item) =>
+          item.href === messagesHref
+            ? { ...item, badge: unreadCount > 0 ? unreadCount : undefined }
+            : item
+        ),
+      })),
+    [messagesHref, navSections, unreadCount]
   );
 
-  return <Sidebar eyebrow={eyebrow} navItems={navItemsWithUnread} />;
+  return <Sidebar eyebrow={eyebrow} navSections={navSectionsWithUnread} />;
 }

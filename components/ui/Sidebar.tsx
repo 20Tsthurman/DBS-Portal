@@ -11,12 +11,19 @@ export interface SidebarNavItem {
   badge?: number;
 }
 
-interface SidebarProps {
-  eyebrow: string;
-  navItems: SidebarNavItem[];
+export interface SidebarNavSection {
+  /** Optional uppercase muted label above the group. Omit for a headingless
+   *  group (the client nav and the trailing Settings group). */
+  heading?: string;
+  items: SidebarNavItem[];
 }
 
-export function Sidebar({ eyebrow, navItems }: SidebarProps) {
+interface SidebarProps {
+  eyebrow: string;
+  navSections: SidebarNavSection[];
+}
+
+export function Sidebar({ eyebrow, navSections }: SidebarProps) {
   const pathname = usePathname();
   const { user } = useUser();
   const { isOpen, close } = useMobileNav();
@@ -70,53 +77,81 @@ export function Sidebar({ eyebrow, navItems }: SidebarProps) {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-4">
-        {navItems.map((item) => {
-          const isActive =
-            pathname === item.href || pathname.startsWith(`${item.href}/`);
-          const hasBadge = typeof item.badge === "number" && item.badge > 0;
-          const badgeLabel = hasBadge
-            ? item.badge! > 99
-              ? "99+"
-              : String(item.badge)
-            : null;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="flex items-center justify-between gap-3 px-6 py-2.5 text-sm transition-colors"
-              style={{
-                color: isActive ? "#FFFFFF" : "rgba(255,255,255,0.55)",
-                backgroundColor: isActive
-                  ? "rgba(255,255,255,0.06)"
-                  : "transparent",
-                borderLeft: isActive
-                  ? "3px solid var(--accent)"
-                  : "3px solid transparent",
-                paddingLeft: isActive ? "calc(1.5rem - 3px)" : "1.5rem",
-                fontWeight: isActive ? 600 : 400,
-              }}
-            >
-              <span className="truncate">{item.label}</span>
-              {badgeLabel && (
-                <span
+        {navSections.map((section, sectionIndex) => (
+          <div
+            key={section.heading ?? `section-${sectionIndex}`}
+            // Divider before every group after the first. For the trailing
+            // headingless Settings group this reads as a deliberate separator.
+            className={sectionIndex > 0 ? "mt-4 pt-4 border-t" : undefined}
+            style={
+              sectionIndex > 0
+                ? { borderColor: "rgba(255,255,255,0.08)" }
+                : undefined
+            }
+          >
+            {section.heading && (
+              <p
+                className="px-6 pb-2"
+                style={{
+                  color: "rgba(255,255,255,0.4)",
+                  fontSize: "10px",
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                  fontWeight: 500,
+                }}
+              >
+                {section.heading}
+              </p>
+            )}
+            {section.items.map((item) => {
+              const isActive =
+                pathname === item.href || pathname.startsWith(`${item.href}/`);
+              const hasBadge = typeof item.badge === "number" && item.badge > 0;
+              const badgeLabel = hasBadge
+                ? item.badge! > 99
+                  ? "99+"
+                  : String(item.badge)
+                : null;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="flex items-center justify-between gap-3 px-6 py-2.5 text-sm transition-colors"
                   style={{
-                    backgroundColor: "var(--accent)",
-                    color: "#FFFFFF",
-                    padding: "2px 8px",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    minWidth: 28,
-                    textAlign: "center",
-                    lineHeight: "14px",
-                    borderRadius: 0,
+                    color: isActive ? "#FFFFFF" : "rgba(255,255,255,0.55)",
+                    backgroundColor: isActive
+                      ? "rgba(255,255,255,0.06)"
+                      : "transparent",
+                    borderLeft: isActive
+                      ? "3px solid var(--accent)"
+                      : "3px solid transparent",
+                    paddingLeft: isActive ? "calc(1.5rem - 3px)" : "1.5rem",
+                    fontWeight: isActive ? 600 : 400,
                   }}
                 >
-                  {badgeLabel}
-                </span>
-              )}
-            </Link>
-          );
-        })}
+                  <span className="truncate">{item.label}</span>
+                  {badgeLabel && (
+                    <span
+                      style={{
+                        backgroundColor: "var(--accent)",
+                        color: "#FFFFFF",
+                        padding: "2px 8px",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        minWidth: 28,
+                        textAlign: "center",
+                        lineHeight: "14px",
+                        borderRadius: 0,
+                      }}
+                    >
+                      {badgeLabel}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       <div
