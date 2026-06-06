@@ -29,6 +29,7 @@ import {
   yearToDateRange,
 } from "@/app/owner/calendar/_lib/timezone";
 import { fetchClientsWithRelations } from "@/app/owner/clients/_lib/queries";
+import { CpaExportButton } from "./_components/CpaExportButton";
 import { FinancialsBoard } from "./_components/FinancialsBoard";
 import { FinancialsToolbar } from "./_components/FinancialsToolbar";
 import {
@@ -150,18 +151,22 @@ export default async function FinancialsPage({
   return (
     <div>
       <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
-        <h1
-          style={{
-            fontFamily: "var(--font-playfair), serif",
-            fontWeight: 500,
-            color: "var(--text-primary)",
-            letterSpacing: "-0.01em",
-            margin: 0,
-          }}
-          className="text-[26px] lg:text-[32px]"
-        >
-          Financials
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1
+            style={{
+              fontFamily: "var(--font-playfair), serif",
+              fontWeight: 500,
+              color: "var(--text-primary)",
+              letterSpacing: "-0.01em",
+              margin: 0,
+            }}
+            className="text-[26px] lg:text-[32px]"
+          >
+            Financials
+          </h1>
+
+          <CpaExportButton />
+        </div>
 
         <FinancialsToolbar
           range={range}

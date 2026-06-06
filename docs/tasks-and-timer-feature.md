@@ -183,5 +183,3 @@ schema.sql                                           (edit — reflect 006)
 Each phase independently shippable. Typecheck between steps. Use `revalidatePath` (not `router.refresh`).
 
 ---
-
-*Spec complete. Drop this in `docs/` and reference it from Claude Code prompts going forward.*
