@@ -1,17 +1,34 @@
 import {
   getSupabaseServiceClient,
   type ExternalEventRecord,
+  type GoogleSyncedCalendarRecord,
 } from "@/lib/supabase";
 import { combineDateAndTimeInTimezone } from "@/app/owner/calendar/_lib/timezone";
-import { getCalendarApi, listEventsIncremental, type GoogleEvent } from "./calendar";
-import { getAuthorizedClient, updateGoogleConnection } from "./connection";
+import {
+  getCalendarApi,
+  listEventsIncremental,
+  type GoogleEvent,
+} from "./calendar";
+import {
+  fetchSyncedCalendars,
+  getAuthorizedClient,
+  updateGoogleConnection,
+  updateSyncedCalendar,
+} from "./connection";
+import type { calendar_v3 } from "googleapis";
 
 /**
- * Google → Portal sync (Stage 1's only direction).
+ * Google → Portal sync (Stage 1's only direction), across every calendar
+ * selected in google_synced_calendars.
  *
- * Incremental via the stored sync_token; the first run (or a token expiry /
- * reconnect) fetches the full window. Events land in external_events keyed
- * on google_event_id; cancellations become status:'cancelled' tombstones.
+ * Google sync tokens are PER-CALENDAR, so each selected calendar carries its
+ * own sync_token and syncs independently: incremental when a token is held,
+ * full-window on first run (or token expiry / re-selection). Events land in
+ * external_events keyed on (calendar_id, google_event_id); cancellations
+ * become status:'cancelled' tombstones scoped to their calendar.
+ *
+ * One calendar failing (revoked share, transient API error) does not abort
+ * the others — failures are collected and reported on the result.
  */
 
 export type SyncResult =
@@ -24,6 +41,8 @@ export type SyncResult =
       upserted: number;
       cancelled: number;
       fullResync: boolean;
+      /** Calendar ids whose sync threw; the rest completed normally. */
+      failedCalendarIds: string[];
     };
 
 /**
@@ -42,7 +61,8 @@ interface SyncOptions {
   /**
    * Skip entirely if the last sync completed within this window. Used by the
    * sync-on-view trigger so opening the calendar repeatedly doesn't hammer
-   * the Google API. Omit (cron, post-connect) to always sync.
+   * the Google API. Omit (cron, post-connect, selection change) to always
+   * sync.
    */
   skipIfSyncedWithinMs?: number;
 }
@@ -63,17 +83,59 @@ export async function syncFromGoogle(
     return { status: "skipped_recent", lastSyncedAt: connection.last_synced_at };
   }
 
-  const calendar = getCalendarApi(auth);
+  const calendarApi = getCalendarApi(auth);
+  const calendars = await fetchSyncedCalendars();
+
+  let upserted = 0;
+  let cancelled = 0;
+  let fullResync = false;
+  const failedCalendarIds: string[] = [];
+  const nowIso = new Date().toISOString();
+
+  for (const cal of calendars) {
+    try {
+      const result = await syncOneCalendar(calendarApi, cal, nowIso);
+      upserted += result.upserted;
+      cancelled += result.cancelled;
+      fullResync = fullResync || result.fullResync;
+    } catch (err) {
+      console.error(
+        `[google-sync] calendar "${cal.calendar_id}" sync failed`,
+        err
+      );
+      failedCalendarIds.push(cal.calendar_id);
+    }
+  }
+
+  // The connection-level stamp drives the 60s sync-on-view skip window and
+  // the settings display. Don't stamp a total failure — that would hide a
+  // broken sync behind the skip window instead of retrying.
+  if (calendars.length === 0 || failedCalendarIds.length < calendars.length) {
+    await updateGoogleConnection({ last_synced_at: nowIso });
+  }
+
+  return {
+    status: "synced",
+    changed: upserted > 0 || cancelled > 0,
+    upserted,
+    cancelled,
+    fullResync,
+    failedCalendarIds,
+  };
+}
+
+async function syncOneCalendar(
+  calendarApi: calendar_v3.Calendar,
+  cal: GoogleSyncedCalendarRecord,
+  nowIso: string
+): Promise<{ upserted: number; cancelled: number; fullResync: boolean }> {
   const { items, nextSyncToken, fullResyncPerformed } =
-    await listEventsIncremental(
-      calendar,
-      connection.calendar_id,
-      connection.sync_token
-    );
+    await listEventsIncremental(calendarApi, cal.calendar_id, cal.sync_token);
 
   const upserts: Array<
     Pick<
       ExternalEventRecord,
+      | "calendar_id"
       | "google_event_id"
       | "title"
       | "starts_at"
@@ -85,7 +147,6 @@ export async function syncFromGoogle(
     > & { updated_at: string }
   > = [];
   const cancelledIds: string[] = [];
-  const nowIso = new Date().toISOString();
 
   for (const event of items) {
     if (!event.id) continue;
@@ -101,6 +162,7 @@ export async function syncFromGoogle(
     if (!mapped) continue;
 
     upserts.push({
+      calendar_id: cal.calendar_id,
       google_event_id: event.id,
       title: event.summary?.trim() || null,
       starts_at: mapped.startsAt.toISOString(),
@@ -121,7 +183,7 @@ export async function syncFromGoogle(
   if (upserts.length > 0) {
     const { error } = await supabase
       .from("external_events")
-      .upsert(upserts, { onConflict: "google_event_id" });
+      .upsert(upserts, { onConflict: "calendar_id,google_event_id" });
     if (error) throw new Error(`external_events upsert failed: ${error.message}`);
   }
 
@@ -129,20 +191,19 @@ export async function syncFromGoogle(
     const { error } = await supabase
       .from("external_events")
       .update({ status: "cancelled", updated_at: nowIso })
+      .eq("calendar_id", cal.calendar_id)
       .in("google_event_id", cancelledIds);
     if (error) {
       throw new Error(`external_events cancel update failed: ${error.message}`);
     }
   }
 
-  await updateGoogleConnection({
+  await updateSyncedCalendar(cal.calendar_id, {
     sync_token: nextSyncToken,
     last_synced_at: nowIso,
   });
 
   return {
-    status: "synced",
-    changed: upserts.length > 0 || cancelledIds.length > 0,
     upserted: upserts.length,
     cancelled: cancelledIds.length,
     fullResync: fullResyncPerformed,

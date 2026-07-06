@@ -35,5 +35,26 @@ export interface GoogleCalendarStatus {
   connected: boolean;
   /** ISO timestamp of the last completed sync, or null before the first one. */
   lastSyncedAt: string | null;
-  calendarId: string | null;
+}
+
+/** One checkbox row in the calendar picker. */
+export interface CalendarChoice {
+  /** Canonical id — 'primary' for the primary calendar (see lib/google/calendar.ts). */
+  id: string;
+  name: string;
+  /** Google backgroundColor hex for the swatch, or null. */
+  color: string | null;
+  primary: boolean;
+  /** Currently selected for import (has a google_synced_calendars row). */
+  selected: boolean;
+}
+
+export interface GoogleCalendarChoices {
+  choices: CalendarChoice[];
+  /**
+   * True when the list came from Google live; false when Google was
+   * unreachable and only the stored (already-selected) rows are shown,
+   * in which case editing is disabled.
+   */
+  live: boolean;
 }

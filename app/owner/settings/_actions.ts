@@ -15,11 +15,17 @@ import {
   type RecurringExpenseTemplateRecord,
 } from "@/lib/supabase";
 import {
-  fetchGoogleConnection,
+  addSyncedCalendar,
   clearGoogleConnection,
+  fetchGoogleConnection,
+  fetchSyncedCalendars,
+  getAuthorizedClient,
   getDecryptedRefreshToken,
+  removeSyncedCalendar,
 } from "@/lib/google/connection";
+import { listCalendars } from "@/lib/google/calendar";
 import { revokeGoogleToken } from "@/lib/google/oauth";
+import { syncFromGoogle } from "@/lib/google/sync";
 import type {
   CreateRecurringExpenseTemplateInput,
   UpdateAppSettingsInput,
@@ -134,6 +140,77 @@ export async function disconnectGoogleCalendarAction(): Promise<ActionResult<nul
     await clearGoogleConnection();
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to disconnect";
+    return { ok: false, error: message };
+  }
+
+  revalidatePath("/owner/settings");
+  revalidatePath("/owner/calendar");
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// updateSyncedCalendarsAction
+//
+// Applies the calendar-picker selection. Requested ids are validated against
+// a fresh server-side calendarList.list — the client can't inject arbitrary
+// calendar ids. Unchecking removes the selection row AND that calendar's
+// imported external_events (they stop rendering and stop blocking bookings
+// immediately); checking inserts a row with a NULL sync token and runs a
+// sync inline so the new calendar's events appear before the page refreshes.
+// ---------------------------------------------------------------------------
+export async function updateSyncedCalendarsAction(
+  selectedIds: string[]
+): Promise<ActionResult<null>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  if (
+    !Array.isArray(selectedIds) ||
+    selectedIds.some((id) => typeof id !== "string" || !id.trim())
+  ) {
+    return { ok: false, error: "Invalid calendar selection" };
+  }
+
+  try {
+    const authorized = await getAuthorizedClient();
+    if (!authorized) {
+      return { ok: false, error: "Google Calendar is not connected" };
+    }
+
+    const live = await listCalendars(authorized.auth);
+    const liveById = new Map(live.map((entry) => [entry.id, entry]));
+    const requested = new Set(selectedIds);
+    for (const id of requested) {
+      if (!liveById.has(id)) {
+        return { ok: false, error: "Unknown calendar in selection" };
+      }
+    }
+
+    const current = await fetchSyncedCalendars();
+    const currentIds = new Set(current.map((row) => row.calendar_id));
+    const toAdd = [...requested].filter((id) => !currentIds.has(id));
+    const toRemove = current.filter((row) => !requested.has(row.calendar_id));
+
+    for (const row of toRemove) {
+      await removeSyncedCalendar(row.calendar_id);
+    }
+    for (const id of toAdd) {
+      const entry = liveById.get(id);
+      await addSyncedCalendar({
+        calendar_id: id,
+        summary: entry?.summary ?? null,
+        color: entry?.color ?? null,
+      });
+    }
+
+    // Pull the newly-checked calendars' events right away (no skip window).
+    // Removals need no sync — their rows are already gone.
+    if (toAdd.length > 0) {
+      await syncFromGoogle();
+    }
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Failed to update calendars";
     return { ok: false, error: message };
   }
 

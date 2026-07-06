@@ -16,6 +16,7 @@ import { SettingsBoard } from "./_components/SettingsBoard";
 import {
   fetchAllTemplates,
   fetchAppSettings,
+  fetchGoogleCalendarChoices,
   fetchGoogleCalendarStatus,
   fetchPackages,
 } from "./_lib/queries";
@@ -33,12 +34,14 @@ export default async function OwnerSettingsPage({
   const googleNotice =
     typeof params.google === "string" ? params.google : null;
 
-  const [settings, templates, packages, googleStatus] = await Promise.all([
-    fetchAppSettings(),
-    fetchAllTemplates(),
-    fetchPackages(),
-    fetchGoogleCalendarStatus(),
-  ]);
+  const [settings, templates, packages, googleStatus, googleCalendars] =
+    await Promise.all([
+      fetchAppSettings(),
+      fetchAllTemplates(),
+      fetchPackages(),
+      fetchGoogleCalendarStatus(),
+      fetchGoogleCalendarChoices(),
+    ]);
 
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto" }}>
@@ -59,6 +62,7 @@ export default async function OwnerSettingsPage({
         initialTemplates={templates}
         initialPackages={packages}
         initialGoogleStatus={googleStatus}
+        initialGoogleCalendars={googleCalendars}
         googleNotice={googleNotice}
       />
     </div>

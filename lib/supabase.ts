@@ -286,8 +286,9 @@ export interface GoogleCalendarConnectionRecord {
   /** Cache of the most recent short-lived access token (may be stale). */
   access_token: string | null;
   token_expiry: string | null;
+  /** DEAD since migration 009 — per-calendar state lives in google_synced_calendars. */
   calendar_id: string;
-  /** Google events.list nextSyncToken. NULL = next sync is a full fetch. */
+  /** DEAD since migration 009 — per-calendar state lives in google_synced_calendars. */
   sync_token: string | null;
   /** Stage 3 (push notifications) — unused in Stage 1, all nullable. */
   watch_channel_id: string | null;
@@ -298,9 +299,28 @@ export interface GoogleCalendarConnectionRecord {
   updated_at: string;
 }
 
+export interface GoogleSyncedCalendarRecord {
+  id: string;
+  /**
+   * Google calendarList id. The primary calendar is stored under the alias
+   * 'primary' (accepted by every Google API call), not its email-shaped id.
+   */
+  calendar_id: string;
+  /** Display-name snapshot for the settings checkboxes. */
+  summary: string | null;
+  /** Google backgroundColor snapshot (checkbox swatch). */
+  color: string | null;
+  /** Per-calendar events.list nextSyncToken. NULL = next sync is a full fetch. */
+  sync_token: string | null;
+  last_synced_at: string | null;
+  created_at: string;
+}
+
 export interface ExternalEventRecord {
   id: string;
-  /** Google's event id (per-instance once expanded). Upsert key. */
+  /** Which google_synced_calendars.calendar_id this event came from. */
+  calendar_id: string;
+  /** Google's event id (per-instance once expanded). Unique per (calendar_id, google_event_id). */
   google_event_id: string;
   title: string | null;
   starts_at: string;
@@ -359,6 +379,9 @@ export type Database = {
       >;
       google_calendar_connection: TableShape<
         GoogleCalendarConnectionRecord & Record<string, unknown>
+      >;
+      google_synced_calendars: TableShape<
+        GoogleSyncedCalendarRecord & Record<string, unknown>
       >;
       external_events: TableShape<ExternalEventRecord & Record<string, unknown>>;
     };

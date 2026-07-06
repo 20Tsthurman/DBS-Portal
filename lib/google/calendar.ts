@@ -17,6 +17,53 @@ export function getCalendarApi(auth: Auth.OAuth2Client): calendar_v3.Calendar {
   return google.calendar({ version: "v3", auth });
 }
 
+export interface GoogleCalendarListEntry {
+  /**
+   * Canonical portal id: 'primary' for the account's primary calendar
+   * (whose raw calendarList id is the email address), the raw id otherwise.
+   * Matches the google_synced_calendars.calendar_id convention.
+   */
+  id: string;
+  summary: string;
+  primary: boolean;
+  /** Google backgroundColor, e.g. "#9fe1e7". */
+  color: string | null;
+}
+
+/**
+ * The account's calendar list (calendarList.list), for the settings
+ * checkboxes. Read-only — covered by the calendar.readonly scope.
+ */
+export async function listCalendars(
+  auth: Auth.OAuth2Client
+): Promise<GoogleCalendarListEntry[]> {
+  const api = getCalendarApi(auth);
+  const items: calendar_v3.Schema$CalendarListEntry[] = [];
+  let pageToken: string | undefined;
+  do {
+    const res = await api.calendarList.list({ maxResults: 250, pageToken });
+    items.push(...(res.data.items ?? []));
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  const entries: GoogleCalendarListEntry[] = [];
+  for (const item of items) {
+    if (!item.id) continue;
+    entries.push({
+      id: item.primary ? "primary" : item.id,
+      summary: item.summaryOverride?.trim() || item.summary?.trim() || item.id,
+      primary: Boolean(item.primary),
+      color: item.backgroundColor ?? null,
+    });
+  }
+  // Primary first, then alphabetical — stable order for the checkbox list.
+  entries.sort((a, b) => {
+    if (a.primary !== b.primary) return a.primary ? -1 : 1;
+    return a.summary.localeCompare(b.summary);
+  });
+  return entries;
+}
+
 export interface ListEventsResult {
   items: GoogleEvent[];
   nextSyncToken: string;

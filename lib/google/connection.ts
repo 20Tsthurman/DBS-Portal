@@ -2,6 +2,7 @@ import type { Auth } from "googleapis";
 import {
   getSupabaseServiceClient,
   type GoogleCalendarConnectionRecord,
+  type GoogleSyncedCalendarRecord,
 } from "@/lib/supabase";
 import { getGoogleOAuthClient } from "./oauth";
 import { decryptToken, encryptToken } from "./tokenCrypto";
@@ -48,9 +49,11 @@ export function getDecryptedRefreshToken(
 }
 
 /**
- * Create-or-replace the singleton after an OAuth exchange. A fresh grant
- * resets sync state (sync_token / last_synced_at) so the first sync after a
- * reconnect is a clean full-window fetch.
+ * Create-or-replace the singleton after an OAuth exchange. A fresh grant is
+ * a clean slate: the calendar selection resets to just the primary calendar,
+ * and the imported mirror is wiped so events from previously-selected
+ * calendars can't linger with no calendar row left to refresh or tombstone
+ * them. The first sync after connect is a full-window fetch.
  */
 export async function saveGoogleConnection(
   input: SaveConnectionInput
@@ -64,8 +67,6 @@ export async function saveGoogleConnection(
         refresh_token: encryptToken(input.refresh_token),
         access_token: input.access_token,
         token_expiry: input.token_expiry,
-        calendar_id: "primary",
-        sync_token: null,
         last_synced_at: null,
         updated_at: new Date().toISOString(),
       },
@@ -76,15 +77,104 @@ export async function saveGoogleConnection(
   if (error || !data) {
     throw new Error(error?.message ?? "Failed to save Google connection");
   }
+
+  const { error: eventsError } = await supabase
+    .from("external_events")
+    .delete()
+    .neq("google_event_id", "");
+  if (eventsError) throw new Error(eventsError.message);
+
+  const { error: calsError } = await supabase
+    .from("google_synced_calendars")
+    .delete()
+    .neq("calendar_id", "");
+  if (calsError) throw new Error(calsError.message);
+
+  const { error: seedError } = await supabase
+    .from("google_synced_calendars")
+    .insert({ calendar_id: "primary", summary: "Primary calendar" });
+  if (seedError) throw new Error(seedError.message);
+
   return data as GoogleCalendarConnectionRecord;
 }
 
-/** Partial update on the singleton (sync_token, last_synced_at, token cache). */
+/** The calendars selected for import, in stable (insertion) order. */
+export async function fetchSyncedCalendars(): Promise<GoogleSyncedCalendarRecord[]> {
+  const supabase = getSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from("google_synced_calendars")
+    .select("*")
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as GoogleSyncedCalendarRecord[];
+}
+
+/** Per-calendar partial update (sync token, sync stamp, display snapshots). */
+export async function updateSyncedCalendar(
+  calendarId: string,
+  patch: Partial<
+    Pick<
+      GoogleSyncedCalendarRecord,
+      "sync_token" | "last_synced_at" | "summary" | "color"
+    >
+  >
+): Promise<void> {
+  const supabase = getSupabaseServiceClient();
+  const { error } = await supabase
+    .from("google_synced_calendars")
+    .update(patch)
+    .eq("calendar_id", calendarId);
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Select a calendar for import. sync_token starts NULL so the next sync
+ * does a full-window fetch for it. No-op if already selected.
+ */
+export async function addSyncedCalendar(input: {
+  calendar_id: string;
+  summary: string | null;
+  color: string | null;
+}): Promise<void> {
+  const supabase = getSupabaseServiceClient();
+  const { error } = await supabase
+    .from("google_synced_calendars")
+    .upsert(
+      {
+        calendar_id: input.calendar_id,
+        summary: input.summary,
+        color: input.color,
+      },
+      { onConflict: "calendar_id" }
+    );
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Deselect a calendar: drop its selection row AND its imported events, so
+ * they stop rendering and stop blocking client bookings immediately.
+ * Re-selecting later recreates the row with a NULL token → clean full sync.
+ */
+export async function removeSyncedCalendar(calendarId: string): Promise<void> {
+  const supabase = getSupabaseServiceClient();
+  const { error: eventsError } = await supabase
+    .from("external_events")
+    .delete()
+    .eq("calendar_id", calendarId);
+  if (eventsError) throw new Error(eventsError.message);
+  const { error } = await supabase
+    .from("google_synced_calendars")
+    .delete()
+    .eq("calendar_id", calendarId);
+  if (error) throw new Error(error.message);
+}
+
+/** Partial update on the singleton (last_synced_at, token cache). */
 export async function updateGoogleConnection(
   patch: Partial<
     Pick<
       GoogleCalendarConnectionRecord,
-      "access_token" | "token_expiry" | "sync_token" | "last_synced_at"
+      "access_token" | "token_expiry" | "last_synced_at"
     >
   >
 ): Promise<void> {
@@ -97,9 +187,10 @@ export async function updateGoogleConnection(
 }
 
 /**
- * Delete the connection row AND the imported mirror. Leaving external_events
- * behind after a disconnect would keep ghost events on the calendar and keep
- * blocking client bookings with data that can no longer be refreshed.
+ * Delete the connection row, the calendar selection, AND the imported
+ * mirror. Leaving external_events behind after a disconnect would keep
+ * ghost events on the calendar and keep blocking client bookings with data
+ * that can no longer be refreshed.
  */
 export async function clearGoogleConnection(): Promise<void> {
   const supabase = getSupabaseServiceClient();
@@ -108,6 +199,11 @@ export async function clearGoogleConnection(): Promise<void> {
     .delete()
     .neq("google_event_id", "");
   if (eventsError) throw new Error(eventsError.message);
+  const { error: calsError } = await supabase
+    .from("google_synced_calendars")
+    .delete()
+    .neq("calendar_id", "");
+  if (calsError) throw new Error(calsError.message);
   const { error } = await supabase
     .from("google_calendar_connection")
     .delete()
