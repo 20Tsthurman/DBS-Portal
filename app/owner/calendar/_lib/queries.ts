@@ -82,11 +82,14 @@ export async function fetchEventsInRange(
       .gte("date", blocksDateLo)
       .lt("date", blocksDateHi),
     // Exact-instant overlap directly in SQL (both bounds are timestamptz).
-    // Tombstoned (cancelled-in-Google) rows never render.
+    // Tombstoned (cancelled-in-Google) rows never render. Converted shoot
+    // candidates are excluded too — their shoots row renders instead, and
+    // showing both would double the event.
     supabase
       .from("external_events")
       .select("id, title, starts_at, ends_at, all_day, html_link")
       .eq("status", "confirmed")
+      .is("converted_shoot_id", null)
       .lt("starts_at", end.toISOString())
       .gt("ends_at", start.toISOString()),
   ]);

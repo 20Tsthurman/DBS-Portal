@@ -15,6 +15,7 @@ const ownerNav: SidebarNavSection[] = [
       { label: "Clients", href: "/owner/clients" },
       { label: "Calendar", href: "/owner/calendar" },
       { label: "Shoots", href: "/owner/shoots" },
+      { label: "Confirm Shoots", href: "/owner/confirm-shoots" },
       { label: "Messages", href: "/owner/messages" },
     ],
   },
