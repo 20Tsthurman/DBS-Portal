@@ -36,7 +36,6 @@ export type FileType = "content" | "contract" | "invoice" | "other";
 export type SenderRole = "owner" | "client";
 export type TimeBlockCategory = "sonography" | "work_block" | "blocked";
 export type ExternalEventStatus = "confirmed" | "cancelled";
-export type ShootCandidateStatus = "pending" | "confirmed" | "dismissed";
 
 export interface ClientRecord {
   id: string;
@@ -337,21 +336,6 @@ export interface ExternalEventRecord {
   /** 'cancelled' rows are tombstones — hidden from the calendar and conflicts. */
   status: ExternalEventStatus;
   html_link: string | null;
-  /** The Google event's location text — flows into shoots.location on confirm. */
-  location: string | null;
-  /**
-   * Shoot-capture lifecycle (migration 010). NULL = plain event; 'pending' =
-   * in the Confirm Shoots queue; 'dismissed' = never re-prompts; 'confirmed'
-   * = converted (see converted_shoot_id). Sync only sets 'pending' on NULL
-   * rows, so decisions survive re-syncs.
-   */
-  shoot_candidate: ShootCandidateStatus | null;
-  /**
-   * Set on confirm. Non-NULL rows are excluded from calendar rendering and
-   * booking conflicts — the shoot row does both jobs. FK nulls out if the
-   * shoot is deleted, resurfacing the event as a normal busy one.
-   */
-  converted_shoot_id: string | null;
   created_at: string;
   updated_at: string;
 }

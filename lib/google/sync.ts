@@ -41,8 +41,6 @@ export type SyncResult =
       upserted: number;
       cancelled: number;
       fullResync: boolean;
-      /** Rows newly flagged into the Confirm Shoots queue this run. */
-      candidatesFlagged: number;
       /** Calendar ids whose sync threw; the rest completed normally. */
       failedCalendarIds: string[];
     };
@@ -58,15 +56,6 @@ const PORTAL_SOURCE_KEY = "dbsPortalSource";
 function isPortalAuthoredEvent(event: GoogleEvent): boolean {
   return Boolean(event.extendedProperties?.private?.[PORTAL_SOURCE_KEY]);
 }
-
-/**
- * Shoot-capture title rule: an event whose title contains "shoot" or
- * "content" (case-insensitive) is a candidate for the Confirm Shoots queue.
- * Kept as ILIKE patterns because detection runs as SQL updates over the
- * whole calendar (see flagShootCandidates) — this catches rows imported
- * before the feature existed, not just the current batch.
- */
-const CANDIDATE_TITLE_PATTERNS = ["%shoot%", "%content%"];
 
 interface SyncOptions {
   /**
@@ -100,7 +89,6 @@ export async function syncFromGoogle(
   let upserted = 0;
   let cancelled = 0;
   let fullResync = false;
-  let candidatesFlagged = 0;
   const failedCalendarIds: string[] = [];
   const nowIso = new Date().toISOString();
 
@@ -110,7 +98,6 @@ export async function syncFromGoogle(
       upserted += result.upserted;
       cancelled += result.cancelled;
       fullResync = fullResync || result.fullResync;
-      candidatesFlagged += result.candidatesFlagged;
     } catch (err) {
       console.error(
         `[google-sync] calendar "${cal.calendar_id}" sync failed`,
@@ -129,11 +116,10 @@ export async function syncFromGoogle(
 
   return {
     status: "synced",
-    changed: upserted > 0 || cancelled > 0 || candidatesFlagged > 0,
+    changed: upserted > 0 || cancelled > 0,
     upserted,
     cancelled,
     fullResync,
-    candidatesFlagged,
     failedCalendarIds,
   };
 }
@@ -142,12 +128,7 @@ async function syncOneCalendar(
   calendarApi: calendar_v3.Calendar,
   cal: GoogleSyncedCalendarRecord,
   nowIso: string
-): Promise<{
-  upserted: number;
-  cancelled: number;
-  fullResync: boolean;
-  candidatesFlagged: number;
-}> {
+): Promise<{ upserted: number; cancelled: number; fullResync: boolean }> {
   const { items, nextSyncToken, fullResyncPerformed } =
     await listEventsIncremental(calendarApi, cal.calendar_id, cal.sync_token);
 
@@ -163,7 +144,6 @@ async function syncOneCalendar(
       | "busy"
       | "status"
       | "html_link"
-      | "location"
     > & { updated_at: string }
   > = [];
   const cancelledIds: string[] = [];
@@ -194,9 +174,6 @@ async function syncOneCalendar(
       busy: event.transparency !== "transparent",
       status: "confirmed",
       html_link: event.htmlLink ?? null,
-      // NOTE: the payload never includes shoot_candidate/converted_shoot_id —
-      // re-syncs must not overwrite Kelsey's confirm/dismiss decisions.
-      location: event.location?.trim() || null,
       updated_at: nowIso,
     });
   }
@@ -221,8 +198,6 @@ async function syncOneCalendar(
     }
   }
 
-  const candidatesFlagged = await flagShootCandidates(cal.calendar_id);
-
   await updateSyncedCalendar(cal.calendar_id, {
     sync_token: nextSyncToken,
     last_synced_at: nowIso,
@@ -232,53 +207,7 @@ async function syncOneCalendar(
     upserted: upserts.length,
     cancelled: cancelledIds.length,
     fullResync: fullResyncPerformed,
-    candidatesFlagged,
   };
-}
-
-/**
- * Candidate detection for the Confirm Shoots queue, run after each
- * calendar's upsert. Two whole-calendar SQL updates rather than per-batch id
- * lists — this also catches rows imported before the feature existed and
- * keeps URL lengths bounded on large full syncs.
- *
- *   1. Flag: title matches shoot|content AND shoot_candidate IS NULL →
- *      'pending'. The IS NULL guard means a dismissed or confirmed decision
- *      is never overridden by a re-sync.
- *   2. Unflag: a PENDING row whose title no longer matches (renamed away
- *      from Shoot/Content, or title removed) drops back to NULL and leaves
- *      the queue. Dismissed/confirmed rows are untouched.
- *
- * Returns how many rows were newly flagged.
- */
-async function flagShootCandidates(calendarId: string): Promise<number> {
-  const supabase = getSupabaseServiceClient();
-  const [p1, p2] = CANDIDATE_TITLE_PATTERNS;
-
-  const flagged = await supabase
-    .from("external_events")
-    .update({ shoot_candidate: "pending" })
-    .eq("calendar_id", calendarId)
-    .eq("status", "confirmed")
-    .is("shoot_candidate", null)
-    .or(`title.ilike.${p1},title.ilike.${p2}`)
-    .select("id");
-  if (flagged.error) {
-    throw new Error(`candidate flagging failed: ${flagged.error.message}`);
-  }
-
-  const unflagged = await supabase
-    .from("external_events")
-    .update({ shoot_candidate: null })
-    .eq("calendar_id", calendarId)
-    .eq("shoot_candidate", "pending")
-    .or(`title.is.null,and(title.not.ilike.${p1},title.not.ilike.${p2})`)
-    .select("id");
-  if (unflagged.error) {
-    throw new Error(`candidate unflagging failed: ${unflagged.error.message}`);
-  }
-
-  return (flagged.data ?? []).length;
 }
 
 /**

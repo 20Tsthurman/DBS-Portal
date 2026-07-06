@@ -66,14 +66,11 @@ export async function checkBookingConflicts(
       .gte("date", blocksDateLo)
       .lt("date", blocksDateHi),
     // Strict-inequality overlap directly in SQL; timestamptz both sides.
-    // Converted shoot candidates are excluded — their shoots row (queried
-    // above) carries the block, and counting both would double it.
     supabase
       .from("external_events")
       .select("id")
       .eq("status", "confirmed")
       .eq("busy", true)
-      .is("converted_shoot_id", null)
       .lt("starts_at", endsAt.toISOString())
       .gt("ends_at", startsAt.toISOString()),
   ]);
