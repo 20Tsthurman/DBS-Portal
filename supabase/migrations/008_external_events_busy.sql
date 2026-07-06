@@ -1,0 +1,16 @@
+-- 008_external_events_busy.sql
+-- Google Calendar sync fix: block bookings on Google's busy/free signal
+-- (the event `transparency` field), not on the all-day heuristic.
+--
+-- PURELY ADDITIVE: one boolean column on external_events. No DROP, no
+-- destructive ALTER, no data writes beyond the column default. Safe to run
+-- top-to-bottom in the Supabase SQL Editor. Idempotent via IF NOT EXISTS.
+--
+-- Semantics: busy = (transparency != 'transparent'). Google omits the field
+-- for "Busy" events (opaque is the API default) and returns 'transparent'
+-- for "Free" ones — including the all-day events it defaults to Free.
+--
+-- DEFAULT true = opaque, matching the API default. Any pre-existing rows
+-- (none in production — nothing has connected yet) err on the blocking side
+-- and are corrected by the next full sync.
+alter table external_events add column if not exists busy boolean not null default true;

@@ -34,9 +34,10 @@ const DAY_MS = 24 * HOUR_MS;
  * on the owner's calendar. Boundary touches do NOT count as conflicts —
  * strict `<` / `>`, not `<=` / `>=`.
  *
- * External events: all-day Google events are excluded. Google defaults
- * all-day events to "free" (they're birthdays and reminders, not busy
- * time), and counting them would block booking for the entire day.
+ * External events count when Google marks them busy (transparency !=
+ * 'transparent', mirrored onto external_events.busy at sync time). That
+ * matches Google's own booking semantics: a "Free" timed event doesn't
+ * block, an all-day event flipped to "Busy" does.
  *
  * Returns only the total count; see {@link ConflictSummary}.
  */
@@ -69,7 +70,7 @@ export async function checkBookingConflicts(
       .from("external_events")
       .select("id")
       .eq("status", "confirmed")
-      .eq("all_day", false)
+      .eq("busy", true)
       .lt("starts_at", endsAt.toISOString())
       .gt("ends_at", startsAt.toISOString()),
   ]);

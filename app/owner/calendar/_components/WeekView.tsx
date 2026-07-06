@@ -16,6 +16,7 @@ import {
 } from "../_lib/timezone";
 import { EventChip } from "./EventChip";
 import { assignEventLanes } from "../_lib/overlap";
+import { visualsForEvent } from "../_lib/eventColors";
 
 interface WeekViewProps {
   /** Sunday's YYYY-MM-DD in PORTAL_TIMEZONE. */
@@ -243,25 +244,38 @@ export function WeekView({ weekStartKey, events, now = new Date() }: WeekViewPro
                 );
               })}
 
-              {/* Event chips — lane-assigned so overlapping events split width */}
+              {/* Event chips — lane-assigned so overlapping events split width.
+                  All-day Google imports are excluded from the time grid (a
+                  midnight-to-midnight span would paint the whole column and
+                  lane-split every timed event) and render as compact pills
+                  pinned at the top instead, like the other views. */}
               {(() => {
-                const lanes = assignEventLanes(dayEvents);
-                return dayEvents.map((e) => {
-                  const top = chipTop(e);
-                  const height = chipHeight(e);
-                  const lane = lanes.get(e.id);
-                  return (
-                    <EventChip
-                      key={e.id}
-                      event={e}
-                      weekKey={weekStartKey}
-                      top={top}
-                      height={height}
-                      laneIndex={lane?.laneIndex ?? 0}
-                      laneCount={lane?.laneCount ?? 1}
-                    />
-                  );
-                });
+                const allDayExternal = dayEvents.filter(isAllDayExternal);
+                const timed = dayEvents.filter((e) => !isAllDayExternal(e));
+                const lanes = assignEventLanes(timed);
+                return (
+                  <>
+                    {allDayExternal.map((e, idx) => (
+                      <AllDayExternalPill key={e.id} event={e} index={idx} />
+                    ))}
+                    {timed.map((e) => {
+                      const top = chipTop(e);
+                      const height = chipHeight(e);
+                      const lane = lanes.get(e.id);
+                      return (
+                        <EventChip
+                          key={e.id}
+                          event={e}
+                          weekKey={weekStartKey}
+                          top={top}
+                          height={height}
+                          laneIndex={lane?.laneIndex ?? 0}
+                          laneCount={lane?.laneCount ?? 1}
+                        />
+                      );
+                    })}
+                  </>
+                );
               })()}
 
               {/* "Now" line — today only, only when current time is in working hours */}
@@ -285,6 +299,66 @@ export function WeekView({ weekStartKey, events, now = new Date() }: WeekViewPro
         })}
       </div>
     </div>
+  );
+}
+
+function isAllDayExternal(event: CalendarEvent): boolean {
+  return event.source.kind === "external" && event.source.allDay;
+}
+
+const ALL_DAY_PILL_HEIGHT = 18;
+const ALL_DAY_PILL_GAP = 2;
+
+/**
+ * Compact "All day" pill pinned at the top of a Week-view day column —
+ * mirrors the read-only Google treatment used by Month/Agenda/DayPanel
+ * (links out to Google Calendar; no portal edit panel). Stacked pills
+ * overlay the first grid hour, which working-hours events (7 AM start)
+ * never occupy.
+ */
+function AllDayExternalPill({
+  event,
+  index,
+}: {
+  event: CalendarEvent;
+  index: number;
+}) {
+  if (event.source.kind !== "external") return null;
+  const v = visualsForEvent(event);
+  const htmlLink = event.source.htmlLink;
+
+  const pillStyle: CSSProperties = {
+    position: "absolute",
+    top: ALL_DAY_PILL_GAP + index * (ALL_DAY_PILL_HEIGHT + ALL_DAY_PILL_GAP),
+    left: 2,
+    right: 2,
+    height: ALL_DAY_PILL_HEIGHT,
+    lineHeight: `${ALL_DAY_PILL_HEIGHT}px`,
+    display: "block",
+    borderLeft: v.borderLeft,
+    backgroundColor: v.background,
+    color: v.textColor,
+    padding: "0 6px",
+    fontSize: 10,
+    fontWeight: 600,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    textDecoration: "none",
+    cursor: htmlLink ? "pointer" : "default",
+    zIndex: 2,
+  };
+
+  return (
+    <a
+      href={htmlLink ?? undefined}
+      target="_blank"
+      rel="noreferrer"
+      title={`All day · ${event.title} · View in Google Calendar`}
+      style={pillStyle}
+    >
+      {event.title || "—"}
+    </a>
   );
 }
 

@@ -79,6 +79,7 @@ export async function syncFromGoogle(
       | "starts_at"
       | "ends_at"
       | "all_day"
+      | "busy"
       | "status"
       | "html_link"
     > & { updated_at: string }
@@ -105,6 +106,10 @@ export async function syncFromGoogle(
       starts_at: mapped.startsAt.toISOString(),
       ends_at: mapped.endsAt.toISOString(),
       all_day: mapped.allDay,
+      // Google's busy/free signal. The API omits transparency for "Busy"
+      // events (opaque is the default) and sends 'transparent' for "Free"
+      // ones — which is what all-day events default to in the Google UI.
+      busy: event.transparency !== "transparent",
       status: "confirmed",
       html_link: event.htmlLink ?? null,
       updated_at: nowIso,

@@ -14,7 +14,11 @@ import {
   type PackageRecord,
   type RecurringExpenseTemplateRecord,
 } from "@/lib/supabase";
-import { fetchGoogleConnection, clearGoogleConnection } from "@/lib/google/connection";
+import {
+  fetchGoogleConnection,
+  clearGoogleConnection,
+  getDecryptedRefreshToken,
+} from "@/lib/google/connection";
 import { revokeGoogleToken } from "@/lib/google/oauth";
 import type {
   CreateRecurringExpenseTemplateInput,
@@ -122,7 +126,11 @@ export async function disconnectGoogleCalendarAction(): Promise<ActionResult<nul
   try {
     const connection = await fetchGoogleConnection();
     if (!connection) return { ok: false, error: "Google Calendar is not connected" };
-    await revokeGoogleToken(connection.refresh_token);
+    // Token is stored encrypted; an undecryptable one (rotated key) can't be
+    // revoked here — skip revoke but still clear our rows. Kelsey can revoke
+    // from her Google account's third-party access page if needed.
+    const refreshToken = getDecryptedRefreshToken(connection);
+    if (refreshToken) await revokeGoogleToken(refreshToken);
     await clearGoogleConnection();
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to disconnect";

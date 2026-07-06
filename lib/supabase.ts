@@ -307,6 +307,12 @@ export interface ExternalEventRecord {
   /** Exclusive. For all-day events this is the PORTAL_TIMEZONE midnight after the last day. */
   ends_at: string;
   all_day: boolean;
+  /**
+   * Google's busy/free signal: transparency != 'transparent'. Drives
+   * checkBookingConflicts — busy events block client bookings, free ones
+   * (birthdays, reminders) don't. Added in migration 008.
+   */
+  busy: boolean;
   /** 'cancelled' rows are tombstones — hidden from the calendar and conflicts. */
   status: ExternalEventStatus;
   html_link: string | null;

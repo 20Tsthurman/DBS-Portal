@@ -2,7 +2,10 @@ import {
   getSupabaseServiceClient,
   type RecurringExpenseTemplateRecord,
 } from "@/lib/supabase";
-import { fetchGoogleConnection } from "@/lib/google/connection";
+import {
+  fetchGoogleConnection,
+  getDecryptedRefreshToken,
+} from "@/lib/google/connection";
 import type { GoogleCalendarStatus } from "./types";
 
 // `fetchAppSettings` lives in the financials module because that's the
@@ -30,6 +33,12 @@ export { fetchActivePackages as fetchPackages } from "@/app/owner/clients/_lib/q
 export async function fetchGoogleCalendarStatus(): Promise<GoogleCalendarStatus> {
   const connection = await fetchGoogleConnection();
   if (!connection) {
+    return { connected: false, lastSyncedAt: null, calendarId: null };
+  }
+  // A row whose refresh token can't be decrypted (missing/rotated
+  // GOOGLE_TOKEN_ENCRYPTION_KEY) can never sync — show it as not connected
+  // so the Connect button is available and a re-grant overwrites the row.
+  if (getDecryptedRefreshToken(connection) === null) {
     return { connected: false, lastSyncedAt: null, calendarId: null };
   }
   return {
