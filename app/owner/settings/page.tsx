@@ -16,16 +16,28 @@ import { SettingsBoard } from "./_components/SettingsBoard";
 import {
   fetchAllTemplates,
   fetchAppSettings,
+  fetchGoogleCalendarStatus,
   fetchPackages,
 } from "./_lib/queries";
 
 export const dynamic = "force-dynamic";
 
-export default async function OwnerSettingsPage() {
-  const [settings, templates, packages] = await Promise.all([
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+export default async function OwnerSettingsPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
+  const params = await searchParams;
+  const googleNotice =
+    typeof params.google === "string" ? params.google : null;
+
+  const [settings, templates, packages, googleStatus] = await Promise.all([
     fetchAppSettings(),
     fetchAllTemplates(),
     fetchPackages(),
+    fetchGoogleCalendarStatus(),
   ]);
 
   return (
@@ -46,6 +58,8 @@ export default async function OwnerSettingsPage() {
         initialSettings={settings}
         initialTemplates={templates}
         initialPackages={packages}
+        initialGoogleStatus={googleStatus}
+        googleNotice={googleNotice}
       />
     </div>
   );

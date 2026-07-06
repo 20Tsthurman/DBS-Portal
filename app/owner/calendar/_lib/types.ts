@@ -22,7 +22,12 @@
 
 import type { TimeBlockCategory } from "@/lib/supabase";
 
-export type EventCategory = "shoot" | "meeting" | TimeBlockCategory;
+export type EventCategory =
+  | "shoot"
+  | "meeting"
+  /** Imported Google Calendar event — read-only; edits happen in Google. */
+  | "external"
+  | TimeBlockCategory;
 
 export type EventStatus =
   | "requested"
@@ -49,5 +54,17 @@ export interface CalendarEvent {
   /** Discriminated source — lets row-action menus call the right CRUD action. */
   source:
     | { kind: "shoot"; shootId: string; clientId: string }
-    | { kind: "time_block"; timeBlockId: string; clientId: string | null };
+    | { kind: "time_block"; timeBlockId: string; clientId: string | null }
+    /**
+     * Google Calendar import. No portal CRUD — views render these read-only
+     * and link out to Google via htmlLink instead of opening an edit panel.
+     * `allDay` lets views label the event "All day" instead of the
+     * meaningless midnight-to-midnight time span.
+     */
+    | {
+        kind: "external";
+        externalEventId: string;
+        htmlLink: string | null;
+        allDay: boolean;
+      };
 }

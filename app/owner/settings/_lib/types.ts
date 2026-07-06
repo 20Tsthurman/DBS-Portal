@@ -26,3 +26,14 @@ export interface UpdatePackageInput {
   monthlyPrice?: number;
   monthlyHours?: number;
 }
+
+/**
+ * Connection state for the Google Calendar section. Deliberately excludes
+ * tokens — only display-safe fields cross the server/client boundary.
+ */
+export interface GoogleCalendarStatus {
+  connected: boolean;
+  /** ISO timestamp of the last completed sync, or null before the first one. */
+  lastSyncedAt: string | null;
+  calendarId: string | null;
+}

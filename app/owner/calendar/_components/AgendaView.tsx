@@ -164,11 +164,18 @@ interface AgendaRowProps {
 function AgendaRow({ event, baseHref }: AgendaRowProps) {
   const v = visualsForEvent(event);
   const editHref = `${baseHref}&date=${event.dateKey}&edit=${event.id}`;
+  // Google-imported events link out to Google Calendar instead of the
+  // portal edit panel (read-only on our side).
+  const external = event.source.kind === "external" ? event.source : null;
 
   const startLabel = formatTimeInTimezone(event.startsAt);
   const endLabel = formatTimeInTimezone(event.endsAt);
   const showRange = event.endsAt.getTime() > event.startsAt.getTime();
-  const timeText = showRange ? `${startLabel} – ${endLabel}` : startLabel;
+  const timeText = external?.allDay
+    ? "All day"
+    : showRange
+      ? `${startLabel} – ${endLabel}`
+      : startLabel;
 
   const struck =
     v.textTexture === "strikethrough" ||
@@ -187,12 +194,8 @@ function AgendaRow({ event, baseHref }: AgendaRowProps) {
     transition: "background-color 0.12s",
   };
 
-  return (
-    <Link
-      href={editHref}
-      style={rowStyle}
-      className="agenda-row"
-    >
+  const body = (
+    <>
       <div
         className="w-[100px] px-2.5 lg:w-[140px] lg:px-[14px]"
         style={{
@@ -258,6 +261,27 @@ function AgendaRow({ event, baseHref }: AgendaRowProps) {
           </div>
         )}
       </div>
+    </>
+  );
+
+  if (external) {
+    return (
+      <a
+        href={external.htmlLink ?? undefined}
+        target="_blank"
+        rel="noreferrer"
+        title="View in Google Calendar"
+        style={external.htmlLink ? rowStyle : { ...rowStyle, cursor: "default" }}
+        className="agenda-row"
+      >
+        {body}
+      </a>
+    );
+  }
+
+  return (
+    <Link href={editHref} style={rowStyle} className="agenda-row">
+      {body}
     </Link>
   );
 }

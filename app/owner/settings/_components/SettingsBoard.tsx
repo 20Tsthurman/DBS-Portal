@@ -5,7 +5,9 @@ import type {
   PackageRecord,
   RecurringExpenseTemplateRecord,
 } from "@/lib/supabase";
+import type { GoogleCalendarStatus } from "../_lib/types";
 import { AppSettingsSection } from "./AppSettingsSection";
+import { GoogleCalendarSection } from "./GoogleCalendarSection";
 import { PackagesTableSection } from "./PackagesTableSection";
 import { TemplatesTableSection } from "./TemplatesTableSection";
 
@@ -13,16 +15,22 @@ interface SettingsBoardProps {
   initialSettings: AppSettingsRecord;
   initialTemplates: RecurringExpenseTemplateRecord[];
   initialPackages: PackageRecord[];
+  initialGoogleStatus: GoogleCalendarStatus;
+  /** Outcome flag from the OAuth callback redirect (?google=…), or null. */
+  googleNotice: string | null;
 }
 
 export function SettingsBoard({
   initialSettings,
   initialTemplates,
   initialPackages,
+  initialGoogleStatus,
+  googleNotice,
 }: SettingsBoardProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       <AppSettingsSection initial={initialSettings} />
+      <GoogleCalendarSection initial={initialGoogleStatus} notice={googleNotice} />
       <TemplatesTableSection initial={initialTemplates} />
       <PackagesTableSection initial={initialPackages} />
 

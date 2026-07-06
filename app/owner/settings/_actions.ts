@@ -14,6 +14,8 @@ import {
   type PackageRecord,
   type RecurringExpenseTemplateRecord,
 } from "@/lib/supabase";
+import { fetchGoogleConnection, clearGoogleConnection } from "@/lib/google/connection";
+import { revokeGoogleToken } from "@/lib/google/oauth";
 import type {
   CreateRecurringExpenseTemplateInput,
   UpdateAppSettingsInput,
@@ -101,6 +103,35 @@ export async function updateAppSettingsAction(
   }
   revalidateBoth();
   return { ok: true, data: data as AppSettingsRecord };
+}
+
+// ---------------------------------------------------------------------------
+// disconnectGoogleCalendarAction
+//
+// Revokes the OAuth grant (best-effort — Kelsey can also revoke from her
+// Google account page), then deletes the connection row AND the imported
+// external_events mirror. Leaving the mirror behind would keep ghost events
+// on the calendar and keep blocking client bookings with data that can no
+// longer refresh. Connect has no action — it's a plain navigation to
+// /api/google/connect, which needs to set a cookie and redirect to Google.
+// ---------------------------------------------------------------------------
+export async function disconnectGoogleCalendarAction(): Promise<ActionResult<null>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  try {
+    const connection = await fetchGoogleConnection();
+    if (!connection) return { ok: false, error: "Google Calendar is not connected" };
+    await revokeGoogleToken(connection.refresh_token);
+    await clearGoogleConnection();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to disconnect";
+    return { ok: false, error: message };
+  }
+
+  revalidatePath("/owner/settings");
+  revalidatePath("/owner/calendar");
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------

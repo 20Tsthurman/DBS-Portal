@@ -100,6 +100,14 @@ export function visualsForEvent(event: CalendarEvent): EventVisuals {
           };
       }
       break;
+    case "external":
+      // Imported Google Calendar events — Google-blue accent so they read
+      // as "not mine to edit here" at a glance.
+      return {
+        background: "rgba(66, 133, 244, 0.10)",
+        borderLeft: "3px solid rgba(66, 133, 244, 0.75)",
+        textColor: "var(--text-body)",
+      };
     case "sonography":
       return {
         background: "rgba(75, 92, 78, 0.12)",
@@ -139,6 +147,8 @@ export function categoryLabel(category: EventCategory): string {
       return "Shoot";
     case "meeting":
       return "Meeting";
+    case "external":
+      return "Google Calendar";
     case "sonography":
       return "Sonography";
     case "work_block":

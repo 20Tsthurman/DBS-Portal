@@ -19,6 +19,10 @@ const isProtectedRoute = createRouteMatcher([
   "/api/invite(.*)",
   "/api/messages(.*)",
   "/api/clients(.*)",
+  // Google OAuth (connect/callback) + sync-on-view. All session-carrying:
+  // the callback is Google redirecting Kelsey's own browser, so her Clerk
+  // cookies ARE present — this must NOT move to the public webhook matcher.
+  "/api/google(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {

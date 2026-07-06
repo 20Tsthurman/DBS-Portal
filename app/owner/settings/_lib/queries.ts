@@ -2,6 +2,8 @@ import {
   getSupabaseServiceClient,
   type RecurringExpenseTemplateRecord,
 } from "@/lib/supabase";
+import { fetchGoogleConnection } from "@/lib/google/connection";
+import type { GoogleCalendarStatus } from "./types";
 
 // `fetchAppSettings` lives in the financials module because that's the
 // feature it shipped with. Re-export here so the settings page can import
@@ -21,6 +23,22 @@ export { fetchActivePackages as fetchPackages } from "@/app/owner/clients/_lib/q
  * `active = true`), this returns inactive rows too so Kelsey can toggle
  * them back on or delete them.
  */
+/**
+ * Display-safe Google Calendar connection state for the settings section.
+ * Never returns tokens — {@link GoogleCalendarStatus} is the boundary shape.
+ */
+export async function fetchGoogleCalendarStatus(): Promise<GoogleCalendarStatus> {
+  const connection = await fetchGoogleConnection();
+  if (!connection) {
+    return { connected: false, lastSyncedAt: null, calendarId: null };
+  }
+  return {
+    connected: true,
+    lastSyncedAt: connection.last_synced_at,
+    calendarId: connection.calendar_id,
+  };
+}
+
 export async function fetchAllTemplates(): Promise<
   RecurringExpenseTemplateRecord[]
 > {

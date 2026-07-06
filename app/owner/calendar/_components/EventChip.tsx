@@ -23,6 +23,9 @@ export function EventChip({
 }: EventChipProps) {
   const v = visualsForEvent(event);
   const editHref = `/owner/calendar?view=week&week=${weekKey}&date=${event.dateKey}&edit=${event.id}`;
+  // Google-imported events have no portal edit panel — link out to Google
+  // Calendar instead (read-only on our side).
+  const external = event.source.kind === "external" ? event.source : null;
 
   const widthPct = 100 / laneCount;
   const leftPct = laneIndex * widthPct;
@@ -82,22 +85,47 @@ export function EventChip({
   const startLabel = formatTimeInTimezone(event.startsAt);
   const endLabel = formatTimeInTimezone(event.endsAt);
   const showRange = event.endsAt.getTime() > event.startsAt.getTime();
-  const timeText = showRange ? `${startLabel} – ${endLabel}` : startLabel;
+  const timeText = external?.allDay
+    ? "All day"
+    : showRange
+      ? `${startLabel} – ${endLabel}`
+      : startLabel;
 
   const tooltip = [
     timeText,
     event.title,
     event.subtitle,
     event.status === "requested" ? "(Pending)" : null,
+    external ? "View in Google Calendar" : null,
   ]
     .filter(Boolean)
     .join(" · ");
 
-  return (
-    <Link href={editHref} title={tooltip} style={baseStyle}>
+  const body = (
+    <>
       <div style={timeStyle}>{timeText}</div>
       <div style={titleStyle}>{event.title || "—"}</div>
       {event.subtitle && <div style={subtitleStyle}>{event.subtitle}</div>}
+    </>
+  );
+
+  if (external) {
+    return (
+      <a
+        href={external.htmlLink ?? undefined}
+        target="_blank"
+        rel="noreferrer"
+        title={tooltip}
+        style={external.htmlLink ? baseStyle : { ...baseStyle, cursor: "default" }}
+      >
+        {body}
+      </a>
+    );
+  }
+
+  return (
+    <Link href={editHref} title={tooltip} style={baseStyle}>
+      {body}
     </Link>
   );
 }

@@ -1,5 +1,6 @@
 import {
   getSupabaseServiceClient,
+  type ExternalEventRecord,
   type ShootRecord,
   type TimeBlockRecord,
 } from "@/lib/supabase";
@@ -29,8 +30,13 @@ const DAY_MS = 24 * HOUR_MS;
 
 /**
  * Whether `[startsAt, endsAt)` overlaps with any existing shoot (any status
- * except cancelled) or any time_block on the owner's calendar. Boundary
- * touches do NOT count as conflicts — strict `<` / `>`, not `<=` / `>=`.
+ * except cancelled), any time_block, or any imported Google Calendar event
+ * on the owner's calendar. Boundary touches do NOT count as conflicts —
+ * strict `<` / `>`, not `<=` / `>=`.
+ *
+ * External events: all-day Google events are excluded. Google defaults
+ * all-day events to "free" (they're birthdays and reminders, not busy
+ * time), and counting them would block booking for the entire day.
  *
  * Returns only the total count; see {@link ConflictSummary}.
  */
@@ -46,7 +52,7 @@ export async function checkBookingConflicts(
   const blocksDateLo = dateKeyInTimezone(startsAt);
   const blocksDateHi = dateKeyInTimezone(new Date(endsAt.getTime() + DAY_MS));
 
-  const [shootsRes, blocksRes] = await Promise.all([
+  const [shootsRes, blocksRes, externalRes] = await Promise.all([
     supabase
       .from("shoots")
       .select("scheduled_at, duration_hours, status")
@@ -58,10 +64,19 @@ export async function checkBookingConflicts(
       .select("date, start_time, end_time")
       .gte("date", blocksDateLo)
       .lt("date", blocksDateHi),
+    // Strict-inequality overlap directly in SQL; timestamptz both sides.
+    supabase
+      .from("external_events")
+      .select("id")
+      .eq("status", "confirmed")
+      .eq("all_day", false)
+      .lt("starts_at", endsAt.toISOString())
+      .gt("ends_at", startsAt.toISOString()),
   ]);
 
   if (shootsRes.error) throw new Error(shootsRes.error.message);
   if (blocksRes.error) throw new Error(blocksRes.error.message);
+  if (externalRes.error) throw new Error(externalRes.error.message);
 
   const shoots = (shootsRes.data ?? []) as Pick<
     ShootRecord,
@@ -71,8 +86,9 @@ export async function checkBookingConflicts(
     TimeBlockRecord,
     "date" | "start_time" | "end_time"
   >[];
+  const externals = (externalRes.data ?? []) as Pick<ExternalEventRecord, "id">[];
 
-  let count = 0;
+  let count = externals.length;
 
   for (const s of shoots) {
     const shootStart = new Date(s.scheduled_at);

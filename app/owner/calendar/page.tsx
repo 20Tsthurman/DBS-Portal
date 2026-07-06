@@ -25,6 +25,7 @@ import { TimeBlockFormPanel } from "./_components/TimeBlockFormPanel";
 import { EditShootPanel } from "./_components/EditShootPanel";
 import { PendingRequestsBar } from "./_components/PendingRequestsBar";
 import { WeekMobileFallback } from "./_components/WeekMobileFallback";
+import { GoogleSyncOnView } from "./_components/GoogleSyncOnView";
 
 export const dynamic = "force-dynamic";
 
@@ -182,6 +183,7 @@ async function renderWeekView(
         <p className="eyebrow mb-3">Owner — Calendar</p>
         <h1 className="page-title">Calendar</h1>
       </header>
+      <GoogleSyncOnView />
       <PendingRequestsBar shoots={pendingShoots} editHrefFor={editHrefFor} />
       <WeekMobileFallback
         fallbackHref={`/owner/calendar?view=month&month=${weekStartKey.slice(0, 7)}`}
@@ -290,6 +292,7 @@ async function renderMonthView(
         <p className="eyebrow mb-3">Owner — Calendar</p>
         <h1 className="page-title">Calendar</h1>
       </header>
+      <GoogleSyncOnView />
       <PendingRequestsBar shoots={pendingShoots} editHrefFor={editHrefFor} />
       <MonthToolbar monthKey={monthKey} />
       <MonthView monthKey={monthKey} events={events} />
@@ -396,6 +399,7 @@ async function renderAgendaView(
         <p className="eyebrow mb-3">Owner — Calendar</p>
         <h1 className="page-title">Calendar</h1>
       </header>
+      <GoogleSyncOnView />
       <PendingRequestsBar shoots={pendingShoots} editHrefFor={editHrefFor} />
       <AgendaToolbar startDateKey={startDateKey} days={days} />
       <AgendaView

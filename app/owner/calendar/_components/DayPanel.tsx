@@ -150,6 +150,9 @@ interface EventCardProps {
 function EventCard({ event, baseHref }: EventCardProps) {
   const v = visualsForEvent(event);
   const editHref = `${baseHref}&date=${event.dateKey}&edit=${event.id}`;
+  // Google-imported events have no portal edit panel — the card links out
+  // to Google Calendar instead (read-only on our side).
+  const external = event.source.kind === "external" ? event.source : null;
 
   const cardStyle: CSSProperties = {
     display: "block",
@@ -169,7 +172,11 @@ function EventCard({ event, baseHref }: EventCardProps) {
   const startLabel = formatTimeInTimezone(event.startsAt);
   const endLabel = formatTimeInTimezone(event.endsAt);
   const showRange = event.endsAt.getTime() > event.startsAt.getTime();
-  const timeText = showRange ? `${startLabel} – ${endLabel}` : startLabel;
+  const timeText = external?.allDay
+    ? "All day"
+    : showRange
+      ? `${startLabel} – ${endLabel}`
+      : startLabel;
 
   const titleStyle: CSSProperties = {
     fontSize: 13,
@@ -180,8 +187,8 @@ function EventCard({ event, baseHref }: EventCardProps) {
     fontStyle: v.textTexture === "italic" ? "italic" : undefined,
   };
 
-  return (
-    <Link href={editHref} style={cardStyle}>
+  const body = (
+    <>
       <div
         style={{
           fontSize: 10,
@@ -215,6 +222,37 @@ function EventCard({ event, baseHref }: EventCardProps) {
           {event.subtitle}
         </div>
       )}
+      {external && external.htmlLink && (
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--text-muted)",
+            marginTop: 6,
+            textDecoration: "underline",
+          }}
+        >
+          View in Google Calendar ↗
+        </div>
+      )}
+    </>
+  );
+
+  if (external) {
+    return (
+      <a
+        href={external.htmlLink ?? undefined}
+        target="_blank"
+        rel="noreferrer"
+        style={external.htmlLink ? cardStyle : { ...cardStyle, cursor: "default" }}
+      >
+        {body}
+      </a>
+    );
+  }
+
+  return (
+    <Link href={editHref} style={cardStyle}>
+      {body}
     </Link>
   );
 }
@@ -225,6 +263,8 @@ function categoryBadge(event: CalendarEvent): string {
       return `Shoot · ${capitalize(event.status)}`;
     case "meeting":
       return `Meeting · ${capitalize(event.status)}`;
+    case "external":
+      return "Google Calendar";
     case "sonography":
       return "Sonography";
     case "work_block":

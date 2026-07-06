@@ -35,6 +35,7 @@ export type SuggestionType =
 export type FileType = "content" | "contract" | "invoice" | "other";
 export type SenderRole = "owner" | "client";
 export type TimeBlockCategory = "sonography" | "work_block" | "blocked";
+export type ExternalEventStatus = "confirmed" | "cancelled";
 
 export interface ClientRecord {
   id: string;
@@ -277,6 +278,42 @@ export interface DismissedSuggestionRecord {
 }
 
 
+export interface GoogleCalendarConnectionRecord {
+  id: string;
+  singleton: boolean;
+  /** Long-lived OAuth credential. Never leaves the server. */
+  refresh_token: string;
+  /** Cache of the most recent short-lived access token (may be stale). */
+  access_token: string | null;
+  token_expiry: string | null;
+  calendar_id: string;
+  /** Google events.list nextSyncToken. NULL = next sync is a full fetch. */
+  sync_token: string | null;
+  /** Stage 3 (push notifications) — unused in Stage 1, all nullable. */
+  watch_channel_id: string | null;
+  watch_resource_id: string | null;
+  watch_expiration: string | null;
+  last_synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExternalEventRecord {
+  id: string;
+  /** Google's event id (per-instance once expanded). Upsert key. */
+  google_event_id: string;
+  title: string | null;
+  starts_at: string;
+  /** Exclusive. For all-day events this is the PORTAL_TIMEZONE midnight after the last day. */
+  ends_at: string;
+  all_day: boolean;
+  /** 'cancelled' rows are tombstones — hidden from the calendar and conflicts. */
+  status: ExternalEventStatus;
+  html_link: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 type Relationships = readonly {
   foreignKeyName: string;
   columns: string[];
@@ -314,6 +351,10 @@ export type Database = {
       dismissed_suggestions: TableShape<
         DismissedSuggestionRecord & Record<string, unknown>
       >;
+      google_calendar_connection: TableShape<
+        GoogleCalendarConnectionRecord & Record<string, unknown>
+      >;
+      external_events: TableShape<ExternalEventRecord & Record<string, unknown>>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   getSupabaseServiceClient,
   type ClientRecord,
+  type ExternalEventRecord,
   type ShootRecord,
   type ShootStatus,
   type TimeBlockCategory,
@@ -37,10 +38,15 @@ type TimeBlockLite = Pick<
   | "notes"
 >;
 
+type ExternalEventLite = Pick<
+  ExternalEventRecord,
+  "id" | "title" | "starts_at" | "ends_at" | "all_day" | "html_link"
+>;
+
 /**
- * Fetch every event (shoots + time_blocks) overlapping [start, end) and
- * return them as a single sorted `CalendarEvent[]`. Used by the owner
- * Week / Month / Agenda views.
+ * Fetch every event (shoots + time_blocks + imported Google events)
+ * overlapping [start, end) and return them as a single sorted
+ * `CalendarEvent[]`. Used by the owner Week / Month / Agenda views.
  *
  * `start` and `end` are UTC `Date`s.
  *
@@ -60,7 +66,7 @@ export async function fetchEventsInRange(
   const blocksDateLo = dateKey(new Date(start.getTime() - dayMs));
   const blocksDateHi = dateKey(new Date(end.getTime() + dayMs));
 
-  const [shootsRes, blocksRes] = await Promise.all([
+  const [shootsRes, blocksRes, externalRes] = await Promise.all([
     supabase
       .from("shoots")
       .select(
@@ -75,13 +81,23 @@ export async function fetchEventsInRange(
       )
       .gte("date", blocksDateLo)
       .lt("date", blocksDateHi),
+    // Exact-instant overlap directly in SQL (both bounds are timestamptz).
+    // Tombstoned (cancelled-in-Google) rows never render.
+    supabase
+      .from("external_events")
+      .select("id, title, starts_at, ends_at, all_day, html_link")
+      .eq("status", "confirmed")
+      .lt("starts_at", end.toISOString())
+      .gt("ends_at", start.toISOString()),
   ]);
 
   if (shootsRes.error) throw new Error(shootsRes.error.message);
   if (blocksRes.error) throw new Error(blocksRes.error.message);
+  if (externalRes.error) throw new Error(externalRes.error.message);
 
   const shoots = (shootsRes.data ?? []) as ShootLite[];
   const blocks = (blocksRes.data ?? []) as TimeBlockLite[];
+  const externals = (externalRes.data ?? []) as ExternalEventLite[];
 
   const clientIds = Array.from(
     new Set<string>([
@@ -101,6 +117,9 @@ export async function fetchEventsInRange(
     const event = timeBlockToEvent(b, nameById);
     if (event.endsAt <= start || event.startsAt >= end) continue;
     events.push(event);
+  }
+  for (const x of externals) {
+    events.push(externalEventToEvent(x));
   }
   events.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
   return events;
@@ -150,6 +169,27 @@ function timeBlockToEvent(
       kind: "time_block",
       timeBlockId: b.id,
       clientId: b.client_id,
+    },
+  };
+}
+
+function externalEventToEvent(x: ExternalEventLite): CalendarEvent {
+  const startsAt = new Date(x.starts_at);
+  const endsAt = new Date(x.ends_at);
+  return {
+    id: `external:${x.id}`,
+    category: "external",
+    dateKey: dateKeyInTimezone(startsAt),
+    startsAt,
+    endsAt,
+    title: x.title?.trim() || "(No title)",
+    subtitle: null,
+    status: "confirmed",
+    source: {
+      kind: "external",
+      externalEventId: x.id,
+      htmlLink: x.html_link,
+      allDay: x.all_day,
     },
   };
 }
