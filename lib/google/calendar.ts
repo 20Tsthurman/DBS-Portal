@@ -1,14 +1,22 @@
 import { google, type Auth, type calendar_v3 } from "googleapis";
 
 /**
- * Thin wrapper around the Google Calendar v3 events API.
- *
- * Stage 1 only reads (listEventsIncremental). The write/watch surface is
- * stubbed so Stages 2–3 have a stable module to fill in, and so the sync
- * module's imports don't churn.
+ * Thin wrapper around the Google Calendar v3 events API. Reads
+ * (listEventsIncremental, listCalendars) serve the Stage 1 import; writes
+ * (insertEvent / patchEvent / deleteEvent) serve the Stage 3 push. Watch
+ * channels (push notifications) remain stubbed — out of scope.
  */
 
 export type GoogleEvent = calendar_v3.Schema$Event;
+
+/**
+ * Echo-loop guard key, shared by the importer and the pusher. Every event
+ * the portal pushes carries extendedProperties.private[PORTAL_SOURCE_KEY] =
+ * "shoot:<id>", and the importer skips any event carrying the key — so a
+ * pushed shoot can never round-trip back in as a busy block. Load-bearing:
+ * the push target ("digital bloom") is also an imported calendar.
+ */
+export const PORTAL_SOURCE_KEY = "dbsPortalSource";
 
 /** How far back the initial full sync reaches. Future events are unbounded. */
 export const INITIAL_SYNC_PAST_DAYS = 30;
@@ -71,13 +79,22 @@ export interface ListEventsResult {
   fullResyncPerformed: boolean;
 }
 
+function errorStatus(err: unknown): number | null {
+  if (typeof err !== "object" || err === null) return null;
+  const e = err as { code?: number | string; response?: { status?: number } };
+  if (typeof e.code === "number") return e.code;
+  if (typeof e.response?.status === "number") return e.response.status;
+  return null;
+}
+
 function isGoneError(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "code" in err &&
-    (err as { code?: number | string }).code === 410
-  );
+  return errorStatus(err) === 410;
+}
+
+/** 404/410 — the event no longer exists (or never did) on Google's side. */
+export function isMissingEventError(err: unknown): boolean {
+  const status = errorStatus(err);
+  return status === 404 || status === 410;
 }
 
 /**
@@ -161,23 +178,47 @@ async function listAllPages(
 }
 
 // ---------------------------------------------------------------------------
-// Stage 2/3 stubs — Portal → Google writes and push-notification channels.
-// Deliberately unimplemented so a stray Stage 1 code path can't write to
-// Kelsey's calendar.
+// Stage 3 writes — Portal → Google push.
 // ---------------------------------------------------------------------------
 
-export async function insertEvent(): Promise<never> {
-  throw new Error("insertEvent is not implemented until Stage 3 (write scope)");
+/** Insert an event; returns Google's event id. */
+export async function insertEvent(
+  calendar: calendar_v3.Calendar,
+  calendarId: string,
+  event: calendar_v3.Schema$Event
+): Promise<string> {
+  const res = await calendar.events.insert({ calendarId, requestBody: event });
+  if (!res.data.id) {
+    throw new Error("Google events.insert returned no event id");
+  }
+  return res.data.id;
 }
 
-export async function patchEvent(): Promise<never> {
-  throw new Error("patchEvent is not implemented until Stage 3 (write scope)");
+/** Patch an existing event. Throws (incl. isMissingEventError cases) — callers decide. */
+export async function patchEvent(
+  calendar: calendar_v3.Calendar,
+  calendarId: string,
+  eventId: string,
+  event: calendar_v3.Schema$Event
+): Promise<void> {
+  await calendar.events.patch({ calendarId, eventId, requestBody: event });
 }
 
-export async function deleteEvent(): Promise<never> {
-  throw new Error("deleteEvent is not implemented until Stage 3 (write scope)");
+/** Delete an event. Already-gone (404/410) counts as success. */
+export async function deleteEvent(
+  calendar: calendar_v3.Calendar,
+  calendarId: string,
+  eventId: string
+): Promise<void> {
+  try {
+    await calendar.events.delete({ calendarId, eventId });
+  } catch (err) {
+    if (isMissingEventError(err)) return;
+    throw err;
+  }
 }
 
+/** Push-notification channels — out of scope; sync is cron + on-view. */
 export async function watchEvents(): Promise<never> {
-  throw new Error("watchEvents is not implemented until Stage 3 (push channels)");
+  throw new Error("watchEvents is not implemented (push channels are out of scope)");
 }

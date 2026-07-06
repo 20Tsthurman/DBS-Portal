@@ -10,6 +10,10 @@ import {
 } from "@/lib/supabase";
 import { requireOwner } from "@/lib/auth";
 import type { ActionResult } from "@/lib/actions";
+import {
+  deleteGoogleEventNonFatal,
+  syncShootToGoogleNonFatal,
+} from "@/lib/google/push";
 
 const VALID_STATUSES: ShootStatus[] = [
   "requested",
@@ -108,6 +112,10 @@ export async function createShoot(
   }
 
   const created = data as ShootRecord;
+  // Portal → Google mirror. Non-fatal by contract: a Google hiccup marks
+  // the shoot google_sync_pending and the sync sweep retries — saving in
+  // the portal never fails on a push problem.
+  await syncShootToGoogleNonFatal(created);
   revalidateShootPaths(created.client_id);
   return { ok: true, data: created };
 }
@@ -209,6 +217,9 @@ export async function updateShoot(
   }
 
   const updated = data as ShootRecord;
+  // Covers every status transition (confirm/complete → upsert in Google;
+  // cancel / revert-to-requested → delete from Google). Non-fatal.
+  await syncShootToGoogleNonFatal(updated);
   revalidateShootPaths(updated.client_id);
   return { ok: true, data: updated };
 }
@@ -239,9 +250,11 @@ export async function deleteShoot(shootId: string): Promise<ActionResult> {
 
   const supabase = getSupabaseServiceClient();
 
+  // Capture the Google linkage BEFORE the row dies — it's the only handle
+  // for removing the pushed event afterward.
   const { data: existing, error: lookupError } = await supabase
     .from("shoots")
-    .select("client_id")
+    .select("client_id, google_event_id, google_calendar_id")
     .eq("id", shootId)
     .maybeSingle();
   if (lookupError) return { ok: false, error: lookupError.message };
@@ -249,8 +262,17 @@ export async function deleteShoot(shootId: string): Promise<ActionResult> {
   const { error } = await supabase.from("shoots").delete().eq("id", shootId);
   if (error) return { ok: false, error: error.message };
 
-  const clientId =
-    (existing as { client_id: string } | null)?.client_id ?? null;
-  revalidateShootPaths(clientId);
+  const row = existing as Pick<
+    ShootRecord,
+    "client_id" | "google_event_id" | "google_calendar_id"
+  > | null;
+  // Best-effort: the shoot row is gone, so a failure here has no retry
+  // handle — it logs the orphaned event id for manual cleanup.
+  await deleteGoogleEventNonFatal(
+    row?.google_calendar_id ?? null,
+    row?.google_event_id ?? null
+  );
+
+  revalidateShootPaths(row?.client_id ?? null);
   return { ok: true };
 }

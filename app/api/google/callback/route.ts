@@ -55,6 +55,7 @@ export async function GET(request: Request) {
       token_expiry: tokens.expiry_date
         ? new Date(tokens.expiry_date).toISOString()
         : null,
+      granted_scopes: tokens.scope ?? null,
     });
   } catch (err) {
     console.error("[google-callback] OAuth exchange failed", err);

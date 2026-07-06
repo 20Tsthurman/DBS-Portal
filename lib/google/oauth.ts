@@ -7,17 +7,32 @@ import { resolveBaseUrl } from "@/lib/baseUrl";
 /**
  * Google OAuth for the calendar sync. One grant, Kelsey's personal Gmail.
  *
- * Stage 1 asks for calendar.readonly only; Stage 3 (portal → Google writes)
- * widens this to the full calendar scope, which will require a re-consent
- * (Disconnect → Connect) because the stored refresh token is scope-bound.
+ * Stage 3 widened the scope from calendar.readonly to the full calendar
+ * scope (portal → Google push). A grant made under the old scope is
+ * detected via granted_scopes on the connection row and treated as
+ * read-only until Kelsey reconnects — the refresh token is scope-bound.
+ * The write scope must also be added on the GCP consent screen's Data
+ * Access page.
  *
  * The consent screen must be published to PRODUCTION (not Testing) — Google
  * expires an unverified Testing app's refresh tokens after 7 days, which
  * would silently kill the sync weekly.
  */
-export const GOOGLE_CALENDAR_SCOPES = [
-  "https://www.googleapis.com/auth/calendar.readonly",
-];
+export const GOOGLE_CALENDAR_WRITE_SCOPE =
+  "https://www.googleapis.com/auth/calendar";
+
+export const GOOGLE_CALENDAR_SCOPES = [GOOGLE_CALENDAR_WRITE_SCOPE];
+
+/**
+ * Whether a stored grant can write to Google Calendar. Exact-token match on
+ * the space-separated scope list — substring matching would false-positive
+ * on "…/auth/calendar.readonly", which CONTAINS the write scope string.
+ */
+export function hasWriteScope(grantedScopes: string | null): boolean {
+  return (grantedScopes ?? "")
+    .split(/\s+/)
+    .includes(GOOGLE_CALENDAR_WRITE_SCOPE);
+}
 
 /**
  * CSRF-state cookie shared by /api/google/connect and /api/google/callback.

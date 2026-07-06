@@ -34,6 +34,8 @@ export interface SaveConnectionInput {
   refresh_token: string;
   access_token: string | null;
   token_expiry: string | null;
+  /** Space-separated scope list from the token response (write-scope detection). */
+  granted_scopes: string | null;
 }
 
 /**
@@ -67,6 +69,10 @@ export async function saveGoogleConnection(
         refresh_token: encryptToken(input.refresh_token),
         access_token: input.access_token,
         token_expiry: input.token_expiry,
+        granted_scopes: input.granted_scopes,
+        // Push target re-resolves on the first push under the new grant.
+        push_calendar_id: null,
+        push_calendar_summary: null,
         last_synced_at: null,
         updated_at: new Date().toISOString(),
       },
@@ -169,12 +175,16 @@ export async function removeSyncedCalendar(calendarId: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-/** Partial update on the singleton (last_synced_at, token cache). */
+/** Partial update on the singleton (last_synced_at, token cache, push target). */
 export async function updateGoogleConnection(
   patch: Partial<
     Pick<
       GoogleCalendarConnectionRecord,
-      "access_token" | "token_expiry" | "last_synced_at"
+      | "access_token"
+      | "token_expiry"
+      | "last_synced_at"
+      | "push_calendar_id"
+      | "push_calendar_summary"
     >
   >
 ): Promise<void> {

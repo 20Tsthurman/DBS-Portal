@@ -7,6 +7,7 @@ import { combineDateAndTimeInTimezone } from "@/app/owner/calendar/_lib/timezone
 import {
   getCalendarApi,
   listEventsIncremental,
+  PORTAL_SOURCE_KEY,
   type GoogleEvent,
 } from "./calendar";
 import {
@@ -15,6 +16,7 @@ import {
   updateGoogleConnection,
   updateSyncedCalendar,
 } from "./connection";
+import { retryPendingGooglePushes } from "./push";
 import type { calendar_v3 } from "googleapis";
 
 /**
@@ -43,16 +45,17 @@ export type SyncResult =
       fullResync: boolean;
       /** Calendar ids whose sync threw; the rest completed normally. */
       failedCalendarIds: string[];
+      /** Portal→Google sweep (retries + backfill): shoots attempted / still failing. */
+      pushAttempted: number;
+      pushFailed: number;
     };
 
 /**
- * Echo-loop guard, scaffolded for Stage 3. Once the portal writes shoots to
- * Google it stamps them with this extendedProperties.private key; the import
- * must skip them or every portal shoot would come back as a duplicate
- * external event. Inert in Stage 1 (nothing writes the stamp yet).
+ * Echo-loop guard. Stage 3 stamps every pushed event with
+ * extendedProperties.private[PORTAL_SOURCE_KEY]; the import skips them so a
+ * portal shoot never round-trips back in as a busy block. Load-bearing:
+ * the push target calendar is also imported.
  */
-const PORTAL_SOURCE_KEY = "dbsPortalSource";
-
 function isPortalAuthoredEvent(event: GoogleEvent): boolean {
   return Boolean(event.extendedProperties?.private?.[PORTAL_SOURCE_KEY]);
 }
@@ -114,6 +117,18 @@ export async function syncFromGoogle(
     await updateGoogleConnection({ last_synced_at: nowIso });
   }
 
+  // Portal → Google direction: sweep failed pushes + the one-time backfill.
+  // Guarded so a push-side problem can never fail the import result.
+  let pushAttempted = 0;
+  let pushFailed = 0;
+  try {
+    const sweep = await retryPendingGooglePushes();
+    pushAttempted = sweep.attempted;
+    pushFailed = sweep.failed;
+  } catch (err) {
+    console.error("[google-sync] push sweep failed", err);
+  }
+
   return {
     status: "synced",
     changed: upserted > 0 || cancelled > 0,
@@ -121,6 +136,8 @@ export async function syncFromGoogle(
     cancelled,
     fullResync,
     failedCalendarIds,
+    pushAttempted,
+    pushFailed,
   };
 }
 

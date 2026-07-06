@@ -35,6 +35,14 @@ export interface GoogleCalendarStatus {
   connected: boolean;
   /** ISO timestamp of the last completed sync, or null before the first one. */
   lastSyncedAt: string | null;
+  /**
+   * Whether the stored grant includes the calendar WRITE scope. False for
+   * grants made before Stage 3 — the section shows a "reconnect to enable
+   * pushing shoots" prompt until Kelsey re-consents.
+   */
+  canPush: boolean;
+  /** Display name of the resolved push target, or null until the first push. */
+  pushCalendarSummary: string | null;
 }
 
 /** One checkbox row in the calendar picker. */

@@ -142,6 +142,44 @@ export function GoogleCalendarSection({
               open the calendar and once daily.
             </p>
 
+            {initial.canPush ? (
+              <p style={helperStyle}>
+                Shoots push to:{" "}
+                <strong style={{ color: "var(--text-primary)" }}>
+                  {initial.pushCalendarSummary ??
+                    "resolved on the first push (digital bloom, or primary)"}
+                </strong>
+                . Confirmed shoots and meetings appear there automatically;
+                cancelling or deleting removes them.
+              </p>
+            ) : (
+              <div
+                role="status"
+                style={{
+                  marginBottom: 16,
+                  padding: "10px 14px",
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                  border: "1px solid var(--border)",
+                  borderLeft: "3px solid var(--status-danger)",
+                  color: "var(--text-body)",
+                  backgroundColor: "var(--surface-base)",
+                }}
+              >
+                <p style={{ marginBottom: 10 }}>
+                  <strong>Reconnect to enable pushing shoots to Google.</strong>{" "}
+                  The current connection is read-only (it predates two-way
+                  sync). Reconnecting asks Google for calendar write access;
+                  you&apos;ll re-pick which calendars to import afterward, and
+                  any shoots saved in the meantime push automatically once
+                  reconnected.
+                </p>
+                <a href="/api/google/connect" style={reconnectLinkStyle}>
+                  Reconnect Google Calendar
+                </a>
+              </div>
+            )}
+
             <div style={{ marginBottom: 16 }}>
               <p style={pickerLabelStyle}>Calendars to sync</p>
               {calendars.choices.length === 0 ? (
@@ -371,4 +409,10 @@ const connectLinkStyle: React.CSSProperties = {
   backgroundColor: "var(--accent)",
   color: "#FFFFFF",
   textDecoration: "none",
+};
+
+const reconnectLinkStyle: React.CSSProperties = {
+  ...connectLinkStyle,
+  padding: "8px 16px",
+  fontSize: 12,
 };

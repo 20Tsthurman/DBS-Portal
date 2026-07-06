@@ -10,6 +10,7 @@ import {
   updateSyncedCalendar,
 } from "@/lib/google/connection";
 import { listCalendars } from "@/lib/google/calendar";
+import { hasWriteScope } from "@/lib/google/oauth";
 import type { GoogleCalendarChoices, GoogleCalendarStatus } from "./types";
 
 // `fetchAppSettings` lives in the financials module because that's the
@@ -35,19 +36,23 @@ export { fetchActivePackages as fetchPackages } from "@/app/owner/clients/_lib/q
  * Never returns tokens — {@link GoogleCalendarStatus} is the boundary shape.
  */
 export async function fetchGoogleCalendarStatus(): Promise<GoogleCalendarStatus> {
+  const notConnected: GoogleCalendarStatus = {
+    connected: false,
+    lastSyncedAt: null,
+    canPush: false,
+    pushCalendarSummary: null,
+  };
   const connection = await fetchGoogleConnection();
-  if (!connection) {
-    return { connected: false, lastSyncedAt: null };
-  }
+  if (!connection) return notConnected;
   // A row whose refresh token can't be decrypted (missing/rotated
   // GOOGLE_TOKEN_ENCRYPTION_KEY) can never sync — show it as not connected
   // so the Connect button is available and a re-grant overwrites the row.
-  if (getDecryptedRefreshToken(connection) === null) {
-    return { connected: false, lastSyncedAt: null };
-  }
+  if (getDecryptedRefreshToken(connection) === null) return notConnected;
   return {
     connected: true,
     lastSyncedAt: connection.last_synced_at,
+    canPush: hasWriteScope(connection.granted_scopes),
+    pushCalendarSummary: connection.push_calendar_summary,
   };
 }
 

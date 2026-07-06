@@ -96,6 +96,12 @@ export interface ShootRecord {
   kind: ShootKind;
   meeting_type: MeetingType | null;
   created_at: string;
+  /** Google event id after a Stage 3 push; NULL = not (yet) in Google. */
+  google_event_id: string | null;
+  /** Which Google calendar the event was pushed to (patch/delete target). */
+  google_calendar_id: string | null;
+  /** True = last push failed or hasn't run; swept by retryPendingGooglePushes. */
+  google_sync_pending: boolean;
 }
 
 export interface TimeLogRecord {
@@ -295,6 +301,15 @@ export interface GoogleCalendarConnectionRecord {
   watch_resource_id: string | null;
   watch_expiration: string | null;
   last_synced_at: string | null;
+  /**
+   * Space-separated OAuth scopes from the token response. NULL (pre-Stage-3
+   * grant) or missing the calendar write scope → connection is read-only and
+   * settings prompts a reconnect. Checked via hasWriteScope() (exact token).
+   */
+  granted_scopes: string | null;
+  /** Resolved push target ("digital bloom" by summary, else primary). Cached on first push. */
+  push_calendar_id: string | null;
+  push_calendar_summary: string | null;
   created_at: string;
   updated_at: string;
 }
