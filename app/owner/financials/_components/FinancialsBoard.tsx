@@ -1000,7 +1000,7 @@ export function FinancialsBoard({
             (summary.taxOnlyExpenses > 0
               ? `${summary.income > 0 ? " · " : ""}Excludes ${formatCurrencyExact(
                   summary.taxOnlyExpenses
-                )} equipment paid in 2025 (deducted for tax in 2026).`
+                )} equipment paid in ${Number(yearLabel) - 1} (deducted for tax in ${yearLabel}).`
               : "")
           }
         />
