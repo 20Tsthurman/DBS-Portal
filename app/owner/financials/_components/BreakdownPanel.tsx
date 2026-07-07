@@ -5,11 +5,12 @@ import { formatCurrency } from "@/app/owner/clients/_lib/format";
 interface BreakdownPanelProps {
   summary: {
     income: number;
-    expenses: number;
+    cashExpenses: number;
+    deductibleExpenses: number;
     mileageDeduction: number;
-    netProfit: number;
+    taxableProfit: number;
     taxSetAside: number;
-    takeHome: number;
+    netCashRetained: number;
     taxRatePercent: number;
   };
 }
@@ -39,6 +40,17 @@ const dividerStyle: CSSProperties = {
   marginBlock: 8,
 };
 
+// Matches the StatCard eyebrow treatment so the two blocks read as
+// section headers, not data rows.
+const sectionLabelStyle: CSSProperties = {
+  fontSize: 11,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+  fontWeight: 600,
+  color: "var(--text-muted)",
+  marginBottom: 4,
+};
+
 function formatAmount(value: number, negative: boolean): string {
   return negative ? `−${formatCurrency(value)}` : formatCurrency(value);
 }
@@ -61,12 +73,19 @@ function Row({ label, amount, negative = false, amountWeight = 400 }: RowProps) 
   );
 }
 
+/**
+ * Two blocks, each reconciling on its own:
+ *   Tax:  income − deductible expenses − mileage = taxable profit
+ *   Cash: income − cash expenses − tax set-aside = net cash retained
+ * The set-aside (rate% of taxable profit) is the bridge — computed by the
+ * tax block, subtracted in the cash block. Chaining both into one column
+ * was the original take-home bug in visual form.
+ */
 export function BreakdownPanel({ summary }: BreakdownPanelProps) {
-  const cashExpenses = summary.expenses - summary.mileageDeduction;
-
   const isEmpty =
     summary.income === 0 &&
-    cashExpenses === 0 &&
+    summary.cashExpenses === 0 &&
+    summary.deductibleExpenses === 0 &&
     summary.mileageDeduction === 0;
 
   if (isEmpty) {
@@ -86,20 +105,27 @@ export function BreakdownPanel({ summary }: BreakdownPanelProps) {
     );
   }
 
-  const takeHomeColor =
-    summary.takeHome > 0 ? "var(--status-success)" : "var(--text-primary)";
-  const takeHomeStyle: CSSProperties = {
+  const retainedColor =
+    summary.netCashRetained > 0
+      ? "var(--status-success)"
+      : "var(--text-primary)";
+  const retainedStyle: CSSProperties = {
     fontFamily: "var(--font-playfair), serif",
     fontSize: 20,
     fontWeight: 500,
-    color: takeHomeColor,
+    color: retainedColor,
     letterSpacing: "-0.01em",
   };
 
   return (
     <DashboardCard eyebrow="BREAKDOWN" title="This month's math">
+      <p style={sectionLabelStyle}>Schedule C (tax)</p>
       <Row label="Income" amount={summary.income} />
-      <Row label="Cash expenses" amount={cashExpenses} negative />
+      <Row
+        label="Deductible expenses"
+        amount={summary.deductibleExpenses}
+        negative
+      />
       <Row
         label="Mileage write-off*"
         amount={summary.mileageDeduction}
@@ -108,9 +134,13 @@ export function BreakdownPanel({ summary }: BreakdownPanelProps) {
       <div style={dividerStyle} />
       <Row
         label="Taxable profit"
-        amount={summary.netProfit}
+        amount={summary.taxableProfit}
         amountWeight={600}
       />
+
+      <p style={{ ...sectionLabelStyle, marginTop: 20 }}>Cash</p>
+      <Row label="Income" amount={summary.income} />
+      <Row label="Cash expenses" amount={summary.cashExpenses} negative />
       <Row
         label={`Tax set-aside (${summary.taxRatePercent}%)`}
         amount={summary.taxSetAside}
@@ -118,9 +148,9 @@ export function BreakdownPanel({ summary }: BreakdownPanelProps) {
       />
       <div style={dividerStyle} />
       <div style={rowStyle}>
-        <span style={takeHomeStyle}>Take-home</span>
-        <span style={{ ...takeHomeStyle, fontFeatureSettings: '"tnum"' }}>
-          {formatCurrency(summary.takeHome)}
+        <span style={retainedStyle}>Net cash retained</span>
+        <span style={{ ...retainedStyle, fontFeatureSettings: '"tnum"' }}>
+          {formatCurrency(summary.netCashRetained)}
         </span>
       </div>
       <p

@@ -88,19 +88,21 @@ export type MileageRow = {
 
 export type FinancialsSummary = {
   income: number;
-  /** Tax-side total: deductibleExpenses + mileageDeduction. Feeds "Total Expenses". */
+  /** Tax-side total: deductibleExpenses + mileageDeduction. Feeds "Total deductible expenses". */
   expenses: number;
   /** Rows classed both | cash_only — money that left the account this period. */
   cashExpenses: number;
   /** Rows classed both | tax_only — Schedule C deductible pool (excl. mileage). */
   deductibleExpenses: number;
+  /**
+   * tax_only rows alone (prior-year equipment). Drives the "excludes
+   * $X equipment paid in 2025" footnote on the cash card — 0 in ranges
+   * that don't contain those rows, which hides the footnote.
+   */
+  taxOnlyExpenses: number;
   taxableProfit: number;
   taxSetAside: number;
   netCashRetained: number;
-  /** @deprecated alias of taxableProfit — consumers renamed in the UI pass. */
-  netProfit: number;
-  /** @deprecated alias of netCashRetained — consumers renamed in the UI pass. */
-  takeHome: number;
   taxRatePercent: number;
 };
 
@@ -126,6 +128,12 @@ export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
   travel_transportation: "Travel & Transportation",
   professional_services: "Professional Services",
   business_operations: "Business Operations",
+};
+
+export const CASH_TAX_CLASS_LABELS: Record<CashTaxClass, string> = {
+  both: "Cash + tax",
+  tax_only: "Tax only (no cash this year)",
+  cash_only: "Cash only (not deductible)",
 };
 
 export async function fetchFinancialsForRange(
@@ -293,6 +301,10 @@ export async function fetchFinancialsForRange(
         : sum,
     0
   );
+  const taxOnlyExpenses = expenseRows.reduce(
+    (sum, r) => (r.cashTaxClass === "tax_only" ? sum + r.amount : sum),
+    0
+  );
   const mileageDeduction = mileageRows.reduce((sum, r) => sum + r.deduction, 0);
   const expenses = deductibleExpenses + mileageDeduction;
   const taxableProfit = income - deductibleExpenses - mileageDeduction;
@@ -308,11 +320,10 @@ export async function fetchFinancialsForRange(
       expenses,
       cashExpenses,
       deductibleExpenses,
+      taxOnlyExpenses,
       taxableProfit,
       taxSetAside,
       netCashRetained,
-      netProfit: taxableProfit,
-      takeHome: netCashRetained,
       taxRatePercent,
     },
     incomeRows,

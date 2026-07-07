@@ -4,10 +4,11 @@ import { useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { MobileTableScroll } from "@/components/ui/MobileTableScroll";
 import {
+  CASH_TAX_CLASS_LABELS,
   EXPENSE_CATEGORY_LABELS,
   type ExpenseRow,
 } from "../_lib/queries";
-import type { ExpenseCategory } from "@/lib/supabase";
+import type { CashTaxClass, ExpenseCategory } from "@/lib/supabase";
 import type { ExpenseSuggestion } from "../_lib/suggestions";
 import type { CommitResult } from "../_lib/types";
 import { InlineCell } from "./InlineCell";
@@ -46,7 +47,11 @@ const EXPENSE_CATEGORY_OPTIONS = (
   Object.entries(EXPENSE_CATEGORY_LABELS) as Array<[ExpenseCategory, string]>
 ).map(([value, label]) => ({ value, label }));
 
-const COLUMN_COUNT = 6;
+const CASH_TAX_CLASS_OPTIONS = (
+  Object.entries(CASH_TAX_CLASS_LABELS) as Array<[CashTaxClass, string]>
+).map(([value, label]) => ({ value, label }));
+
+const COLUMN_COUNT = 7;
 
 export function ExpenseTable({
   rows,
@@ -143,12 +148,13 @@ export function ExpenseTable({
 
   return (
     <>
-      <MobileTableScroll minWidth={720}>
+      <MobileTableScroll minWidth={860}>
         <table>
           <thead>
             <tr>
               <th>Date</th>
               <th>Category</th>
+              <th>Cash/Tax</th>
               <th>Description</th>
               <th style={{ textAlign: "right" }}>Amount</th>
               <th>Notes</th>
@@ -175,6 +181,19 @@ export function ExpenseTable({
                     onCommit={(v) =>
                       onUpdate(row.id, {
                         category: (v ?? "") as ExpenseCategory,
+                      })
+                    }
+                  />
+                </td>
+                <td style={{ padding: 0 }}>
+                  <InlineCell
+                    type="enum"
+                    label="Cash/Tax"
+                    value={row.cashTaxClass}
+                    options={CASH_TAX_CLASS_OPTIONS}
+                    onCommit={(v) =>
+                      onUpdate(row.id, {
+                        cashTaxClass: (v ?? "both") as CashTaxClass,
                       })
                     }
                   />
@@ -245,6 +264,17 @@ export function ExpenseTable({
                         })
                       }
                     />
+                  </td>
+                  {/* Recurring-template accepts are always real same-month
+                      spends — inserted as 'both' (the DB default). */}
+                  <td
+                    style={{
+                      fontSize: 14,
+                      color: "var(--text-muted)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {CASH_TAX_CLASS_LABELS.both}
                   </td>
                   <td style={{ padding: 0 }}>
                     <InlineCell
@@ -319,6 +349,20 @@ export function ExpenseTable({
                     onDraftFieldChange(
                       "category",
                       v === null ? null : (v as ExpenseCategory)
+                    )
+                  }
+                />
+              </td>
+              <td style={{ padding: 0 }}>
+                <InlineCell
+                  type="enum"
+                  label="Cash/Tax"
+                  value={draft.cashTaxClass}
+                  options={CASH_TAX_CLASS_OPTIONS}
+                  onCommit={(v) =>
+                    onDraftFieldChange(
+                      "cashTaxClass",
+                      (v ?? "both") as CashTaxClass
                     )
                   }
                 />

@@ -6,6 +6,7 @@ import { monthRangeForKey } from "@/app/owner/calendar/_lib/timezone";
 import { getMilesBetween } from "@/lib/google-maps";
 import {
   getSupabaseServiceClient,
+  type CashTaxClass,
   type ExpenseCategory,
   type ExpenseRecord,
   type IncomePaymentRecord,
@@ -32,6 +33,8 @@ const EXPENSE_CATEGORIES: ExpenseCategory[] = [
   "professional_services",
   "business_operations",
 ];
+
+const CASH_TAX_CLASSES: CashTaxClass[] = ["both", "tax_only", "cash_only"];
 
 const SUGGESTION_TYPES: SuggestionType[] = [
   "income_retainer",
@@ -187,6 +190,8 @@ export interface AddExpenseInput {
   amount: number;
   description?: string | null;
   notes?: string | null;
+  /** Omitted = 'both' (the DB default). */
+  cash_tax_class?: CashTaxClass;
 }
 
 export async function addExpenseAction(
@@ -204,6 +209,12 @@ export async function addExpenseAction(
   if (!isPositiveFiniteNumber(input.amount)) {
     return { ok: false, error: "Amount must be greater than 0" };
   }
+  if (
+    input.cash_tax_class !== undefined &&
+    !CASH_TAX_CLASSES.includes(input.cash_tax_class)
+  ) {
+    return { ok: false, error: "Invalid cash/tax class" };
+  }
 
   const supabase = getSupabaseServiceClient();
   const { data, error } = await supabase
@@ -214,6 +225,7 @@ export async function addExpenseAction(
       amount: input.amount,
       description: input.description?.trim() || null,
       notes: input.notes?.trim() || null,
+      cash_tax_class: input.cash_tax_class ?? "both",
     })
     .select("*")
     .single();
@@ -231,6 +243,7 @@ export type UpdateExpenseInput = {
   description?: string | null;
   amount?: number;
   notes?: string | null;
+  cash_tax_class?: CashTaxClass;
 };
 
 export async function updateExpenseAction(
@@ -265,6 +278,12 @@ export async function updateExpenseAction(
   }
   if (updates.notes !== undefined) {
     patch.notes = updates.notes?.trim() || null;
+  }
+  if (updates.cash_tax_class !== undefined) {
+    if (!CASH_TAX_CLASSES.includes(updates.cash_tax_class)) {
+      return { ok: false, error: "Invalid cash/tax class" };
+    }
+    patch.cash_tax_class = updates.cash_tax_class;
   }
 
   if (Object.keys(patch).length === 0) {

@@ -181,6 +181,7 @@ export default async function FinancialsPage({
         initialExpenseRows={data.expenseRows}
         initialMileageRows={data.mileageRows}
         taxRatePercent={data.summary.taxRatePercent}
+        yearLabel={yearLabel}
         incomeSuggestions={incomeSuggestions}
         expenseSuggestions={expenseSuggestions}
         mileageSuggestions={mileageSuggestions}

@@ -432,7 +432,10 @@ export async function aggregateCpaPackage(
   // a) gross income matches
   // b) cash + equipment + mileage matches summary.expenses
   //    (summary.expenses already folds mileage into its total)
-  // c) taxable income with equipment expensed matches summary.netProfit
+  // c) taxable income with equipment expensed matches summary.taxableProfit
+  //    (category-based equipment split here vs class-based pools in the
+  //    summary — identical while no cash_only rows exist; a future gas row
+  //    would surface as a flagged delta in check (b)/(c), which is correct)
   const reconciliation = buildReconciliation([
     {
       label: "Gross income === summary income",
@@ -448,9 +451,9 @@ export async function aggregateCpaPackage(
     },
     {
       label:
-        "Estimated taxable income (equipment expensed) === summary net profit",
+        "Estimated taxable income (equipment expensed) === summary taxable profit",
       cpaValue: estimatedTaxableIncomeIfEquipmentExpensed,
-      summaryValue: sourceSummary.netProfit,
+      summaryValue: sourceSummary.taxableProfit,
     },
   ]);
 

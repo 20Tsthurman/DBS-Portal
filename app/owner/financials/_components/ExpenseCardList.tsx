@@ -14,10 +14,11 @@ import {
 } from "@/components/ui/EditSheet";
 import { formatCurrency, formatDate } from "@/app/owner/clients/_lib/format";
 import {
+  CASH_TAX_CLASS_LABELS,
   EXPENSE_CATEGORY_LABELS,
   type ExpenseRow,
 } from "../_lib/queries";
-import type { ExpenseCategory } from "@/lib/supabase";
+import type { CashTaxClass, ExpenseCategory } from "@/lib/supabase";
 import type { ExpenseSuggestion } from "../_lib/suggestions";
 import type { CommitResult } from "../_lib/types";
 import type { DraftExpenseRow } from "./FinancialsBoard";
@@ -30,6 +31,12 @@ const EXPENSE_CATEGORY_VALUES: ExpenseCategory[] = [
   "travel_transportation",
   "professional_services",
   "business_operations",
+];
+
+const CASH_TAX_CLASS_VALUES: CashTaxClass[] = [
+  "both",
+  "tax_only",
+  "cash_only",
 ];
 
 interface ExpenseCardListProps {
@@ -53,6 +60,7 @@ interface ExpenseFormState {
   description: string;
   amount: string;
   notes: string;
+  cashTaxClass: CashTaxClass;
 }
 
 const emptyForm: ExpenseFormState = {
@@ -61,6 +69,7 @@ const emptyForm: ExpenseFormState = {
   description: "",
   amount: "",
   notes: "",
+  cashTaxClass: "both",
 };
 
 function rowToForm(row: ExpenseRow): ExpenseFormState {
@@ -70,6 +79,7 @@ function rowToForm(row: ExpenseRow): ExpenseFormState {
     description: row.description ?? "",
     amount: String(row.amount),
     notes: row.notes ?? "",
+    cashTaxClass: row.cashTaxClass,
   };
 }
 
@@ -164,6 +174,7 @@ export function ExpenseCardList({
           description: form.description.trim() || null,
           amount,
           notes: form.notes.trim() || null,
+          cashTaxClass: form.cashTaxClass,
         });
         if (!res.ok) {
           setError(res.error ?? "Failed to save");
@@ -182,6 +193,9 @@ export function ExpenseCardList({
         if (amount !== before.amount) patch.amount = amount;
         const nextNotes = form.notes.trim() || null;
         if (nextNotes !== before.notes) patch.notes = nextNotes;
+        if (form.cashTaxClass !== before.cashTaxClass) {
+          patch.cashTaxClass = form.cashTaxClass;
+        }
 
         if (Object.keys(patch).length === 0) {
           setMode({ kind: "none" });
@@ -242,6 +256,13 @@ export function ExpenseCardList({
                   value={row.description ?? "—"}
                   muted={row.description === null}
                 />
+                {/* 'both' is the norm — only surface the exceptions. */}
+                {row.cashTaxClass !== "both" && (
+                  <CardRow
+                    label="Cash/Tax"
+                    value={CASH_TAX_CLASS_LABELS[row.cashTaxClass]}
+                  />
+                )}
                 <CardRow
                   label="Notes"
                   value={row.notes ?? "—"}
@@ -352,6 +373,30 @@ export function ExpenseCardList({
             {EXPENSE_CATEGORY_VALUES.map((v) => (
               <option key={v} value={v}>
                 {EXPENSE_CATEGORY_LABELS[v]}
+              </option>
+            ))}
+          </select>
+        </SheetField>
+
+        <SheetField
+          label="Cash/Tax"
+          hint="'Cash + tax' unless it's prior-year gear or non-deductible cash"
+          htmlFor="expense-cash-tax-class"
+        >
+          <select
+            id="expense-cash-tax-class"
+            value={form.cashTaxClass}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                cashTaxClass: e.target.value as CashTaxClass,
+              }))
+            }
+            style={sheetInputStyle}
+          >
+            {CASH_TAX_CLASS_VALUES.map((v) => (
+              <option key={v} value={v}>
+                {CASH_TAX_CLASS_LABELS[v]}
               </option>
             ))}
           </select>

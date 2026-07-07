@@ -3,8 +3,9 @@
 import { useCallback, useMemo, useState } from "react";
 import { DashboardCard } from "@/components/ui/DashboardCard";
 import { StatCard } from "@/components/ui/StatCard";
-import { formatCurrency } from "@/app/owner/clients/_lib/format";
+import { formatCurrency, formatPercent } from "@/app/owner/clients/_lib/format";
 import type {
+  CashTaxClass,
   ExpenseCategory,
   IncomeType,
 } from "@/lib/supabase";
@@ -69,6 +70,8 @@ export type DraftExpenseRow = {
   description: string | null;
   amount: number | null;
   notes: string | null;
+  /** Never null — defaults to 'both' and always has a concrete value. */
+  cashTaxClass: CashTaxClass;
 };
 
 export type DraftMileageRow = {
@@ -93,6 +96,7 @@ const emptyExpenseDraft = (): DraftExpenseRow => ({
   description: null,
   amount: null,
   notes: null,
+  cashTaxClass: "both",
 });
 
 const emptyMileageDraft = (): DraftMileageRow => ({
@@ -150,6 +154,8 @@ interface FinancialsBoardProps {
   initialExpenseRows: ExpenseRow[];
   initialMileageRows: MileageRow[];
   taxRatePercent: number;
+  /** Year of the viewed range ("2026") — labels the cash-retained card. */
+  yearLabel: string;
   /** Suggestion arrays for inline ghost rows. Empty in YTD view. */
   incomeSuggestions: IncomeSuggestion[];
   expenseSuggestions: ExpenseSuggestion[];
@@ -193,6 +199,10 @@ function recomputeSummary(
     (s, r) => s + r.miles * r.ratePerMile,
     0
   );
+  const taxOnlyExpenses = expenses.reduce(
+    (s, r) => (r.cashTaxClass === "tax_only" ? s + r.amount : s),
+    0
+  );
   const expensesAll = deductibleExpenses + mileageDeduction;
   const taxableProfit = incomeTotal - deductibleExpenses - mileageDeduction;
   const taxSetAside = (taxRatePercent / 100) * Math.max(taxableProfit, 0);
@@ -204,14 +214,22 @@ function recomputeSummary(
     expenses: expensesAll,
     cashExpenses,
     deductibleExpenses,
+    taxOnlyExpenses,
     mileageDeduction,
     taxableProfit,
     taxSetAside,
     netCashRetained,
-    netProfit: taxableProfit,
-    takeHome: netCashRetained,
     taxRatePercent,
   };
+}
+
+// Cents-precise (formatCurrency rounds to whole dollars) — the cash-card
+// footnote must match the books exactly, e.g. "$5,702.71".
+function formatCurrencyExact(value: number): string {
+  return `$${value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 export function FinancialsBoard({
@@ -219,6 +237,7 @@ export function FinancialsBoard({
   initialExpenseRows,
   initialMileageRows,
   taxRatePercent,
+  yearLabel,
   incomeSuggestions,
   expenseSuggestions,
   mileageSuggestions,
@@ -447,6 +466,9 @@ export function FinancialsBoard({
       }
       if (patch.amount !== undefined) actionPatch.amount = patch.amount;
       if (patch.notes !== undefined) actionPatch.notes = patch.notes;
+      if (patch.cashTaxClass !== undefined) {
+        actionPatch.cash_tax_class = patch.cashTaxClass;
+      }
 
       const res = await updateExpenseAction(rowId, actionPatch);
       if (!res.ok) {
@@ -500,6 +522,7 @@ export function FinancialsBoard({
           amount: next.amount!,
           description: next.description ?? null,
           notes: next.notes ?? null,
+          cash_tax_class: next.cashTaxClass,
         });
         if (!res.ok || !res.data) {
           setExpenseDraftError(res.error ?? "Failed to save");
@@ -541,6 +564,7 @@ export function FinancialsBoard({
         amount: draft.amount,
         description: draft.description ?? null,
         notes: draft.notes ?? null,
+        cash_tax_class: draft.cashTaxClass,
       });
       if (!res.ok || !res.data) {
         return { ok: false, error: res.error ?? "Failed to save" };
@@ -948,14 +972,14 @@ export function FinancialsBoard({
           icon={<IconIncome size={28} />}
         />
         <StatCard
-          label="Total Expenses"
+          label="Total deductible expenses"
           value={formatCurrency(summary.expenses)}
           icon={<IconExpenses size={28} />}
         />
         <StatCard
-          label="Net Profit"
-          value={formatCurrency(summary.netProfit)}
-          tone={summary.netProfit < 0 ? "danger" : "success"}
+          label="Est. taxable profit (Schedule C)"
+          value={formatCurrency(summary.taxableProfit)}
+          tone={summary.taxableProfit < 0 ? "danger" : "success"}
           icon={<IconWallet size={28} />}
         />
         <StatCard
@@ -965,10 +989,20 @@ export function FinancialsBoard({
           icon={<IconTax size={28} />}
         />
         <StatCard
-          label="Est. Take-Home"
-          value={formatCurrency(summary.takeHome)}
-          tone={summary.takeHome > 0 ? "success" : "default"}
+          label={`Net cash retained (${yearLabel})`}
+          value={formatCurrency(summary.netCashRetained)}
+          tone={summary.netCashRetained > 0 ? "success" : "default"}
           icon={<IconPiggyBank size={28} />}
+          hint={
+            (summary.income > 0
+              ? `${formatPercent(summary.netCashRetained / summary.income)} of income`
+              : "") +
+            (summary.taxOnlyExpenses > 0
+              ? `${summary.income > 0 ? " · " : ""}Excludes ${formatCurrencyExact(
+                  summary.taxOnlyExpenses
+                )} equipment paid in 2025 (deducted for tax in 2026).`
+              : "")
+          }
         />
       </div>
 

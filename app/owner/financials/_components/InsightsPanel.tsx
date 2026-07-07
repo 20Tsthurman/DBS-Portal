@@ -20,7 +20,7 @@ const TONE_TILE_BG: Record<InsightTone, string> = {
 interface InsightsPanelProps {
   summary: {
     income: number;
-    takeHome: number;
+    netCashRetained: number;
   };
   pendingSuggestionsCount: number;
   incomeCount: number;
@@ -50,14 +50,14 @@ export function InsightsPanel({
 
   const rows: Row[] = [
     {
-      key: "take-home-pace",
+      key: "cash-retained-pace",
       tone: "success",
       icon: <IconTrendingUp size={28} />,
       value: hasIncome
-        ? formatPercent(summary.takeHome / summary.income)
+        ? formatPercent(summary.netCashRetained / summary.income)
         : "—",
       descriptor: hasIncome
-        ? "of income is take-home this month"
+        ? "of income kept as cash this month"
         : "No income logged yet this month",
     },
     {
