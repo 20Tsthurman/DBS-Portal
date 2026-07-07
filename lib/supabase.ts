@@ -22,6 +22,14 @@ export type ExpenseCategory =
   | "travel_transportation"
   | "professional_services"
   | "business_operations";
+/**
+ * Cash-vs-tax classification (migration 013). Drives the two-pool
+ * financials split: cash pool = both + cash_only, tax pool = both +
+ * tax_only. 'tax_only' = deductible but no current-year cash (prior-year
+ * equipment); 'cash_only' = cash out but not separately deductible
+ * (actual gas under the standard-mileage election).
+ */
+export type CashTaxClass = "both" | "tax_only" | "cash_only";
 export type IncomeType =
   | "brand_retainer"
   | "wedding_same_day"
@@ -160,6 +168,7 @@ export interface ExpenseRecord {
    * non-NULL = created from accepting a Phase 4 expense suggestion.
    */
   source_template_id: string | null;
+  cash_tax_class: CashTaxClass;
 }
 
 export interface MessageRecord {

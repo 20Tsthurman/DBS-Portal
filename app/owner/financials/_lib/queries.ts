@@ -2,6 +2,7 @@ import { cache } from "react";
 import {
   getSupabaseServiceClient,
   type AppSettingsRecord,
+  type CashTaxClass,
   type ClientRecord,
   type ExpenseCategory,
   type ExpenseRecord,
@@ -71,6 +72,7 @@ export type ExpenseRow = {
   description: string | null;
   amount: number;
   notes: string | null;
+  cashTaxClass: CashTaxClass;
 };
 
 export type MileageRow = {
@@ -86,9 +88,18 @@ export type MileageRow = {
 
 export type FinancialsSummary = {
   income: number;
+  /** Tax-side total: deductibleExpenses + mileageDeduction. Feeds "Total Expenses". */
   expenses: number;
-  netProfit: number;
+  /** Rows classed both | cash_only — money that left the account this period. */
+  cashExpenses: number;
+  /** Rows classed both | tax_only — Schedule C deductible pool (excl. mileage). */
+  deductibleExpenses: number;
+  taxableProfit: number;
   taxSetAside: number;
+  netCashRetained: number;
+  /** @deprecated alias of taxableProfit — consumers renamed in the UI pass. */
+  netProfit: number;
+  /** @deprecated alias of netCashRetained — consumers renamed in the UI pass. */
   takeHome: number;
   taxRatePercent: number;
 };
@@ -134,7 +145,9 @@ export async function fetchFinancialsForRange(
       .order("created_at", { ascending: false }),
     supabase
       .from("expenses")
-      .select("id, date, category, description, amount, notes, created_at")
+      .select(
+        "id, date, category, description, amount, notes, cash_tax_class, created_at"
+      )
       .gte("date", range.start)
       .lte("date", range.end)
       .order("date", { ascending: false })
@@ -186,7 +199,13 @@ export async function fetchFinancialsForRange(
   const expenseRaw = (expenseRes.data ?? []) as Array<
     Pick<
       ExpenseRecord,
-      "id" | "date" | "category" | "description" | "amount" | "notes"
+      | "id"
+      | "date"
+      | "category"
+      | "description"
+      | "amount"
+      | "notes"
+      | "cash_tax_class"
     >
   >;
   const expenseRows: ExpenseRow[] = expenseRaw.map((r) => ({
@@ -196,6 +215,7 @@ export async function fetchFinancialsForRange(
     description: r.description,
     amount: Number(r.amount),
     notes: r.notes,
+    cashTaxClass: r.cash_tax_class,
   }));
 
   const mileageRaw = (mileageRes.data ?? []) as Array<
@@ -255,23 +275,44 @@ export async function fetchFinancialsForRange(
   });
 
   const income = incomeRows.reduce((sum, r) => sum + r.amount, 0);
-  const expensesFromTable = expenseRows.reduce((sum, r) => sum + r.amount, 0);
+  // Two-pool split on cash_tax_class (migration 013): tax_only rows are
+  // prior-year cash (deductible now, no money out this period); cash_only
+  // rows are the reverse (money out, not separately deductible — e.g. gas
+  // under the standard-mileage election).
+  const cashExpenses = expenseRows.reduce(
+    (sum, r) =>
+      r.cashTaxClass === "both" || r.cashTaxClass === "cash_only"
+        ? sum + r.amount
+        : sum,
+    0
+  );
+  const deductibleExpenses = expenseRows.reduce(
+    (sum, r) =>
+      r.cashTaxClass === "both" || r.cashTaxClass === "tax_only"
+        ? sum + r.amount
+        : sum,
+    0
+  );
   const mileageDeduction = mileageRows.reduce((sum, r) => sum + r.deduction, 0);
-  const expenses = expensesFromTable + mileageDeduction;
-  const netProfit = income - expenses;
-  const taxSetAside = netProfit > 0 ? netProfit * (taxRatePercent / 100) : 0;
-  // Mileage deduction reduces taxes owed (via netProfit/taxSetAside above) but does
-  // not leave the bank account — so it is intentionally excluded from take-home.
-  const takeHome = income - expensesFromTable - taxSetAside;
+  const expenses = deductibleExpenses + mileageDeduction;
+  const taxableProfit = income - deductibleExpenses - mileageDeduction;
+  const taxSetAside = (taxRatePercent / 100) * Math.max(taxableProfit, 0);
+  // Mileage reduces taxes owed (via taxableProfit/taxSetAside above) but does
+  // not leave the bank account — intentionally excluded from cash retained.
+  const netCashRetained = income - cashExpenses - taxSetAside;
 
   return {
     range,
     summary: {
       income,
       expenses,
-      netProfit,
+      cashExpenses,
+      deductibleExpenses,
+      taxableProfit,
       taxSetAside,
-      takeHome,
+      netCashRetained,
+      netProfit: taxableProfit,
+      takeHome: netCashRetained,
       taxRatePercent,
     },
     incomeRows,

@@ -162,8 +162,9 @@ interface FinancialsBoardProps {
   mileageRatePerMile: number | null;
 }
 
-// Mirrors queries.ts:229-235 — keep the formulas identical, since this is
-// what drives the Summary card between server fetches.
+// Mirrors the two-pool math in queries.ts:fetchFinancialsForRange — keep the
+// formulas identical, since this is what drives the Summary card between
+// server fetches.
 function recomputeSummary(
   income: IncomeRow[],
   expenses: ExpenseRow[],
@@ -171,24 +172,44 @@ function recomputeSummary(
   taxRatePercent: number
 ) {
   const incomeTotal = income.reduce((s, r) => s + r.amount, 0);
-  const expensesFromTable = expenses.reduce((s, r) => s + r.amount, 0);
+  // Two-pool split on cash_tax_class (migration 013): tax_only rows are
+  // prior-year cash (deductible now, no money out this period); cash_only
+  // rows are the reverse (money out, not separately deductible).
+  const cashExpenses = expenses.reduce(
+    (s, r) =>
+      r.cashTaxClass === "both" || r.cashTaxClass === "cash_only"
+        ? s + r.amount
+        : s,
+    0
+  );
+  const deductibleExpenses = expenses.reduce(
+    (s, r) =>
+      r.cashTaxClass === "both" || r.cashTaxClass === "tax_only"
+        ? s + r.amount
+        : s,
+    0
+  );
   const mileageDeduction = mileage.reduce(
     (s, r) => s + r.miles * r.ratePerMile,
     0
   );
-  const expensesAll = expensesFromTable + mileageDeduction;
-  const netProfit = incomeTotal - expensesAll;
-  const taxSetAside = netProfit > 0 ? netProfit * (taxRatePercent / 100) : 0;
-  // Mileage deduction reduces taxes owed (via netProfit/taxSetAside above) but does
-  // not leave the bank account — so it is intentionally excluded from take-home.
-  const takeHome = incomeTotal - expensesFromTable - taxSetAside;
+  const expensesAll = deductibleExpenses + mileageDeduction;
+  const taxableProfit = incomeTotal - deductibleExpenses - mileageDeduction;
+  const taxSetAside = (taxRatePercent / 100) * Math.max(taxableProfit, 0);
+  // Mileage reduces taxes owed (via taxableProfit/taxSetAside above) but does
+  // not leave the bank account — intentionally excluded from cash retained.
+  const netCashRetained = incomeTotal - cashExpenses - taxSetAside;
   return {
     income: incomeTotal,
     expenses: expensesAll,
+    cashExpenses,
+    deductibleExpenses,
     mileageDeduction,
-    netProfit,
+    taxableProfit,
     taxSetAside,
-    takeHome,
+    netCashRetained,
+    netProfit: taxableProfit,
+    takeHome: netCashRetained,
     taxRatePercent,
   };
 }
@@ -491,6 +512,7 @@ export function FinancialsBoard({
           description: res.data.description,
           amount: Number(res.data.amount),
           notes: res.data.notes,
+          cashTaxClass: res.data.cash_tax_class,
         };
         setExpenseRows((rows) => sortByDateDesc([...rows, newRow]));
         setExpenseDraft(emptyExpenseDraft());
@@ -530,6 +552,7 @@ export function FinancialsBoard({
         description: res.data.description,
         amount: Number(res.data.amount),
         notes: res.data.notes,
+        cashTaxClass: res.data.cash_tax_class,
       };
       setExpenseRows((rows) => sortByDateDesc([...rows, newRow]));
       return { ok: true };
@@ -744,6 +767,7 @@ export function FinancialsBoard({
         description: res.data.description,
         amount: Number(res.data.amount),
         notes: res.data.notes,
+        cashTaxClass: res.data.cash_tax_class,
       };
       setExpenseRows((rows) => sortByDateDesc([...rows, newRow]));
       return { ok: true };
