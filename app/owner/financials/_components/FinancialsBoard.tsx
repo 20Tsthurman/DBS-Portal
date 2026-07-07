@@ -972,7 +972,7 @@ export function FinancialsBoard({
           icon={<IconIncome size={28} />}
         />
         <StatCard
-          label="Total deductible expenses"
+          label="Total deductions"
           value={formatCurrency(summary.expenses)}
           icon={<IconExpenses size={28} />}
         />

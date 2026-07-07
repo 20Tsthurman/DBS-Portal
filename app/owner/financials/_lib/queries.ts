@@ -88,7 +88,7 @@ export type MileageRow = {
 
 export type FinancialsSummary = {
   income: number;
-  /** Tax-side total: deductibleExpenses + mileageDeduction. Feeds "Total deductible expenses". */
+  /** Tax-side total: deductibleExpenses + mileageDeduction. Feeds "Total deductions". */
   expenses: number;
   /** Rows classed both | cash_only — money that left the account this period. */
   cashExpenses: number;
