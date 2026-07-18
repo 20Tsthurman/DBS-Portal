@@ -22,9 +22,9 @@
 import { NextResponse } from "next/server";
 import { requireOwnerApi } from "@/lib/auth";
 import {
-  dateKeyInTimezone,
   shortDateLabelForDateKey,
 } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import { aggregateCpaPackage } from "@/app/owner/financials/_lib/cpaPackage";
 import type { FinancialsRange } from "@/app/owner/financials/_lib/queries";
 import {

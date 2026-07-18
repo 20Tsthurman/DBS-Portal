@@ -10,10 +10,10 @@ import {
   addDaysToDateKey,
   combineDateAndTimeInTimezone,
   currentMonthKey,
-  dateKeyInTimezone,
   monthGridDateKeys,
   weekStartKeyForDate,
 } from "./_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import { WeekView } from "./_components/WeekView";
 import { WeekToolbar } from "./_components/WeekToolbar";
 import { MonthView } from "./_components/MonthView";

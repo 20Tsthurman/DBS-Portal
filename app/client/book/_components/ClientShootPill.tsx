@@ -7,9 +7,9 @@ import {
   visualsForEvent,
 } from "@/app/owner/calendar/_lib/eventColors";
 import {
-  dateKeyInTimezone,
   formatShortTimeInTimezone,
 } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 
 interface ClientShootPillProps {
   shoot: ShootRecord;

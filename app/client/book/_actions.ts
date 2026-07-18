@@ -8,8 +8,8 @@ import {
 import { requireCurrentClient } from "@/lib/currentClient";
 import {
   combineDateAndTimeInTimezone,
-  dateKeyInTimezone,
 } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import { checkBookingConflicts } from "./_lib/conflicts";
 import type { ActionResult } from "@/lib/actions";
 

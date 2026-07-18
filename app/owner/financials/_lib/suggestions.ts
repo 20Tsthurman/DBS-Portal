@@ -15,7 +15,7 @@ import {
   fetchClientsWithRelations,
   type ClientWithRelations,
 } from "@/app/owner/clients/_lib/queries";
-import { dateKeyInTimezone } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import {
   getSupabaseServiceClient,
   type DismissedSuggestionRecord,

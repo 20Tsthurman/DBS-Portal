@@ -1,7 +1,7 @@
 import { DashboardCard } from "@/components/ui/DashboardCard";
 import { StatCard } from "@/components/ui/StatCard";
 import { fetchClientsLite } from "@/app/owner/calendar/_lib/queries";
-import { dateKeyInTimezone } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import { QuickLogForm } from "./_components/QuickLogForm";
 import { MonthlyHoursChart } from "./_components/MonthlyHoursChart";
 import { ExportMonthlyCsvButton } from "./_components/ExportMonthlyCsvButton";

@@ -6,8 +6,8 @@ import {
 } from "@/lib/supabase";
 import {
   addDaysToDateKey,
-  dateKeyInTimezone,
 } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 
 export type ShootWithClientName = ShootRecord & { client_name: string };
 

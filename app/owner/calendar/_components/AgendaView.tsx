@@ -4,11 +4,11 @@ import type { CalendarEvent } from "../_lib/types";
 import { visualsForEvent } from "../_lib/eventColors";
 import {
   addDaysToDateKey,
-  dateKeyInTimezone,
   formatTimeInTimezone,
   shortDateLabelForDateKey,
   shortWeekdayForDateKey,
 } from "../_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 
 interface AgendaViewProps {
   /** YYYY-MM-DD — first day of the visible window. */

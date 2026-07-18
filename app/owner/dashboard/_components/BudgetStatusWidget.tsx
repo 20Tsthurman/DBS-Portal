@@ -2,9 +2,9 @@ import Link from "next/link";
 import { DashboardCard } from "@/components/ui/DashboardCard";
 import { fetchClientsWithRelations } from "@/app/owner/clients/_lib/queries";
 import {
-  dateKeyInTimezone,
   PORTAL_TIMEZONE,
 } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import { effectiveMonthlyHours } from "@/lib/pricing";
 
 const MAX_VISIBLE = 8;

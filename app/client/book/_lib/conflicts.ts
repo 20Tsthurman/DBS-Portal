@@ -6,8 +6,8 @@ import {
 } from "@/lib/supabase";
 import {
   combineDateAndTimeInTimezone,
-  dateKeyInTimezone,
 } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 
 /**
  * Result of a booking-conflict check.

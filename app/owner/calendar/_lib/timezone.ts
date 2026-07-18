@@ -11,14 +11,14 @@
  * timezone assembly. They land on `CalendarEvent.startsAt` directly.
  */
 
-export const PORTAL_TIMEZONE = "America/Chicago";
+import { PORTAL_TIMEZONE, dateKeyInTimezone } from "@/lib/date";
 
-const dateKeyFmt = new Intl.DateTimeFormat("en-CA", {
-  timeZone: PORTAL_TIMEZONE,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
+// `PORTAL_TIMEZONE` and `dateKeyInTimezone` are defined in the neutral,
+// bundle-safe `@/lib/date` so client code can use them without importing from
+// `app/owner/**`. PORTAL_TIMEZONE is re-exported here for existing consumers
+// that import it from this module; `dateKeyInTimezone` callers import it
+// directly from `@/lib/date`.
+export { PORTAL_TIMEZONE };
 
 /**
  * First and last day of the current month — interpreted in PORTAL_TIMEZONE,
@@ -48,27 +48,6 @@ export function currentMonthRange(
   const start = `${year}-${mm}-01`;
   const end = `${year}-${mm}-${String(lastDay).padStart(2, "0")}`;
   return { start, end };
-}
-
-/**
- * Local YYYY-MM-DD for a UTC `Date` as observed in PORTAL_TIMEZONE.
- *
- * Use this when bucketing UTC timestamps (e.g. `shoots.scheduled_at`) into
- * days for a calendar grid. `dateMath.dateKey()` uses server-local time and
- * will drift on a UTC server — prefer this helper everywhere a day key
- * crosses the DB boundary.
- */
-export function dateKeyInTimezone(
-  d: Date,
-  tz: string = PORTAL_TIMEZONE
-): string {
-  if (tz === PORTAL_TIMEZONE) return dateKeyFmt.format(d);
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(d);
 }
 
 interface WallClockParts {

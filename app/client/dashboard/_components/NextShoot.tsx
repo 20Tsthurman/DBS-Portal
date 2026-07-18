@@ -1,10 +1,10 @@
 import type { CSSProperties } from "react";
 import type { ShootRecord } from "@/lib/supabase";
 import {
-  dateKeyInTimezone,
   formatTimeInTimezone,
   fullDateLabelForDateKey,
 } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 
 interface NextShootProps {
   /** Soonest upcoming session, or null when nothing is scheduled. */

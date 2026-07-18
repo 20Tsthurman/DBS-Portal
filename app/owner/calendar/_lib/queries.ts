@@ -11,8 +11,8 @@ import {
 import { dateKey } from "./dateMath";
 import {
   combineDateAndTimeInTimezone,
-  dateKeyInTimezone,
 } from "./timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import type { CalendarEvent } from "./types";
 
 type ShootLite = Pick<

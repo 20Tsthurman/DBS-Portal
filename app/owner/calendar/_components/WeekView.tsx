@@ -10,10 +10,10 @@ import {
 } from "../_lib/dateMath";
 import {
   addDaysToDateKey,
-  dateKeyInTimezone,
   hourOfDayInTimezone,
   weekdayForDateKey,
 } from "../_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import { EventChip } from "./EventChip";
 import { assignEventLanes } from "../_lib/overlap";
 import { visualsForEvent } from "../_lib/eventColors";

@@ -1,5 +1,6 @@
 import { getSupabaseServiceClient } from "@/lib/supabase";
 import type { InvoiceWithClient } from "@/app/owner/invoices/_lib/queries";
+import { dateKeyInTimezone } from "@/lib/date";
 
 /**
  * Re-export the shared row shape so the client-side surface doesn't need
@@ -15,8 +16,11 @@ type RawInvoiceRow = Omit<InvoiceWithClient, "client_name" | "client_email" | "e
   clients: { name: string; email: string } | { name: string; email: string }[];
 };
 
+// "Today" as a YYYY-MM-DD key in America/Chicago (PORTAL_TIMEZONE) — must match
+// the owner-side overdue computation so both surfaces agree. A UTC-based key
+// would flip overdue up to several hours early or late around midnight Central.
 function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+  return dateKeyInTimezone(new Date());
 }
 
 function flattenRow(row: RawInvoiceRow): InvoiceWithClient {

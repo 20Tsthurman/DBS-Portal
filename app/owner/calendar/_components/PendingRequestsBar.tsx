@@ -2,11 +2,11 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import type { PendingShoot } from "../_lib/queries";
 import {
-  dateKeyInTimezone,
   formatTimeInTimezone,
   shortDateLabelForDateKey,
   shortWeekdayForDateKey,
 } from "../_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import { PendingRequestActions } from "./PendingRequestActions";
 
 interface PendingRequestsBarProps {

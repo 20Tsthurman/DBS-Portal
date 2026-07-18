@@ -8,6 +8,7 @@ import {
 } from "@/lib/supabase";
 import { requireOwnerOrClientApi } from "@/lib/auth";
 import { maybeSendNewMessageEmail } from "@/lib/messageNotifications";
+import { MESSAGE_MAX_LENGTH } from "@/lib/messages";
 
 interface SendBody {
   clientId?: unknown;
@@ -33,6 +34,14 @@ export async function POST(request: Request) {
   if (trimmed.length === 0) {
     return NextResponse.json(
       { error: "body must be non-empty" },
+      { status: 400 }
+    );
+  }
+  if (trimmed.length > MESSAGE_MAX_LENGTH) {
+    return NextResponse.json(
+      {
+        error: `Message is too long (maximum ${MESSAGE_MAX_LENGTH} characters).`,
+      },
       { status: 400 }
     );
   }

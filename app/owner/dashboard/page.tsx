@@ -1,8 +1,8 @@
 import {
-  dateKeyInTimezone,
   fullDateLabelForDateKey,
   PORTAL_TIMEZONE,
 } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import { fetchUnreadCountsForOwner } from "@/app/owner/messages/_lib/queries";
 import { TodaysShootsWidget } from "./_components/TodaysShootsWidget";
 import { UnreadMessagesWidget } from "./_components/UnreadMessagesWidget";

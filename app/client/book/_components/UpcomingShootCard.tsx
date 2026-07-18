@@ -2,10 +2,10 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import type { MeetingType, ShootRecord } from "@/lib/supabase";
 import {
-  dateKeyInTimezone,
   formatTimeInTimezone,
   fullDateLabelForDateKey,
 } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import { StatusBadge } from "./StatusBadge";
 import { IconCalendar, IconChevronRight } from "./Icons";
 import { QuickMessageButton } from "@/components/messages/QuickMessageButton";

@@ -11,7 +11,7 @@ import {
   fieldStyle,
   labelStyle,
 } from "@/app/owner/clients/_components/formStyles";
-import { dateKeyInTimezone } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import { requestShoot } from "../_actions";
 
 interface RequestShootFormPanelProps {

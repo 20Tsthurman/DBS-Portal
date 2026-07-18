@@ -2,9 +2,9 @@ import type { CSSProperties } from "react";
 import type { ShootRecord } from "@/lib/supabase";
 import {
   dateKeyInMonth,
-  dateKeyInTimezone,
   monthGridDateKeys,
 } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import { ClientShootPill } from "./ClientShootPill";
 
 interface ClientBookingCalendarProps {

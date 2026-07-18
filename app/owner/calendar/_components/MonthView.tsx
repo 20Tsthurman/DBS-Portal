@@ -3,9 +3,9 @@ import type { CSSProperties } from "react";
 import type { CalendarEvent } from "../_lib/types";
 import {
   dateKeyInMonth,
-  dateKeyInTimezone,
   monthGridDateKeys,
 } from "../_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import { MonthEventPill } from "./MonthEventPill";
 
 interface MonthViewProps {

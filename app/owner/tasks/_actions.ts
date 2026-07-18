@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getSupabaseServiceClient } from "@/lib/supabase";
 import { requireOwner } from "@/lib/auth";
-import { dateKeyInTimezone } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import type { ActionResult } from "@/lib/actions";
 import type {
   ActiveTimerView,

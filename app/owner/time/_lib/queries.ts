@@ -7,11 +7,11 @@ import {
 import {
   addDaysToDateKey,
   currentMonthRange,
-  dateKeyInTimezone,
   formatMonthKey,
   formatMonthLabel,
   weekdayForDateKey,
 } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 
 export interface ClientHours {
   clientId: string;

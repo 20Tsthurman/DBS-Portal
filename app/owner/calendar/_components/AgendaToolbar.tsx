@@ -2,9 +2,9 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import {
   addDaysToDateKey,
-  dateKeyInTimezone,
   shortDateLabelForDateKey,
 } from "../_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 
 interface AgendaToolbarProps {
   startDateKey: string;

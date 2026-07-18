@@ -3,6 +3,7 @@ import {
   type InvoiceRecord,
   type InvoiceStatus,
 } from "@/lib/supabase";
+import { dateKeyInTimezone } from "@/lib/date";
 
 export interface InvoiceWithClient extends InvoiceRecord {
   client_name: string;
@@ -40,8 +41,12 @@ type RawInvoiceRow = InvoiceRecord & {
   clients: RawInvoiceClient | RawInvoiceClient[];
 };
 
+// "Today" as a YYYY-MM-DD key in America/Chicago (PORTAL_TIMEZONE) — the same
+// Central-time day the rest of the app uses. A UTC-based key would flip an
+// invoice to/from "overdue" up to several hours early or late around midnight
+// Central.
 function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+  return dateKeyInTimezone(new Date());
 }
 
 function computeEffectiveStatus(

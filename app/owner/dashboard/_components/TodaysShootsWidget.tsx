@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { StatusPill } from "@/components/ui/StatusPill";
 import {
-  dateKeyInTimezone,
   formatTimeInTimezone,
   PORTAL_TIMEZONE,
 } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import { fetchShootsForDay } from "@/app/owner/shoots/_lib/queries";
 import { DashboardCard } from "@/components/ui/DashboardCard";
 import { shootTone } from "./shootTone";

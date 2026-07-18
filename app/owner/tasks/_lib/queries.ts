@@ -4,8 +4,8 @@ import {
 } from "@/lib/supabase";
 import {
   addDaysToDateKey,
-  dateKeyInTimezone,
 } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 
 // ---------------------------------------------------------------------------
 // Types

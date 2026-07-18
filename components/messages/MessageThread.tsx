@@ -11,6 +11,7 @@ import {
 } from "react";
 import type { MessageRecord, SenderRole } from "@/lib/supabase";
 import { formatMessageTimestamp } from "@/lib/formatRelativeTime";
+import { MESSAGE_MAX_LENGTH } from "@/lib/messages";
 import {
   DEFAULT_POLL_INTERVAL_MS,
   useVisibilityPolling,
@@ -513,6 +514,7 @@ export function MessageThread({
             onKeyDown={handleComposerKeyDown}
             placeholder="Write a message…"
             rows={1}
+            maxLength={MESSAGE_MAX_LENGTH}
             style={textareaStyle}
           />
           <button
@@ -529,7 +531,12 @@ export function MessageThread({
             Send
           </button>
         </div>
-        <p style={hintStyle}>Enter to send · Shift+Enter for newline</p>
+        <div style={composerFooterStyle}>
+          <span style={hintStyle}>Enter to send · Shift+Enter for newline</span>
+          <span style={counterStyle}>
+            {composer.length}/{MESSAGE_MAX_LENGTH}
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -780,11 +787,26 @@ const sendButtonStyle: CSSProperties = {
   border: "none",
 };
 
-const hintStyle: CSSProperties = {
+const composerFooterStyle: CSSProperties = {
   marginTop: 6,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+};
+
+const hintStyle: CSSProperties = {
   fontSize: 11,
   color: "var(--text-muted)",
   letterSpacing: "0.02em",
+};
+
+const counterStyle: CSSProperties = {
+  flexShrink: 0,
+  fontSize: 11,
+  color: "var(--text-muted)",
+  letterSpacing: "0.02em",
+  fontVariantNumeric: "tabular-nums",
 };
 
 const retryButtonStyle: CSSProperties = {
