@@ -27,15 +27,23 @@ const labelStyle: React.CSSProperties = {
   minWidth: 52,
 };
 
+// `minWidth: 200` used to be a hard floor here: the editor row is a no-wrap
+// flex, so at 375px the row measured wider than the viewport and — because
+// globals.css sets body{overflow-x:hidden} — the Cancel button was clipped
+// off-screen with no way to exit the editor. `flex: 1` + `minWidth: 0` lets the
+// input absorb whatever space is left instead. 16px suppresses iOS auto-zoom
+// (this input is autoFocus, so the zoom fired on tap, before any typing).
+// Height stays compact — this is an inline editor, not a standalone form field.
 const inlineInputStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
   border: "1px solid var(--border)",
   background: "#FFFFFF",
   padding: "4px 8px",
-  fontSize: "13px",
+  fontSize: "16px",
   color: "var(--text-primary)",
   fontFamily: "inherit",
   outline: "none",
-  minWidth: 200,
 };
 
 // Small text-style trigger/action button used inline in the contact rows.

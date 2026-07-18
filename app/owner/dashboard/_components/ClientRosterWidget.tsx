@@ -51,7 +51,7 @@ export async function ClientRosterWidget() {
 
   return (
     <DashboardCard eyebrow="ROSTER" title="Active Clients">
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Active clients" value={activeCount} />
         <StatCard label="In onboarding" value={onboardingCount} />
         <StatCard label="Leads" value={leadCount} />

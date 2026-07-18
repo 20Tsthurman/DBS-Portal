@@ -36,7 +36,7 @@ export default async function OwnerTasksPage() {
 
   return (
     <section>
-      <header className="mb-8 flex items-start justify-between gap-6">
+      <header className="mb-8 flex flex-wrap items-start justify-between gap-6">
         <div>
           <p className="eyebrow mb-3">Owner — Tasks</p>
           <h1 className="page-title">Tasks</h1>

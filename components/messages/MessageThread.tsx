@@ -762,7 +762,9 @@ const textareaStyle: CSSProperties = {
   flex: 1,
   resize: "none",
   fontFamily: "inherit",
-  fontSize: 14,
+  // 16px suppresses iOS Safari's auto-zoom on focus. No height here — the
+  // auto-resize effect drives height off scrollHeight, capped at COMPOSER_MAX_PX.
+  fontSize: 16,
   lineHeight: 1.45,
   padding: "10px 12px",
   border: "1px solid var(--border)",

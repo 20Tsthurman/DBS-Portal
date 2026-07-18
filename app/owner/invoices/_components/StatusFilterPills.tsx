@@ -46,8 +46,12 @@ export function StatusFilterPills({ active }: StatusFilterPillsProps) {
   );
 }
 
+// Wraps rather than overflowing: five pills measure ~330-345px against ~343px
+// of content width at 375px, and body{overflow-x:hidden} would clip the last
+// filter out of reach instead of letting it scroll.
 const containerStyle: CSSProperties = {
   display: "inline-flex",
+  flexWrap: "wrap",
   marginBottom: 24,
 };
 

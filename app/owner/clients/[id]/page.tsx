@@ -171,7 +171,7 @@ export default async function OwnerClientDetailPage({ params }: PageProps) {
             phone={client.phone}
           />
         </div>
-        <div className="flex items-start gap-2">
+        <div className="flex flex-wrap items-start gap-2">
           <SendInviteButton
             clientId={client.id}
             clientName={client.name}

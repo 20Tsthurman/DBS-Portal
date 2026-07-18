@@ -219,14 +219,17 @@ const fieldLabel: CSSProperties = {
   marginBottom: 6,
 };
 
+// minHeight (not the previous fixed height: 34) so 16px text has room — the
+// font-size is what suppresses iOS Safari's auto-zoom on the date inputs and
+// the period select.
 const control: CSSProperties = {
   width: "100%",
-  height: 34,
+  minHeight: 44,
   padding: "0 8px",
   border: "1px solid var(--border)",
   backgroundColor: "#FFFFFF",
   color: "var(--text-primary)",
-  fontSize: 13,
+  fontSize: 16,
 };
 
 const generateButton: CSSProperties = {

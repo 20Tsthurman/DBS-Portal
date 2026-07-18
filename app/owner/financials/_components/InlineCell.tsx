@@ -321,12 +321,17 @@ export function InlineCell(props: InlineCellProps) {
   );
 }
 
+// displayButtonStyle and editFieldStyle MUST keep the same font-size: the cell
+// swaps between them on tap, and any mismatch reflows the row mid-edit. 16px is
+// required on the edit side to suppress iOS Safari's auto-zoom on focus, so the
+// display side follows it. Height is deliberately left to the existing 14px
+// padding (~45px) — these are inline table cells, not standalone form fields.
 const displayButtonStyle: CSSProperties = {
   display: "block",
   width: "100%",
   boxSizing: "border-box",
   padding: "14px 16px",
-  fontSize: 14,
+  fontSize: 16,
   fontFamily: "inherit",
   color: "inherit",
   background: "transparent",
@@ -339,7 +344,7 @@ const editFieldStyle: CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
   padding: "14px 16px",
-  fontSize: 14,
+  fontSize: 16,
   fontFamily: "inherit",
   color: "var(--text-primary)",
   background: "#FFFFFF",

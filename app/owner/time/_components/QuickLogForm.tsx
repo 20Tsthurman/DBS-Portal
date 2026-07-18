@@ -44,12 +44,15 @@ const labelStyle: CSSProperties = {
   fontWeight: 600,
 };
 
+// Local copy of the shared formStyles.fieldStyle. 16px suppresses iOS Safari's
+// auto-zoom on focus; minHeight gives a 48px touch target.
 const fieldStyle: CSSProperties = {
   width: "100%",
   border: "1px solid var(--border)",
   background: "#FFFFFF",
   padding: "8px 12px",
-  fontSize: 14,
+  fontSize: 16,
+  minHeight: 48,
   color: "var(--text-primary)",
   fontFamily: "inherit",
   outline: "none",

@@ -390,7 +390,11 @@ export function InvoiceFormPanel({
                       }
                       onFocus={applyFocus}
                       onBlur={clearFocus}
-                      style={{ ...fieldStyle, flex: 1 }}
+                      // minWidth: 0 lets this shrink inside the no-wrap line-item
+                      // row; without it the input's intrinsic min-content width
+                      // (which grew with the 16px bump) pushes the row past the
+                      // panel edge.
+                      style={{ ...fieldStyle, flex: 1, minWidth: 0 }}
                     />
                     <input
                       type="number"

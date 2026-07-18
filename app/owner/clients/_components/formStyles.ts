@@ -10,12 +10,17 @@ export const labelStyle: CSSProperties = {
   fontWeight: 600,
 };
 
+// 16px font-size is load-bearing: below it, iOS Safari auto-zooms the viewport
+// on focus and never zooms back out. minHeight (not height) keeps the 44px+
+// touch target while letting the seven textarea consumers grow — and lets
+// NotesTab's `minHeight: 200` override win through the spread.
 export const fieldStyle: CSSProperties = {
   width: "100%",
   border: "1px solid var(--border)",
   background: "#FFFFFF",
   padding: "8px 12px",
-  fontSize: "14px",
+  fontSize: "16px",
+  minHeight: 48,
   color: "var(--text-primary)",
   fontFamily: "inherit",
   outline: "none",

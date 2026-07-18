@@ -810,9 +810,13 @@ const tertiaryButtonStyle: CSSProperties = {
   cursor: "pointer",
 };
 
+// 16px suppresses iOS Safari's auto-zoom on focus; minHeight gives a 48px
+// touch target. NOTE: the `fieldStyle` below is an unrelated layout wrapper
+// that happens to share a name with formStyles.fieldStyle — not an input style.
 const inputStyle: CSSProperties = {
   padding: "8px 10px",
-  fontSize: 13,
+  fontSize: 16,
+  minHeight: 48,
   border: "1px solid var(--border)",
   backgroundColor: "var(--surface-raised)",
   color: "var(--text-primary)",
@@ -835,7 +839,8 @@ const fieldLabelStyle: CSSProperties = {
 
 const selectStyle: CSSProperties = {
   padding: "8px 10px",
-  fontSize: 13,
+  fontSize: 16,
+  minHeight: 48,
   border: "1px solid var(--border)",
   backgroundColor: "var(--surface-raised)",
   color: "var(--text-primary)",
