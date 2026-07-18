@@ -2,8 +2,19 @@
 
 import { useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
+import {
+  MobileCard,
+  MobileCardActions,
+  MobileCardField,
+  MobileCardHeader,
+} from "@/components/ui/MobileCard";
 import type { TaskWithMeta } from "../_lib/queries";
-import { categoryLabel, dueLabel, loggedLabel } from "../_lib/format";
+import {
+  categoryLabel,
+  dueLabel,
+  loggedDuration,
+  loggedLabel,
+} from "../_lib/format";
 import { deleteTask, startTimer, toggleTaskDone } from "../_actions";
 
 interface TaskRowProps {
@@ -13,13 +24,21 @@ interface TaskRowProps {
   onEdit: (task: TaskWithMeta) => void;
 }
 
-export function TaskRow({ task, isTracking, onEdit }: TaskRowProps) {
+/**
+ * Toggle / start / delete for one task. Shared verbatim by the desktop row and
+ * the mobile card so the two presentations can never drift onto different
+ * actions — in particular Start is the same `startTimer` server action feeding
+ * the same persistent <TimerPill/> in the owner top bar. Stop deliberately has
+ * no control here; it lives on that pill.
+ *
+ * Each presentation calls this independently and so owns its own transition
+ * state. That's correct rather than wasteful: only one of the two is ever
+ * visible (`hidden lg:block` / `lg:hidden`), so their pending flags never need
+ * to agree.
+ */
+function useTaskActions(todo: TaskWithMeta["todo"]) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const { todo, clientName, loggedHours, bucket } = task;
-  const done = todo.status === "done";
-  // Start is only offered on open tasks that have a client (decision 4).
-  const canStart = !done && Boolean(todo.client_id);
 
   const handleToggle = () => {
     startTransition(async () => {
@@ -44,8 +63,17 @@ export function TaskRow({ task, isTracking, onEdit }: TaskRowProps) {
     });
   };
 
+  return { isPending, handleToggle, handleStart, handleDelete };
+}
+
+/** Presentation-independent derivations shared by the row and the card. */
+function useTaskDisplay(task: TaskWithMeta) {
+  const { todo, clientName, loggedHours, bucket } = task;
+  const done = todo.status === "done";
+  // Start is only offered on open tasks that have a client (decision 4).
+  const canStart = !done && Boolean(todo.client_id);
+
   const due = dueLabel(todo.due_date, bucket);
-  const logged = loggedLabel(loggedHours);
   const cat = todo.category ? categoryLabel(todo.category) : null;
   // Mauve "Client · Category" badge — only when a client is attached; the
   // category suffix shows only when set.
@@ -61,6 +89,38 @@ export function TaskRow({ task, isTracking, onEdit }: TaskRowProps) {
       : due.tone === "today"
         ? "var(--status-warning)"
         : "var(--text-muted)";
+
+  return { todo, done, canStart, due, dueColor, badgeText, loggedHours };
+}
+
+/** Pulsing dot + "Tracking" caption. Shared so the two views stay in step. */
+function TrackingIndicator() {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 12,
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        color: "var(--sidebar-bg)",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span aria-hidden="true" className="task-tracking-dot" />
+      Tracking
+    </span>
+  );
+}
+
+export function TaskRow({ task, isTracking, onEdit }: TaskRowProps) {
+  const { todo, done, canStart, due, dueColor, badgeText, loggedHours } =
+    useTaskDisplay(task);
+  const { isPending, handleToggle, handleStart, handleDelete } =
+    useTaskActions(todo);
+  const logged = loggedLabel(loggedHours);
 
   return (
     <div
@@ -139,22 +199,7 @@ export function TaskRow({ task, isTracking, onEdit }: TaskRowProps) {
         }}
       >
         {isTracking ? (
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 12,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              color: "var(--sidebar-bg)",
-              whiteSpace: "nowrap",
-            }}
-          >
-            <span aria-hidden="true" className="task-tracking-dot" />
-            Tracking
-          </span>
+          <TrackingIndicator />
         ) : canStart ? (
           <button
             type="button"
@@ -188,6 +233,126 @@ export function TaskRow({ task, isTracking, onEdit }: TaskRowProps) {
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Phone rendering of the same task. Mirrors the Shoots page card vocabulary
+ * (header → fields → actions); `MobileCardActions` supplies the 44px minimum
+ * on every button it wraps, which is why Start/Edit/Delete reuse the existing
+ * `.task-start-btn` / `actionStyle` treatments unchanged.
+ */
+export function TaskCard({ task, isTracking, onEdit }: TaskRowProps) {
+  const { todo, done, canStart, due, dueColor, badgeText, loggedHours } =
+    useTaskDisplay(task);
+  const { isPending, handleToggle, handleStart, handleDelete } =
+    useTaskActions(todo);
+  const logged = loggedDuration(loggedHours);
+
+  return (
+    <MobileCard
+      style={{
+        opacity: isPending ? 0.55 : 1,
+        // Same tracking treatment as the desktop row, via the accent-rail
+        // idiom MobileCard already supports (cf. pinned clients). Spread
+        // conditionally: MobileCard merges this object *after* its own
+        // defaults, so an explicit `backgroundColor: undefined` would strip
+        // the card's surface-raised fill rather than leave it in place.
+        ...(isTracking
+          ? {
+              borderLeftWidth: 3,
+              borderLeftColor: "var(--sidebar-bg)",
+              backgroundColor: "rgba(27,56,39,0.06)",
+            }
+          : null),
+      }}
+    >
+      <MobileCardHeader
+        title={
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 4 }}>
+            {/* The bare 16px checkbox the desktop row uses is far under the
+                44px touch minimum, so on touch it gets a 44px hit area from a
+                wrapping label. Negative margins pull that box back against the
+                card's 16px padding so the title still reads flush. */}
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 44,
+                height: 44,
+                margin: "-11px 0 -11px -12px",
+                flex: "0 0 auto",
+                cursor: isPending ? "default" : "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={done}
+                onChange={handleToggle}
+                disabled={isPending}
+                aria-label={done ? "Reopen task" : "Mark task done"}
+                style={{
+                  width: 18,
+                  height: 18,
+                  accentColor: "var(--accent)",
+                  cursor: "inherit",
+                }}
+              />
+            </label>
+            <span
+              style={{
+                minWidth: 0,
+                color: done ? "var(--text-muted)" : undefined,
+                textDecoration: done ? "line-through" : "none",
+              }}
+            >
+              {todo.title}
+            </span>
+          </div>
+        }
+        badge={isTracking ? <TrackingIndicator /> : undefined}
+        subtitle={badgeText ? <span style={badgeStyle}>{badgeText}</span> : undefined}
+      />
+
+      <MobileCardField label="Due">
+        <span style={{ fontWeight: 600, color: dueColor }}>{due.text}</span>
+      </MobileCardField>
+      {logged && <MobileCardField label="Logged">{logged}</MobileCardField>}
+
+      <MobileCardActions align="end">
+        {canStart && !isTracking && (
+          <button
+            type="button"
+            className="task-start-btn"
+            onClick={handleStart}
+            disabled={isPending}
+          >
+            Start
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => onEdit(task)}
+          style={{ ...actionStyle, color: "var(--accent)" }}
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={isPending}
+          style={{
+            ...actionStyle,
+            color: "var(--status-danger)",
+            cursor: isPending ? "default" : "pointer",
+            opacity: isPending ? 0.6 : 1,
+          }}
+        >
+          Delete
+        </button>
+      </MobileCardActions>
+    </MobileCard>
   );
 }
 

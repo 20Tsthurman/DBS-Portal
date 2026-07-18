@@ -16,6 +16,7 @@ import {
   DEFAULT_POLL_INTERVAL_MS,
   useVisibilityPolling,
 } from "@/lib/hooks/useVisibilityPolling";
+import { useCoarsePointer } from "@/lib/hooks/useCoarsePointer";
 
 const CLUSTER_GAP_MS = 5 * 60 * 1000;
 const NEAR_BOTTOM_PX = 80;
@@ -77,6 +78,9 @@ export function MessageThread({
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Read at keydown time only — see `useCoarsePointer` for why this is a ref
+  // and why the hint below is a CSS swap rather than a branch on this value.
+  const isCoarsePointerRef = useCoarsePointer();
   const isNearBottomRef = useRef(true);
   const knownIdsRef = useRef<Set<string>>(
     new Set((initialMessages ?? []).map((m) => m.id))
@@ -400,6 +404,10 @@ export function MessageThread({
   );
 
   const handleComposerKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // On a touch keyboard the Enter key sits where Return belongs, so hijacking
+    // it makes multi-paragraph messages impossible to type; there send is the
+    // button only. Fine pointers keep Enter-to-send unchanged.
+    if (isCoarsePointerRef.current) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -532,12 +540,32 @@ export function MessageThread({
           </button>
         </div>
         <div style={composerFooterStyle}>
-          <span style={hintStyle}>Enter to send · Shift+Enter for newline</span>
+          {/* Both hints render; CSS picks one. Keyed off `pointer: coarse` —
+              the same predicate `useCoarsePointer` feeds the keydown handler,
+              so the copy can never contradict the behaviour (a width-based
+              `lg:` swap would lie on a wide tablet and on a narrow desktop
+              window). Rendering both also keeps SSR output unconditional. */}
+          <span style={hintStyle}>
+            <span className="composer-hint-fine">
+              Enter to send · Shift+Enter for newline
+            </span>
+            <span className="composer-hint-coarse">
+              Tap Send to send · Enter for a new line
+            </span>
+          </span>
           <span style={counterStyle}>
             {composer.length}/{MESSAGE_MAX_LENGTH}
           </span>
         </div>
       </div>
+
+      <style>{`
+        .composer-hint-coarse { display: none; }
+        @media (pointer: coarse) {
+          .composer-hint-fine { display: none; }
+          .composer-hint-coarse { display: inline; }
+        }
+      `}</style>
     </div>
   );
 }

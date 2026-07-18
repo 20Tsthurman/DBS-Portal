@@ -65,15 +65,27 @@ export function dueLabel(dueDate: string | null, bucket: TaskBucket): DueLabel {
 }
 
 /**
- * "Logged Xm" / "Logged Xh" / "Logged Xh Ym" from summed logged hours, rounded
- * to whole minutes. Returns null when nothing is logged (caller hides it).
+ * Bare duration — "Xm" / "Xh" / "Xh Ym" — from summed logged hours, rounded to
+ * whole minutes. Returns null when nothing is logged (caller hides it).
+ *
+ * Split out from `loggedLabel` so the mobile card can render this under a
+ * "Logged" field label without the redundant "LOGGED  Logged 45m" stutter.
  */
-export function loggedLabel(loggedHours: number): string | null {
+export function loggedDuration(loggedHours: number): string | null {
   if (!loggedHours || loggedHours <= 0) return null;
   const totalMinutes = Math.round(loggedHours * 60);
   if (totalMinutes <= 0) return null;
-  if (totalMinutes < 60) return `Logged ${totalMinutes}m`;
+  if (totalMinutes < 60) return `${totalMinutes}m`;
   const h = Math.floor(totalMinutes / 60);
   const mins = totalMinutes % 60;
-  return mins === 0 ? `Logged ${h}h` : `Logged ${h}h ${mins}m`;
+  return mins === 0 ? `${h}h` : `${h}h ${mins}m`;
+}
+
+/**
+ * "Logged Xm" / "Logged Xh" / "Logged Xh Ym" — the self-describing form used
+ * in the desktop row's inline meta strip, where there's no field label.
+ */
+export function loggedLabel(loggedHours: number): string | null {
+  const duration = loggedDuration(loggedHours);
+  return duration === null ? null : `Logged ${duration}`;
 }

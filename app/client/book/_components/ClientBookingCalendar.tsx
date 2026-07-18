@@ -1,7 +1,9 @@
+import Link from "next/link";
 import type { CSSProperties } from "react";
 import type { ShootRecord } from "@/lib/supabase";
 import {
   dateKeyInMonth,
+  fullDateLabelForDateKey,
   monthGridDateKeys,
 } from "@/app/owner/calendar/_lib/timezone";
 import { dateKeyInTimezone } from "@/lib/date";
@@ -89,6 +91,38 @@ export function ClientBookingCalendar({
           const col = idx % 7;
           const row = Math.floor(idx / 7);
 
+          // Cell-level tap target, mirroring the owner MonthView. An 18px pill
+          // is well under the 44px touch minimum, and at phone widths a column
+          // is only ~48px wide, so the cell itself is the only rectangle big
+          // enough to aim at.
+          //
+          // Requests are offered only on days the form would actually accept:
+          // RequestShootFormPanel puts `min={todayKey}` on its date input, so
+          // linking a past or adjacent-month day would prefill a value the
+          // form silently refuses to submit. Both keys are YYYY-MM-DD, so the
+          // string compare matches that `min` exactly.
+          //
+          // `dayShoots` excludes cancelled shoots (filtered by the page), so a
+          // day whose only shoot was cancelled correctly reads as free.
+          const canRequest = inMonth && dk >= todayKey;
+          const soleShoot = dayShoots.length === 1 ? dayShoots[0] : null;
+
+          // Multi-shoot days get no overlay: picking one for the whole cell
+          // would be a guess, so the pills stay the only targets there.
+          const cellLink = soleShoot
+            ? {
+                href: `${baseHref}&shoot=${soleShoot.id}`,
+                label: `View your ${
+                  soleShoot.kind === "meeting" ? "meeting" : "shoot"
+                } on ${fullDateLabelForDateKey(dk)}`,
+              }
+            : dayShoots.length === 0 && canRequest
+              ? {
+                  href: `${baseHref}&request=1&date=${dk}`,
+                  label: `Request a shoot on ${fullDateLabelForDateKey(dk)}`,
+                }
+              : null;
+
           return (
             <div
               key={dk}
@@ -108,12 +142,27 @@ export function ClientBookingCalendar({
                 overflow: "hidden",
               }}
             >
+              {cellLink && (
+                <Link
+                  href={cellLink.href}
+                  aria-label={cellLink.label}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    zIndex: 0,
+                  }}
+                />
+              )}
+
               <div
                 className="px-1 py-0.5"
                 style={{
+                  position: "relative",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "flex-start",
+                  zIndex: 2,
+                  pointerEvents: "none",
                 }}
               >
                 {isToday ? (
@@ -144,6 +193,8 @@ export function ClientBookingCalendar({
                   display: "flex",
                   flexDirection: "column",
                   gap: 2,
+                  position: "relative",
+                  zIndex: 2,
                 }}
               >
                 {dayShoots.map((s) => (

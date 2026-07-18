@@ -6,7 +6,8 @@ import type {
   GroupedTasks,
   TaskWithMeta,
 } from "../_lib/queries";
-import { TaskRow } from "./TaskRow";
+import { MobileCardList } from "@/components/ui/MobileCard";
+import { TaskCard, TaskRow } from "./TaskRow";
 import { TaskFormPanel } from "./TaskFormPanel";
 
 interface TaskListProps {
@@ -60,7 +61,11 @@ export function TaskList({ grouped, clients, activeTodoId }: TaskListProps) {
                 </span>
               </div>
 
+              {/* Desktop: bordered list of rows. Mobile: free-standing cards,
+                  matching the Shoots page split. Only one is ever displayed,
+                  so the duplicated map costs a render, not an interaction. */}
               <div
+                className="hidden lg:block"
                 style={{
                   border: "1px solid var(--border)",
                   backgroundColor: "var(--surface-raised)",
@@ -75,6 +80,17 @@ export function TaskList({ grouped, clients, activeTodoId }: TaskListProps) {
                   />
                 ))}
               </div>
+
+              <MobileCardList className="lg:hidden">
+                {items.map((task) => (
+                  <TaskCard
+                    key={task.todo.id}
+                    task={task}
+                    isTracking={task.todo.id === activeTodoId}
+                    onEdit={(t) => setEditingTask(t)}
+                  />
+                ))}
+              </MobileCardList>
             </section>
           );
         })}
