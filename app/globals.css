@@ -25,6 +25,12 @@
   backdrop-filter: none !important;
 }
 
+/* Global flat * rules above strip this badge's radius/shadow, so it renders
+   as a notch cut out of the Google button's top border. Hide it. */
+.cl-lastAuthenticationStrategyBadge {
+  display: none;
+}
+
 html,
 body {
   background-color: var(--surface-base);
