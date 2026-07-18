@@ -42,7 +42,11 @@ export function Sidebar({ eyebrow, navSections }: SidebarProps) {
         }`}
       />
       <aside
-        className={`fixed left-0 top-0 z-40 flex h-screen w-60 flex-col transition-transform duration-200 ease-out lg:translate-x-0 ${
+        // h-dvh, not h-screen: on iOS `100vh` is the *large* viewport (URL bar
+        // hidden), so with the browser chrome showing this fixed drawer ran
+        // ~100px taller than the visible area and the account row below the
+        // nav was unreachable. `dvh` tracks the visible viewport instead.
+        className={`fixed left-0 top-0 z-40 flex h-dvh w-60 flex-col transition-transform duration-200 ease-out lg:translate-x-0 ${
           isOpen ? "translate-x-0" : "-translate-x-full"
         }`}
         style={{ backgroundColor: "var(--sidebar-bg)" }}
@@ -76,7 +80,11 @@ export function Sidebar({ eyebrow, navSections }: SidebarProps) {
         </p>
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-4">
+      {/* overscroll-contain: sizing the drawer to the visible viewport is what
+          finally makes this region overflow, so its scroll behaviour now
+          matters. Without this, dragging past either end chains the scroll to
+          the page behind the drawer on iOS. */}
+      <nav className="flex-1 overflow-y-auto overscroll-contain py-4">
         {navSections.map((section, sectionIndex) => (
           <div
             key={section.heading ?? `section-${sectionIndex}`}
