@@ -3,8 +3,8 @@ import type { ClientStatus, ClientType } from "@/lib/supabase";
 export function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   return `$${Number(value).toLocaleString(undefined, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   })}`;
 }
 
