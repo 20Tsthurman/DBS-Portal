@@ -11,11 +11,14 @@ export interface InvoiceWithClient extends InvoiceRecord {
   client_phone: string | null;
   client_clerk_user_id: string | null;
   /**
-   * Computed at read time. Equal to `status` unless `status === 'sent'`
-   * and `due_date` is non-null and in the past — in which case the
-   * computed value is `'overdue'`. The DB `status` column itself is
-   * never auto-updated to 'overdue'; the UI partitions sent vs. overdue
-   * via this derived field.
+   * Computed at read time from `status`, `due_date`, and `inactive_at`:
+   *   - `'inactive'` whenever `inactive_at` is set (wins over everything
+   *     else — a retired invoice is never shown as overdue);
+   *   - `'overdue'` when `status === 'sent'` and `due_date` is non-null
+   *     and in the past;
+   *   - otherwise just `status`.
+   * The DB `status` column is never auto-updated to either derived
+   * value; the UI partitions the rows via this field.
    */
   effective_status: InvoiceStatus;
 }
@@ -24,11 +27,21 @@ export interface InvoiceWithClient extends InvoiceRecord {
  * `'open'` means all rows where the DB status is `'sent'` — the UI
  * partitions them visually into "sent" and "overdue" using
  * `effective_status`. There is no DB-level 'overdue' status.
+ *
+ * Every filter except `'inactive'` hides soft-retired invoices;
+ * `'inactive'` shows only those. So `'all'` means "all live invoices",
+ * not "every row" — retired invoices live behind their own filter.
  */
-export type InvoiceListStatusFilter = "all" | "open" | "draft" | "sent" | "paid";
+export type InvoiceListStatusFilter =
+  | "all"
+  | "open"
+  | "draft"
+  | "sent"
+  | "paid"
+  | "inactive";
 
 const INVOICE_SELECT =
-  "id, client_id, amount, due_date, paid_at, sent_at, status, stripe_payment_link, line_items, created_at, invoice_number, income_type, memo, clients!inner(name, email, phone, clerk_user_id)";
+  "id, client_id, amount, due_date, paid_at, sent_at, status, stripe_payment_link, line_items, created_at, invoice_number, income_type, memo, inactive_at, clients!inner(name, email, phone, clerk_user_id)";
 
 type RawInvoiceClient = {
   name: string;
@@ -51,8 +64,12 @@ function todayKey(): string {
 
 function computeEffectiveStatus(
   status: InvoiceStatus,
-  dueDate: string | null
+  dueDate: string | null,
+  inactiveAt: string | null
 ): InvoiceStatus {
+  // Retired wins: an inactive invoice is no longer chasing payment, so it
+  // must never render as overdue.
+  if (inactiveAt) return "inactive";
   if (status === "sent" && dueDate && dueDate < todayKey()) {
     return "overdue";
   }
@@ -79,11 +96,16 @@ function flattenRow(row: RawInvoiceRow): InvoiceWithClient {
     invoice_number: row.invoice_number,
     income_type: row.income_type,
     memo: row.memo,
+    inactive_at: row.inactive_at,
     client_name: clientName,
     client_email: clientEmail,
     client_phone: clientPhone,
     client_clerk_user_id: clientClerkUserId,
-    effective_status: computeEffectiveStatus(row.status, row.due_date),
+    effective_status: computeEffectiveStatus(
+      row.status,
+      row.due_date,
+      row.inactive_at
+    ),
   };
 }
 
@@ -102,10 +124,17 @@ export async function fetchInvoices(filters?: {
     query = query.eq("client_id", filters.clientId);
   }
   const status = filters?.status ?? "all";
-  if (status === "open") {
-    query = query.in("status", ["sent"]);
-  } else if (status === "draft" || status === "sent" || status === "paid") {
-    query = query.eq("status", status);
+  if (status === "inactive") {
+    query = query.not("inactive_at", "is", null);
+  } else {
+    // Soft-retired invoices are excluded from every live view, including
+    // "all" — they're reachable only through the Inactive filter.
+    query = query.is("inactive_at", null);
+    if (status === "open") {
+      query = query.in("status", ["sent"]);
+    } else if (status === "draft" || status === "sent" || status === "paid") {
+      query = query.eq("status", status);
+    }
   }
 
   const { data, error } = await query;

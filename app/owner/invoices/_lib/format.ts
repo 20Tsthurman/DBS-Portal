@@ -40,6 +40,7 @@ export function statusToneFor(
       return "danger";
     case "sent":
       return "accent";
+    case "inactive":
     case "draft":
     default:
       return "neutral";
@@ -54,6 +55,8 @@ export function statusLabelFor(status: EffectiveStatus): string {
       return "Overdue";
     case "sent":
       return "Sent";
+    case "inactive":
+      return "Inactive";
     case "draft":
     default:
       return "Draft";

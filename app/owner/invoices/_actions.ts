@@ -248,6 +248,12 @@ export async function updateInvoiceAction(
   try {
     const invoice = await fetchInvoiceById(input.invoiceId);
     if (!invoice) return { ok: false, error: "Invoice not found" };
+    if (invoice.inactive_at) {
+      return {
+        ok: false,
+        error: "Inactive invoices cannot be edited. Reactivate it first.",
+      };
+    }
     if (invoice.status === "paid") {
       return { ok: false, error: "Paid invoices cannot be edited" };
     }
@@ -366,6 +372,12 @@ export async function sendInvoiceAction(
   try {
     const invoice = await fetchInvoiceById(input.invoiceId);
     if (!invoice) return { ok: false, error: "Invoice not found" };
+    if (invoice.inactive_at) {
+      return {
+        ok: false,
+        error: "Inactive invoices cannot be sent. Reactivate it first.",
+      };
+    }
     if (invoice.status !== "draft") {
       return { ok: false, error: "Only draft invoices can be sent" };
     }
@@ -501,6 +513,12 @@ export async function markInvoicePaidAction(
   try {
     const invoice = await fetchInvoiceById(input.invoiceId);
     if (!invoice) return { ok: false, error: "Invoice not found" };
+    if (invoice.inactive_at) {
+      return {
+        ok: false,
+        error: "Inactive invoices cannot be marked paid. Reactivate it first.",
+      };
+    }
     if (invoice.status === "paid") {
       return { ok: false, error: "Invoice is already marked paid" };
     }
@@ -631,6 +649,12 @@ export async function deleteInvoiceAction(
     if (invoice.status !== "draft") {
       return { ok: false, error: "Only draft invoices can be deleted" };
     }
+    if (invoice.inactive_at) {
+      return {
+        ok: false,
+        error: "Reactivate the invoice before deleting it.",
+      };
+    }
 
     const supabase = getSupabaseServiceClient();
     const { error } = await supabase
@@ -646,6 +670,100 @@ export async function deleteInvoiceAction(
     return {
       ok: false,
       error: err instanceof Error ? err.message : "Failed to delete invoice",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// setInvoiceInactiveAction / reactivateInvoiceAction
+//
+// Soft-retire, the non-destructive counterpart to deleteInvoiceAction: the
+// row, its number, its line items, and its generated PDF all stay put, but
+// the invoice drops out of the live lists, disappears from the client
+// portal, and stops being editable / sendable / payable. Used for invoices
+// that were cancelled, superseded, or billed by mistake — anything where the
+// history still matters.
+//
+// The underlying `status` is deliberately left alone, so reactivating puts
+// the invoice back exactly where it was (a retired overdue invoice comes back
+// overdue). Paid invoices can't be retired: the money is already recorded in
+// income_payments, and hiding the invoice would orphan that row.
+// ---------------------------------------------------------------------------
+
+export interface SetInvoiceInactiveInput {
+  invoiceId: string;
+}
+
+export async function setInvoiceInactiveAction(
+  input: SetInvoiceInactiveInput
+): Promise<ActionResult> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  if (!input.invoiceId) return { ok: false, error: "Missing invoice id" };
+
+  try {
+    const invoice = await fetchInvoiceById(input.invoiceId);
+    if (!invoice) return { ok: false, error: "Invoice not found" };
+    // Idempotent: a double-click or a stale tab shouldn't surface an error.
+    if (invoice.inactive_at) return { ok: true };
+    if (invoice.status === "paid") {
+      return {
+        ok: false,
+        error:
+          "Paid invoices can't be made inactive — the payment is already on the books.",
+      };
+    }
+
+    const supabase = getSupabaseServiceClient();
+    const { error } = await supabase
+      .from("invoices")
+      .update({ inactive_at: new Date().toISOString() })
+      .eq("id", invoice.id)
+      // Race guard against a concurrent mark-paid: never retire an invoice
+      // that just became paid.
+      .neq("status", "paid")
+      .is("inactive_at", null);
+    if (error) return { ok: false, error: error.message };
+
+    await revalidateInvoiceSurfaces(invoice.client_id);
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to mark inactive",
+    };
+  }
+}
+
+export interface ReactivateInvoiceInput {
+  invoiceId: string;
+}
+
+export async function reactivateInvoiceAction(
+  input: ReactivateInvoiceInput
+): Promise<ActionResult> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  if (!input.invoiceId) return { ok: false, error: "Missing invoice id" };
+
+  try {
+    const invoice = await fetchInvoiceById(input.invoiceId);
+    if (!invoice) return { ok: false, error: "Invoice not found" };
+    if (!invoice.inactive_at) return { ok: true };
+
+    const supabase = getSupabaseServiceClient();
+    const { error } = await supabase
+      .from("invoices")
+      .update({ inactive_at: null })
+      .eq("id", invoice.id);
+    if (error) return { ok: false, error: error.message };
+
+    await revalidateInvoiceSurfaces(invoice.client_id);
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to reactivate",
     };
   }
 }

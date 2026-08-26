@@ -14,7 +14,18 @@ export type TimeLogCategory =
   | "filming"
   | "admin"
   | "communication";
-export type InvoiceStatus = "draft" | "sent" | "paid" | "overdue";
+/**
+ * `'overdue'` and `'inactive'` are *derived* — no invoice row ever stores
+ * them. `'overdue'` is computed from a sent invoice with a past due date;
+ * `'inactive'` is computed from a non-NULL `inactive_at`. Both surface
+ * through `InvoiceWithClient.effective_status`.
+ */
+export type InvoiceStatus =
+  | "draft"
+  | "sent"
+  | "paid"
+  | "overdue"
+  | "inactive";
 export type ExpenseCategory =
   | "platform_software"
   | "marketing_advertising"
@@ -152,6 +163,14 @@ export interface InvoiceRecord {
    * created_at. created_at remains for audit/row-creation purposes.
    */
   sent_at: string | null;
+  /**
+   * Soft-retire marker. NULL = live invoice. Non-NULL = the invoice was
+   * marked Inactive at this timestamp: kept for history but hidden from
+   * default owner lists and from the client portal, and no longer
+   * editable / sendable / payable. Clearing it reactivates the invoice
+   * back into whatever `status` it held when retired.
+   */
+  inactive_at: string | null;
 }
 
 export interface ExpenseRecord {

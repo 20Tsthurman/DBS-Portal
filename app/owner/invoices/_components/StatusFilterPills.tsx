@@ -1,7 +1,13 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 
-export type StatusFilter = "all" | "open" | "draft" | "sent" | "paid";
+export type StatusFilter =
+  | "all"
+  | "open"
+  | "draft"
+  | "sent"
+  | "paid"
+  | "inactive";
 
 interface StatusFilterPillsProps {
   active: StatusFilter;
@@ -13,6 +19,7 @@ const ITEMS: Array<{ value: StatusFilter; label: string }> = [
   { value: "draft", label: "Draft" },
   { value: "sent", label: "Sent" },
   { value: "paid", label: "Paid" },
+  { value: "inactive", label: "Inactive" },
 ];
 
 export function StatusFilterPills({ active }: StatusFilterPillsProps) {
@@ -46,9 +53,9 @@ export function StatusFilterPills({ active }: StatusFilterPillsProps) {
   );
 }
 
-// Wraps rather than overflowing: five pills measure ~330-345px against ~343px
-// of content width at 375px, and body{overflow-x:hidden} would clip the last
-// filter out of reach instead of letting it scroll.
+// Wraps rather than overflowing: the pills overrun ~343px of content width at
+// 375px (they did at five, and Inactive makes six), and body{overflow-x:hidden}
+// would clip the last filter out of reach instead of letting it scroll.
 const containerStyle: CSSProperties = {
   display: "inline-flex",
   flexWrap: "wrap",

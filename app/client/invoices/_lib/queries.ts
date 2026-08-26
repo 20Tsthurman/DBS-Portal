@@ -10,7 +10,7 @@ import { dateKeyInTimezone } from "@/lib/date";
 export type { InvoiceWithClient } from "@/app/owner/invoices/_lib/queries";
 
 const INVOICE_SELECT =
-  "id, client_id, amount, due_date, paid_at, sent_at, status, stripe_payment_link, line_items, created_at, invoice_number, income_type, memo, clients!inner(name, email)";
+  "id, client_id, amount, due_date, paid_at, sent_at, status, stripe_payment_link, line_items, created_at, invoice_number, income_type, memo, inactive_at, clients!inner(name, email)";
 
 type RawInvoiceRow = Omit<InvoiceWithClient, "client_name" | "client_email" | "effective_status"> & {
   clients: { name: string; email: string } | { name: string; email: string }[];
@@ -46,6 +46,7 @@ function flattenRow(row: RawInvoiceRow): InvoiceWithClient {
     invoice_number: row.invoice_number,
     income_type: row.income_type,
     memo: row.memo,
+    inactive_at: row.inactive_at,
     client_name: clientName,
     client_email: clientEmail,
     // client_phone and client_clerk_user_id are only consumed by the
@@ -59,7 +60,9 @@ function flattenRow(row: RawInvoiceRow): InvoiceWithClient {
 
 /**
  * List the signed-in client's invoices. Drafts are excluded — they're
- * owner-side scratch work and should never appear in the client UI.
+ * owner-side scratch work and should never appear in the client UI — as
+ * are invoices the owner marked Inactive: those were cancelled or billed
+ * in error, so the client shouldn't see (or be able to pay) them.
  * Ordered newest first.
  */
 export async function fetchMyInvoices(
@@ -71,6 +74,7 @@ export async function fetchMyInvoices(
     .select(INVOICE_SELECT)
     .eq("client_id", clientId)
     .neq("status", "draft")
+    .is("inactive_at", null)
     .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
   return ((data ?? []) as unknown as RawInvoiceRow[]).map(flattenRow);
@@ -79,8 +83,11 @@ export async function fetchMyInvoices(
 /**
  * Fetch a single invoice with the ownership check baked in. Returns
  * null when the row is missing OR when it belongs to another client OR
- * when it is still a draft — the client UI must treat all three cases
- * identically (no leakage of "exists but not yours").
+ * when it is still a draft OR when it has been marked Inactive — the
+ * client UI must treat all four cases identically (no leakage of
+ * "exists but not yours"). The inactive filter is what stops a stale
+ * tab from paying a cancelled invoice: every client-side action routes
+ * through this function.
  */
 export async function fetchMyInvoiceById(
   clientId: string,
@@ -93,6 +100,7 @@ export async function fetchMyInvoiceById(
     .eq("id", invoiceId)
     .eq("client_id", clientId)
     .neq("status", "draft")
+    .is("inactive_at", null)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return null;

@@ -15,7 +15,13 @@ interface PageProps {
 }
 
 function parseStatusFilter(raw: unknown): StatusFilter {
-  if (raw === "all" || raw === "draft" || raw === "sent" || raw === "paid") {
+  if (
+    raw === "all" ||
+    raw === "draft" ||
+    raw === "sent" ||
+    raw === "paid" ||
+    raw === "inactive"
+  ) {
     return raw;
   }
   return "open";

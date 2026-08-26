@@ -105,7 +105,7 @@ async function handleCheckoutSessionCompleted(
   const { data: invoice, error: fetchError } = await supabase
     .from("invoices")
     .select(
-      "id, client_id, status, line_items, amount, invoice_number, income_type, memo"
+      "id, client_id, status, line_items, amount, invoice_number, income_type, memo, inactive_at"
     )
     .eq("id", invoiceId)
     .maybeSingle();
@@ -156,6 +156,16 @@ async function handleCheckoutSessionCompleted(
   const nowIso = new Date().toISOString();
   const today = nowIso.slice(0, 10);
 
+  // An invoice marked Inactive after the client opened checkout can still
+  // produce a completed session. The money is real, so record it rather
+  // than dropping it on the floor — clearing `inactive_at` below brings the
+  // invoice back into the live lists as paid, which is the honest state.
+  if (invoice.inactive_at) {
+    console.warn(
+      `[stripe webhook] invoice ${invoiceId} was marked inactive but a payment completed (sessionId=${session.id}) — recording the payment and reactivating`
+    );
+  }
+
   // Flip the invoice. The `.neq('status', 'paid')` clause is a
   // race-safe guard: if a concurrent webhook delivery already flipped
   // the row, this update returns zero rows and we abort before
@@ -163,7 +173,7 @@ async function handleCheckoutSessionCompleted(
   // make Supabase return the updated rows so we can count them.
   const { data: updatedRows, error: updateError } = await supabase
     .from("invoices")
-    .update({ status: "paid", paid_at: nowIso })
+    .update({ status: "paid", paid_at: nowIso, inactive_at: null })
     .eq("id", invoiceId)
     .neq("status", "paid")
     .select("id");

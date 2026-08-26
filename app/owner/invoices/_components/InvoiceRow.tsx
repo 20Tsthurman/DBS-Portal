@@ -8,6 +8,8 @@ import { formatDate } from "@/app/owner/clients/_lib/format";
 import {
   createInvoicePdfDownloadUrlAction,
   deleteInvoiceAction,
+  reactivateInvoiceAction,
+  setInvoiceInactiveAction,
 } from "../_actions";
 import {
   formatInvoiceAmount,
@@ -36,11 +38,14 @@ export function InvoiceRow({
   const status = invoice.effective_status;
   const isDraft = status === "draft";
   const isPaid = status === "paid";
+  const isInactive = status === "inactive";
 
   const [downloading, setDownloading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmInactive, setConfirmInactive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isDeleting, startDeleteTransition] = useTransition();
+  const [isRetiring, startRetireTransition] = useTransition();
 
   const total = invoice.line_items.reduce(
     (sum, li) => sum + Number(li.amount),
@@ -69,6 +74,31 @@ export function InvoiceRow({
         return;
       }
       setConfirmDelete(false);
+      router.refresh();
+    });
+  };
+
+  const handleConfirmInactive = () => {
+    setError(null);
+    startRetireTransition(async () => {
+      const res = await setInvoiceInactiveAction({ invoiceId: invoice.id });
+      if (!res.ok) {
+        setError(res.error ?? "Could not mark inactive");
+        return;
+      }
+      setConfirmInactive(false);
+      router.refresh();
+    });
+  };
+
+  const handleReactivate = () => {
+    setError(null);
+    startRetireTransition(async () => {
+      const res = await reactivateInvoiceAction({ invoiceId: invoice.id });
+      if (!res.ok) {
+        setError(res.error ?? "Could not reactivate");
+        return;
+      }
       router.refresh();
     });
   };
@@ -149,6 +179,50 @@ export function InvoiceRow({
               >
                 {downloading ? "Opening…" : "PDF"}
               </button>
+              <button
+                type="button"
+                onClick={() => setConfirmInactive(true)}
+                style={{ ...rowActionStyle, color: "var(--text-muted)" }}
+              >
+                Make Inactive
+              </button>
+            </>
+          )}
+          {isInactive && (
+            <>
+              <button
+                type="button"
+                onClick={() => onEdit(invoice)}
+                style={rowActionStyle}
+              >
+                View
+              </button>
+              {invoice.sent_at && (
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  style={{
+                    ...rowActionStyle,
+                    opacity: downloading ? 0.6 : 1,
+                    cursor: downloading ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {downloading ? "Opening…" : "PDF"}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleReactivate}
+                disabled={isRetiring}
+                style={{
+                  ...rowActionStyle,
+                  opacity: isRetiring ? 0.6 : 1,
+                  cursor: isRetiring ? "not-allowed" : "pointer",
+                }}
+              >
+                {isRetiring ? "Working…" : "Reactivate"}
+              </button>
             </>
           )}
           {isPaid && (
@@ -204,6 +278,26 @@ export function InvoiceRow({
         confirmLabel="Delete"
         variant="danger"
         busy={isDeleting}
+      />
+
+      <ConfirmDialog
+        open={confirmInactive}
+        onCancel={() => {
+          if (isRetiring) return;
+          setConfirmInactive(false);
+        }}
+        onConfirm={handleConfirmInactive}
+        title="Mark invoice inactive?"
+        body={
+          <>
+            <strong>{invoice.invoice_number ?? "(no number)"}</strong> stays in
+            your history but stops counting as open — it disappears from{" "}
+            {invoice.client_name || "the client"}&apos;s portal and can&apos;t
+            be paid. You can reactivate it any time from the Inactive filter.
+          </>
+        }
+        confirmLabel="Make Inactive"
+        busy={isRetiring}
       />
     </>
   );

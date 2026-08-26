@@ -103,12 +103,17 @@ export function InvoiceFormPanel({
   const fieldId = useId();
 
   const isEdit = Boolean(invoice);
-  const isReadOnly = invoice?.status === "paid";
+  // Read-only whenever the invoice can no longer legally change: it's
+  // paid (money is on the books) or it's been marked Inactive (the
+  // server rejects edits until it's reactivated). Both open the panel as
+  // a viewer.
+  const isReadOnly =
+    invoice?.status === "paid" || invoice?.inactive_at != null;
   // The send-immediately toggle only makes sense for new drafts and
   // existing drafts. Once an invoice is sent, the only action is "save
   // changes" (PDF regen is automatic).
   const canSendImmediately =
-    !invoice || invoice.status === "draft";
+    !invoice || (invoice.status === "draft" && !invoice.inactive_at);
 
   const [values, setValues] = useState<FormValues>(emptyValues);
   const [submitting, setSubmitting] = useState(false);
