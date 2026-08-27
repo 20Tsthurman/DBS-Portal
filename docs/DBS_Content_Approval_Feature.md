@@ -166,6 +166,7 @@ content_cycles              -- one row per client per month
   included_rounds int default 1
   extra_round_price numeric
   status: drafting | in_review | locked
+  unique (client_id, month)  -- enforces one-per-client-per-month
 
 content_items
   id, client_id, cycle_id
@@ -182,8 +183,13 @@ content_assets              -- separate table: carousels are multi-asset
   kind: video|image
   provider: 'stream'|'supabase'
   external_id text          -- Stream UID or storage path
+  status: processing|ready|failed  default 'ready'
+                            -- only Stream video starts 'processing'; §3.5b
   duration_seconds, width, height, bytes
   replaced_at               -- soft version history across revisions
+  unique (content_item_id, position) where replaced_at is null
+                            -- one CURRENT asset per position; partial so
+                            --   superseded rows may share the position
 
 revision_rounds             -- the atomic unit
   id, content_item_id, round_number int
@@ -191,6 +197,8 @@ revision_rounds             -- the atomic unit
   submitted_at, submitted_by     -- NULL until client submits
   status: open|addressed, resolved_at
   invoice_id                -- set when billed
+  unique (content_item_id, round_number)
+                            -- no two round-2 rows on one item
 
 revision_notes              -- children of a round
   id, round_id
@@ -434,7 +442,7 @@ Kelsey is phone-first for most of her portal use. The exception is bulk month-bu
 |---|---|
 | `extra_round_price` value | Not set |
 | Default deadline length | Not set — 3 days and 48 business hours both discussed |
-| Nav label, owner side | Not decided |
+| Nav label, owner side | **Decided** — "Content", route `/owner/content` |
 | Nav label, client side | Not decided |
 | Round 2+ framing and wording | Not decided — must not feel punitive |
 | Cloudflare account creation | Deferred until code is in development. Payment method to be the Amex under the LLC, not personal. |

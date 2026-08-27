@@ -55,6 +55,39 @@ export type FileType = "content" | "contract" | "invoice" | "other";
 export type SenderRole = "owner" | "client";
 export type TimeBlockCategory = "sonography" | "work_block" | "blocked";
 export type ExternalEventStatus = "confirmed" | "cancelled";
+/**
+ * Content & Approval unions (migration 015). Each mirrors a text + CHECK
+ * constraint in `supabase/migrations/015_content_approval.sql` — keep the
+ * two in sync by hand, there is no codegen.
+ */
+export type ContentCycleStatus = "drafting" | "in_review" | "locked";
+export type ContentItemStatus =
+  | "draft"
+  | "in_review"
+  | "changes_requested"
+  | "approved"
+  | "published";
+export type Platform =
+  | "instagram"
+  | "tiktok"
+  | "facebook"
+  | "youtube"
+  | "pinterest";
+export type PostFormat = "reel" | "feed" | "story" | "carousel";
+/**
+ * Where an asset physically lives. `'stream'` = Cloudflare Stream (video),
+ * `'supabase'` = the private `content-assets` Storage bucket (stills).
+ */
+export type AssetProvider = "stream" | "supabase";
+export type RevisionCategory =
+  | "clips"
+  | "caption"
+  | "music"
+  | "pacing"
+  | "text_overlay"
+  | "cover"
+  | "schedule"
+  | "other";
 
 export interface ClientRecord {
   id: string;
@@ -383,6 +416,109 @@ export interface ExternalEventRecord {
   updated_at: string;
 }
 
+/**
+ * One client, one month — the unit that gets released, deadlined, and
+ * locked. Added in migration 015.
+ */
+export interface ContentCycleRecord {
+  id: string;
+  client_id: string;
+  /** YYYY-MM-DD — always the FIRST of the month. A `date`, not a timestamp. */
+  month: string;
+  /** NULL until Release; a cycle in 'drafting' has no deadline yet. */
+  revision_deadline: string | null;
+  included_rounds: number;
+  /** Snapshot of the round-2+ price at cycle creation. NULL = not set. */
+  extra_round_price: number | null;
+  status: ContentCycleStatus;
+  created_at: string;
+}
+
+/**
+ * One scheduled post. `client_id` is denormalized alongside `cycle_id` so
+ * ownership checks stay single-table. Added in migration 015.
+ */
+export interface ContentItemRecord {
+  id: string;
+  client_id: string;
+  cycle_id: string;
+  /** PORTAL_TIMEZONE wall-clock instant — build via combineDateAndTimeInTimezone. */
+  scheduled_for: string;
+  platform: Platform;
+  format: PostFormat;
+  caption: string | null;
+  status: ContentItemStatus;
+  /** Round 1 is included; 2+ is billable. */
+  current_round: number;
+  approved_at: string | null;
+  /** Free text, not a FK — the deadline sweep writes the literal 'auto'. */
+  approved_by: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+/**
+ * One video or image on an item; carousels have several, ordered by
+ * `position`. Added in migration 015.
+ */
+export interface ContentAssetRecord {
+  id: string;
+  content_item_id: string;
+  /** 0-based ordering within a carousel. Single-asset items are 0. */
+  position: number;
+  kind: "video" | "image";
+  provider: AssetProvider;
+  /** Cloudflare Stream UID when provider='stream', storage key when 'supabase'. */
+  external_id: string;
+  /**
+   * Async-transcoding state (spec §3.5b). Defaults to 'ready' — only Stream
+   * video inserts as 'processing'; a Supabase still is playable on arrival.
+   * Release is blocked while any asset in the cycle is not 'ready'.
+   */
+  status: "processing" | "ready" | "failed";
+  duration_seconds: number | null;
+  width: number | null;
+  height: number | null;
+  bytes: number | null;
+  /** Soft version history: non-NULL = superseded by a revision. NULL = current. */
+  replaced_at: string | null;
+  created_at: string;
+}
+
+/**
+ * One batch of change requests on one item — the atomic billing unit.
+ * Added in migration 015.
+ */
+export interface RevisionRoundRecord {
+  id: string;
+  content_item_id: string;
+  round_number: number;
+  is_billable: boolean;
+  /** Snapshot of content_cycles.extra_round_price at submission. */
+  price: number | null;
+  /** NULL while the client is still assembling the round. */
+  submitted_at: string | null;
+  submitted_by: string | null;
+  status: "open" | "addressed";
+  resolved_at: string | null;
+  /** Set when the round is added to an invoice as a line item. */
+  invoice_id: string | null;
+  created_at: string;
+}
+
+/**
+ * One piece of feedback inside a round. Added in migration 015.
+ */
+export interface RevisionNoteRecord {
+  id: string;
+  round_id: string;
+  category: RevisionCategory;
+  /** Nullable; only meaningful as a scrubber position on a video asset. */
+  timestamp_seconds: number | null;
+  body: string;
+  created_at: string;
+}
+
 type Relationships = readonly {
   foreignKeyName: string;
   columns: string[];
@@ -427,6 +563,13 @@ export type Database = {
         GoogleSyncedCalendarRecord & Record<string, unknown>
       >;
       external_events: TableShape<ExternalEventRecord & Record<string, unknown>>;
+      content_cycles: TableShape<ContentCycleRecord & Record<string, unknown>>;
+      content_items: TableShape<ContentItemRecord & Record<string, unknown>>;
+      content_assets: TableShape<ContentAssetRecord & Record<string, unknown>>;
+      revision_rounds: TableShape<
+        RevisionRoundRecord & Record<string, unknown>
+      >;
+      revision_notes: TableShape<RevisionNoteRecord & Record<string, unknown>>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

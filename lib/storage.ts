@@ -1,12 +1,31 @@
 import { getSupabaseServiceClient } from "@/lib/supabase";
 
 /**
- * The single Supabase Storage bucket used for client-facing files
- * (deliverables, references, briefs, mood boards). Service-role only —
- * the bucket has no RLS, no public access. Reads and writes always go
- * through signed URLs minted server-side.
+ * The Supabase Storage bucket used for client-facing files (deliverables,
+ * references, briefs, mood boards). Service-role only — the bucket has no
+ * RLS, no public access. Reads and writes always go through signed URLs
+ * minted server-side.
+ *
+ * This is the DEFAULT bucket for every helper in this module; callers that
+ * do not pass a bucket behave exactly as they did before parameterization.
  */
 export const FILES_BUCKET = "client-files";
+
+/**
+ * The private bucket backing photo/still content assets (migration 015).
+ * Deliberately separate from FILES_BUCKET: content under review is
+ * work-in-progress and must not surface in the client-facing Files feature,
+ * which lists rows from the `files` table.
+ */
+export const CONTENT_ASSETS_BUCKET = "content-assets";
+
+/**
+ * Every bucket this module knows how to reach. Helpers take a
+ * `bucket: StorageBucket` argument, defaulted to FILES_BUCKET.
+ */
+export type StorageBucket =
+  | typeof FILES_BUCKET
+  | typeof CONTENT_ASSETS_BUCKET;
 
 /** Signed download URLs live one hour; long enough for a click-through. */
 const DOWNLOAD_URL_TTL_SECONDS = 3600;
@@ -51,11 +70,12 @@ export function buildStoragePath(clientId: string, filename: string): string {
  * try/catch and convert to an `ActionResult`.
  */
 export async function createSignedUploadUrl(
-  storagePath: string
+  storagePath: string,
+  bucket: StorageBucket = FILES_BUCKET
 ): Promise<{ signedUrl: string; token: string }> {
   const supabase = getSupabaseServiceClient();
   const { data, error } = await supabase.storage
-    .from(FILES_BUCKET)
+    .from(bucket)
     .createSignedUploadUrl(storagePath);
   if (error || !data) {
     throw new Error(
@@ -74,11 +94,12 @@ export async function createSignedUploadUrl(
  */
 export async function createSignedDownloadUrl(
   storagePath: string,
-  filename: string
+  filename: string,
+  bucket: StorageBucket = FILES_BUCKET
 ): Promise<string> {
   const supabase = getSupabaseServiceClient();
   const { data, error } = await supabase.storage
-    .from(FILES_BUCKET)
+    .from(bucket)
     .createSignedUrl(storagePath, DOWNLOAD_URL_TTL_SECONDS, {
       download: filename,
     });
@@ -94,7 +115,7 @@ export async function createSignedDownloadUrl(
  * Upload a server-generated buffer (PDF, etc.) directly to storage. The
  * buffer never leaves the server, so going through the signed-URL flow
  * (which is built for browser uploads) would be pointless. Used by the
- * invoice send/edit actions to write the generated PDF into the
+ * invoice send/edit actions to write the generated PDF into the default
  * `client-files` bucket.
  *
  * `upsert = true` overwrites an existing object at the same path; the
@@ -108,11 +129,12 @@ export async function uploadServerBuffer(
   storagePath: string,
   buffer: Buffer,
   mimeType: string,
-  upsert?: boolean
+  upsert?: boolean,
+  bucket: StorageBucket = FILES_BUCKET
 ): Promise<void> {
   const supabase = getSupabaseServiceClient();
   const { error } = await supabase.storage
-    .from(FILES_BUCKET)
+    .from(bucket)
     .upload(storagePath, buffer, {
       contentType: mimeType,
       upsert: upsert ?? false,
@@ -125,10 +147,13 @@ export async function uploadServerBuffer(
  * error. Per the Phase 5 contract, callers delete the DB row first; a
  * storage failure here is logged but does NOT roll back the row delete.
  */
-export async function deleteStorageObject(storagePath: string): Promise<void> {
+export async function deleteStorageObject(
+  storagePath: string,
+  bucket: StorageBucket = FILES_BUCKET
+): Promise<void> {
   const supabase = getSupabaseServiceClient();
   const { error } = await supabase.storage
-    .from(FILES_BUCKET)
+    .from(bucket)
     .remove([storagePath]);
   if (error) throw new Error(error.message);
 }
@@ -146,7 +171,8 @@ export async function deleteStorageObject(storagePath: string): Promise<void> {
  * client has.
  */
 export async function readUploadedObjectMetadata(
-  storagePath: string
+  storagePath: string,
+  bucket: StorageBucket = FILES_BUCKET
 ): Promise<{ mimeType: string; sizeBytes: number }> {
   const slash = storagePath.lastIndexOf("/");
   if (slash === -1) {
@@ -157,7 +183,7 @@ export async function readUploadedObjectMetadata(
 
   const supabase = getSupabaseServiceClient();
   const { data, error } = await supabase.storage
-    .from(FILES_BUCKET)
+    .from(bucket)
     .list(prefix, { limit: 1, search: filename });
   if (error) throw new Error(error.message);
 
