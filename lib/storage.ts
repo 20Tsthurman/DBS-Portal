@@ -8,9 +8,6 @@ import { getSupabaseServiceClient } from "@/lib/supabase";
  */
 export const FILES_BUCKET = "client-files";
 
-/** Signed upload URLs live 60s; clients PUT immediately after minting. */
-const UPLOAD_URL_TTL_SECONDS = 60;
-
 /** Signed download URLs live one hour; long enough for a click-through. */
 const DOWNLOAD_URL_TTL_SECONDS = 3600;
 
@@ -45,6 +42,10 @@ export function buildStoragePath(clientId: string, filename: string): string {
  * Mint a one-shot signed upload URL the browser can PUT to directly.
  * The returned `token` is what `uploadToSignedUrl` expects if a caller
  * ever wants to use the SDK helper rather than a raw `fetch(... PUT)`.
+ *
+ * The URL lifetime is fixed at two hours by Supabase Storage —
+ * `createSignedUploadUrl` accepts only `{ upsert }`, no TTL argument —
+ * so it is not tunable from here.
  *
  * Throws on Supabase error — callers wrap this in their server-action
  * try/catch and convert to an `ActionResult`.
