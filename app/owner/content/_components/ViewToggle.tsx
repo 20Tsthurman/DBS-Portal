@@ -9,9 +9,9 @@ interface ViewToggleProps {
 }
 
 /**
- * Calendar / List switch. Link-based like `ClientFilterPills`, and rendered
- * on the same row as the month stepper — a view is a filter on the same URL,
- * so the toggle preserves month and client and vice versa.
+ * Calendar / List switch, rendered on the same row as the month stepper —
+ * a view is a filter on the same URL, so the toggle preserves month and
+ * client and vice versa.
  */
 export function ViewToggle({ view, monthKey, clientId }: ViewToggleProps) {
   const items: Array<{ view: ContentView; label: string }> = [

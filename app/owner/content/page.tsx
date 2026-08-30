@@ -1,5 +1,5 @@
 import { currentMonthKey } from "@/app/owner/calendar/_lib/timezone";
-import { ClientFilterPills } from "./_components/ClientFilterPills";
+import { ClientFilterSelect } from "./_components/ClientFilterSelect";
 import { ContentBoard } from "./_components/ContentBoard";
 import { MonthStepper } from "./_components/MonthStepper";
 import { ViewToggle } from "./_components/ViewToggle";
@@ -68,17 +68,19 @@ export default async function OwnerContentPage({ searchParams }: PageProps) {
         </p>
       </header>
 
-      <div className="flex flex-col">
-        <div className="flex flex-wrap items-center justify-between gap-x-4">
-          <MonthStepper monthKey={monthKey} clientId={clientId} view={view} />
-          <ViewToggle view={view} monthKey={monthKey} clientId={clientId} />
-        </div>
-        <ClientFilterPills
+      {/* One toolbar row at desktop width; the client filter drops to its
+          own full-width row on mobile via its order-last/w-full classes. */}
+      <div className="flex flex-wrap items-center gap-x-4">
+        <MonthStepper monthKey={monthKey} clientId={clientId} view={view} />
+        <ClientFilterSelect
           clients={clients}
           activeClientId={clientId}
           monthKey={monthKey}
           view={view}
         />
+        <div className="ml-auto">
+          <ViewToggle view={view} monthKey={monthKey} clientId={clientId} />
+        </div>
       </div>
 
       <ContentBoard
