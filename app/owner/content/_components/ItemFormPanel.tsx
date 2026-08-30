@@ -882,45 +882,52 @@ export function ItemFormPanel({
             style={formColStyle}
           >
           <div className="flex-1 space-y-5">
-            <div className="flex gap-4">
-              <div style={{ flex: 1 }}>
-                <label htmlFor="item-date" style={labelStyle}>
-                  Date
-                </label>
-                <input
-                  id="item-date"
-                  type="date"
-                  required
-                  value={values.date}
-                  onChange={(e) =>
-                    setValues((v) => ({ ...v, date: e.target.value }))
-                  }
-                  onFocus={applyFocus}
-                  onBlur={clearFocus}
-                  style={fieldStyle}
-                />
+            {/* Row and helper share one space-y child so the helper sits in
+                normal flow under the inputs. (Its old `marginTop: -12` was
+                written against v4 space-y semantics; under v3, space-y puts
+                margin-TOP on following siblings, so the inline value replaced
+                +20px outright and the text rode up over the time field.) */}
+            <div>
+              <div className="flex gap-4">
+                <div style={{ flex: 1 }}>
+                  <label htmlFor="item-date" style={labelStyle}>
+                    Date
+                  </label>
+                  <input
+                    id="item-date"
+                    type="date"
+                    required
+                    value={values.date}
+                    onChange={(e) =>
+                      setValues((v) => ({ ...v, date: e.target.value }))
+                    }
+                    onFocus={applyFocus}
+                    onBlur={clearFocus}
+                    style={fieldStyle}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label htmlFor="item-time" style={labelStyle}>
+                    Time
+                  </label>
+                  <input
+                    id="item-time"
+                    type="time"
+                    required
+                    value={values.time}
+                    onChange={(e) =>
+                      setValues((v) => ({ ...v, time: e.target.value }))
+                    }
+                    onFocus={applyFocus}
+                    onBlur={clearFocus}
+                    style={fieldStyle}
+                  />
+                </div>
               </div>
-              <div style={{ flex: 1 }}>
-                <label htmlFor="item-time" style={labelStyle}>
-                  Time
-                </label>
-                <input
-                  id="item-time"
-                  type="time"
-                  required
-                  value={values.time}
-                  onChange={(e) =>
-                    setValues((v) => ({ ...v, time: e.target.value }))
-                  }
-                  onFocus={applyFocus}
-                  onBlur={clearFocus}
-                  style={fieldStyle}
-                />
-              </div>
+              <p style={helperStyle}>
+                Central time. Must fall inside the cycle&apos;s month.
+              </p>
             </div>
-            <p style={{ ...helperStyle, marginTop: -12 }}>
-              Central time. Must fall inside the cycle&apos;s month.
-            </p>
 
             <div className="flex gap-4">
               <div style={{ flex: 1 }}>
@@ -999,9 +1006,11 @@ export function ItemFormPanel({
             <div style={mediaSectionStyle}>
               <span style={labelStyle}>Media</span>
               {!activeItemId ? (
-                <p style={helperStyle}>
+                /* Same dashed frame the add tiles use, so the section reads
+                   as "media goes here" before it can hold any. */
+                <div style={mediaEmptyHintStyle}>
                   Save the post first — media attaches to it once it exists.
-                </p>
+                </div>
               ) : (
                 <>
                   <p style={helperStyle}>
@@ -1014,90 +1023,140 @@ export function ItemFormPanel({
                     <p style={mutedNoteStyle}>Loading media…</p>
                   )}
 
-                  {previews.length > 0 && (
-                    <div style={thumbGridStyle}>
-                      {previews.map((preview, index) => (
-                        <figure key={preview.id} style={thumbFigureStyle}>
-                          {preview.url && preview.status === "ready" &&
-                            preview.kind === "video" ? (
-                            /* Ready video: the signed poster frame, pressable.
-                               A button rather than a click handler on the image
-                               so it is reachable by keyboard and announces
-                               itself. Pressing opens playback — beside the form
-                               in the widened panel on desktop, the full-screen
-                               overlay on mobile. The player never renders in
-                               this ~110px column, where it was unwatchable. */
-                            <button
-                              type="button"
-                              onClick={() => void handlePlay(preview.id)}
-                              style={thumbPlayButtonStyle}
-                              aria-label={`Play video ${index + 1}`}
-                            >
-                              <img
-                                src={preview.url}
-                                alt=""
-                                style={thumbImgStyle}
-                                onError={handlePreviewImageError}
-                              />
-                              <span aria-hidden="true" style={playOverlayStyle}>
-                                ▶
-                              </span>
-                            </button>
-                          ) : preview.url ? (
-                            /* Plain <img>: these are short-lived signed URLs
-                               against a private bucket, so the Image optimizer
-                               has no stable host to whitelist. */
+                  {/* One grid holds the media AND the two add tiles, so the
+                      way in lives where the result lands — and an empty post
+                      shows two inviting tiles instead of a bare button row. */}
+                  <div style={thumbGridStyle}>
+                    {previews.map((preview, index) => (
+                      <figure key={preview.id} style={thumbFigureStyle}>
+                        {preview.url && preview.status === "ready" &&
+                          preview.kind === "video" ? (
+                          /* Ready video: the signed poster frame, pressable.
+                             A button rather than a click handler on the image
+                             so it is reachable by keyboard and announces
+                             itself. Pressing opens playback — beside the form
+                             in the widened panel on desktop, the full-screen
+                             overlay on mobile. The player never renders in
+                             this ~110px column, where it was unwatchable. */
+                          <button
+                            type="button"
+                            onClick={() => void handlePlay(preview.id)}
+                            style={thumbPlayButtonStyle}
+                            aria-label={`Play video ${index + 1}`}
+                          >
                             <img
                               src={preview.url}
-                              alt={`Photo ${index + 1}`}
+                              alt=""
                               style={thumbImgStyle}
                               onError={handlePreviewImageError}
                             />
-                          ) : (
-                            /* Nothing to show as an image: a video that is
-                               still processing or has failed has no frame to
-                               ask Cloudflare for, and a photo whose object went
-                               missing has none at all. The tile is still
-                               rendered either way. Omitting it would make an
-                               uploaded video invisible while its row holds a
-                               carousel slot, which reads as a lost upload and
-                               invites a second one into a position already
-                               taken. */
-                            <div
-                              role="img"
-                              aria-label={`${tileLabel(preview, videoUpload)}, position ${index + 1}`}
-                              style={
-                                preview.status === "failed"
-                                  ? thumbFailedPlaceholderStyle
-                                  : thumbPlaceholderStyle
-                              }
-                            >
-                              <span aria-hidden="true" style={placeholderMarkStyle}>
-                                {preview.status === "failed"
-                                  ? "!"
-                                  : preview.kind === "video"
-                                    ? "▶"
-                                    : "!"}
-                              </span>
-                              <span style={placeholderTextStyle}>
-                                {tileLabel(preview, videoUpload)}
-                              </span>
-                            </div>
-                          )}
-                          <figcaption style={thumbCaptionStyle}>
-                            <span>#{index + 1}</span>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteAsset(preview)}
-                              style={thumbDeleteStyle}
-                            >
-                              Remove
-                            </button>
-                          </figcaption>
-                        </figure>
-                      ))}
-                    </div>
-                  )}
+                            <span aria-hidden="true" style={playOverlayStyle}>
+                              ▶
+                            </span>
+                          </button>
+                        ) : preview.url ? (
+                          /* Plain <img>: these are short-lived signed URLs
+                             against a private bucket, so the Image optimizer
+                             has no stable host to whitelist. */
+                          <img
+                            src={preview.url}
+                            alt={`Photo ${index + 1}`}
+                            style={thumbImgStyle}
+                            onError={handlePreviewImageError}
+                          />
+                        ) : (
+                          /* Nothing to show as an image: a video that is
+                             still processing or has failed has no frame to
+                             ask Cloudflare for, and a photo whose object went
+                             missing has none at all. The tile is still
+                             rendered either way. Omitting it would make an
+                             uploaded video invisible while its row holds a
+                             carousel slot, which reads as a lost upload and
+                             invites a second one into a position already
+                             taken. */
+                          <div
+                            role="img"
+                            aria-label={`${tileLabel(preview, videoUpload)}, position ${index + 1}`}
+                            style={
+                              preview.status === "failed"
+                                ? thumbFailedPlaceholderStyle
+                                : thumbPlaceholderStyle
+                            }
+                          >
+                            <span aria-hidden="true" style={placeholderMarkStyle}>
+                              {preview.status === "failed"
+                                ? "!"
+                                : preview.kind === "video"
+                                  ? "▶"
+                                  : "!"}
+                            </span>
+                            <span style={placeholderTextStyle}>
+                              {tileLabel(preview, videoUpload)}
+                            </span>
+                          </div>
+                        )}
+                        <span aria-hidden="true" style={orderBadgeStyle}>
+                          {index + 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteAsset(preview)}
+                          aria-label={`Remove ${
+                            preview.kind === "video" ? "video" : "photo"
+                          } ${index + 1}`}
+                          style={removeChipStyle}
+                        >
+                          ×
+                        </button>
+                      </figure>
+                    ))}
+
+                    {/* The photo tile doubles as the progress readout while
+                        its upload runs — the one moment it can't be pressed
+                        anyway. */}
+                    <button
+                      type="button"
+                      onClick={handlePickPhoto}
+                      disabled={uploading}
+                      style={{
+                        ...addTileStyle,
+                        cursor: uploading ? "default" : "pointer",
+                      }}
+                    >
+                      {uploading ? (
+                        <>
+                          <span style={addTileMarkStyle}>
+                            {Math.round(uploadProgress * 100)}%
+                          </span>
+                          <span style={addTileLabelStyle}>
+                            {uploadProgress >= 1 ? "Finalizing" : "Uploading"}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span aria-hidden="true" style={addTileMarkStyle}>
+                            +
+                          </span>
+                          <span style={addTileLabelStyle}>Photo</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handlePickVideo}
+                      disabled={addVideoDisabled}
+                      style={{
+                        ...addTileStyle,
+                        opacity: addVideoDisabled ? 0.5 : 1,
+                        cursor: addVideoDisabled ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      <span aria-hidden="true" style={addTileMarkStyle}>
+                        +
+                      </span>
+                      <span style={addTileLabelStyle}>Video</span>
+                    </button>
+                  </div>
 
                   {failedPreviews.length > 0 && (
                     <div role="alert" style={assetFailureStyle}>
@@ -1111,55 +1170,62 @@ export function ItemFormPanel({
                     </div>
                   )}
 
-                  {uploading && (
-                    <p style={mutedNoteStyle}>
-                      {uploadProgress >= 1
-                        ? "Finalizing…"
-                        : `Uploading ${Math.round(uploadProgress * 100)}%`}
-                    </p>
-                  )}
-
                   {videoUpload && (
-                    <div style={videoStatusStyle}>
-                      {videoUpload.phase === "paused" ? (
-                        <>
-                          <span style={videoStatusTextStyle}>
-                            {videoUpload.needsFile
-                              ? videoUpload.filename
-                              : `${videoUpload.filename} — paused at ${Math.round(
-                                  videoUpload.progress * 100
-                                )}%`}
-                          </span>
-                          {videoUpload.recoverable ? (
-                            <button
-                              type="button"
-                              onClick={handleContinueVideo}
-                              style={addMediaStyle}
-                            >
+                    <div style={videoUploadBoxStyle}>
+                      <div style={videoStatusStyle}>
+                        {videoUpload.phase === "paused" ? (
+                          <>
+                            <span style={videoStatusTextStyle}>
                               {videoUpload.needsFile
-                                ? "Pick the file to continue"
-                                : "Resume upload"}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={dismissVideoUpload}
-                              style={addMediaStyle}
-                            >
-                              Dismiss
-                            </button>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <UploadProgressIndicator
-                            fraction={videoUpload.progress}
-                          />
-                          <span style={videoStatusTextStyle}>
-                            {videoUpload.filename}
-                          </span>
-                        </>
-                      )}
+                                ? videoUpload.filename
+                                : `${videoUpload.filename} — paused at ${Math.round(
+                                    videoUpload.progress * 100
+                                  )}%`}
+                            </span>
+                            {videoUpload.recoverable ? (
+                              <button
+                                type="button"
+                                onClick={handleContinueVideo}
+                                style={addMediaStyle}
+                              >
+                                {videoUpload.needsFile
+                                  ? "Pick the file to continue"
+                                  : "Resume upload"}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={dismissVideoUpload}
+                                style={addMediaStyle}
+                              >
+                                Dismiss
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <UploadProgressIndicator
+                              fraction={videoUpload.progress}
+                            />
+                            <span style={videoStatusTextStyle}>
+                              {videoUpload.filename}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      {/* Says exactly what the platform does and nothing
+                          more. There is no background upload API in Safari:
+                          a closed tab, a reload, or a backgrounded app on
+                          iPhone stops the transfer. What survives is the
+                          byte offset. Lives inside the upload box — while a
+                          transfer is running is the only time the warning
+                          can change what she does next. */}
+                      <p style={videoUploadNoteStyle}>
+                        Video uploads pick up where they stopped. They only
+                        move while this screen is open — closing the tab,
+                        reloading, or switching apps on a phone pauses the
+                        upload until you come back to it.
+                      </p>
                     </div>
                   )}
 
@@ -1187,44 +1253,6 @@ export function ItemFormPanel({
                     onChange={handleVideoSelected}
                     style={{ display: "none" }}
                   />
-
-                  <div style={mediaActionsStyle}>
-                    <button
-                      type="button"
-                      onClick={handlePickPhoto}
-                      disabled={uploading}
-                      style={{
-                        ...addMediaStyle,
-                        opacity: uploading ? 0.6 : 1,
-                        cursor: uploading ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      Add photo
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handlePickVideo}
-                      disabled={addVideoDisabled}
-                      style={{
-                        ...addMediaStyle,
-                        opacity: addVideoDisabled ? 0.6 : 1,
-                        cursor: addVideoDisabled ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      Add video
-                    </button>
-                  </div>
-
-                  {/* Says exactly what the platform does and nothing more.
-                      There is no background upload API in Safari: a closed
-                      tab, a reload, or a backgrounded app on iPhone stops the
-                      transfer. What survives is the byte offset. */}
-                  <p style={mutedNoteStyle}>
-                    Video uploads pick up where they stopped. They only move
-                    while this screen is open — closing the tab, reloading, or
-                    switching apps on a phone pauses the upload until you come
-                    back to it.
-                  </p>
 
                   {(mediaError || videoUpload?.error) && (
                     <div role="alert" style={errorStyle}>
@@ -1313,8 +1341,10 @@ const thumbGridStyle: CSSProperties = {
   margin: "12px 0",
 };
 
+// `relative` anchors the order badge and remove chip to the tile's corners.
 const thumbFigureStyle: CSSProperties = {
   margin: 0,
+  position: "relative",
   border: "1px solid var(--border)",
   backgroundColor: "var(--surface-raised)",
 };
@@ -1327,23 +1357,45 @@ const thumbImgStyle: CSSProperties = {
   objectFit: "cover",
 };
 
-const thumbCaptionStyle: CSSProperties = {
-  display: "flex",
+/**
+ * Corner chips over the tile image. The same dark scrim as playOverlayStyle,
+ * for the same reason — they sit on photographs, so they carry their own
+ * contrast instead of borrowing the tile's.
+ */
+const orderBadgeStyle: CSSProperties = {
+  position: "absolute",
+  top: 6,
+  left: 6,
+  minWidth: 20,
+  height: 20,
+  display: "inline-flex",
   alignItems: "center",
-  justifyContent: "space-between",
-  gap: 4,
-  padding: "4px 6px",
-  fontSize: 11,
-  color: "var(--text-muted)",
-};
-
-const thumbDeleteStyle: CSSProperties = {
-  background: "transparent",
-  border: "none",
-  padding: 0,
+  justifyContent: "center",
+  padding: "0 5px",
   fontSize: 11,
   fontWeight: 600,
-  color: "var(--status-danger)",
+  lineHeight: 1,
+  color: "#fff",
+  backgroundColor: "rgba(0,0,0,0.55)",
+};
+
+// Painted after the play button in DOM order, so it wins the corner it
+// covers — a press on the chip never starts playback.
+const removeChipStyle: CSSProperties = {
+  position: "absolute",
+  top: 6,
+  right: 6,
+  width: 24,
+  height: 24,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  border: "none",
+  padding: 0,
+  fontSize: 15,
+  lineHeight: 1,
+  color: "#fff",
+  backgroundColor: "rgba(0,0,0,0.55)",
   cursor: "pointer",
 };
 
@@ -1353,6 +1405,7 @@ const mutedNoteStyle: CSSProperties = {
   color: "var(--text-muted)",
 };
 
+// Resume/dismiss actions inside the video-upload box.
 const addMediaStyle: CSSProperties = {
   background: "transparent",
   border: "1px solid var(--border)",
@@ -1363,6 +1416,68 @@ const addMediaStyle: CSSProperties = {
   letterSpacing: "0.04em",
   textTransform: "uppercase",
   color: "var(--accent)",
+  cursor: "pointer",
+};
+
+/**
+ * The add-photo / add-video tiles. Same cell and 9:16 ratio as the media
+ * tiles they sit among; dashed where real media is solid, so they read as
+ * "goes here" rather than content.
+ */
+const addTileStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 6,
+  width: "100%",
+  aspectRatio: "9 / 16",
+  padding: 6,
+  border: "1px dashed var(--border)",
+  background: "transparent",
+  color: "var(--accent)",
+};
+
+const addTileMarkStyle: CSSProperties = {
+  fontSize: 20,
+  lineHeight: 1,
+  fontWeight: 500,
+};
+
+const addTileLabelStyle: CSSProperties = {
+  fontSize: 10,
+  fontWeight: 600,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+};
+
+// Dashed like the add tiles it stands in for, before a post exists to
+// attach media to.
+const mediaEmptyHintStyle: CSSProperties = {
+  margin: "12px 0 4px",
+  padding: "20px 16px",
+  border: "1px dashed var(--border)",
+  fontSize: 12,
+  lineHeight: 1.5,
+  color: "var(--text-muted)",
+  textAlign: "center",
+};
+
+const videoUploadBoxStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  margin: "8px 0",
+  padding: "10px 12px",
+  border: "1px solid var(--border)",
+  background: "#FFFFFF",
+};
+
+const videoUploadNoteStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 12,
+  lineHeight: 1.5,
+  color: "var(--text-muted)",
 };
 
 const footerStyle: CSSProperties = {
@@ -1459,19 +1574,12 @@ const videoStatusStyle: CSSProperties = {
   alignItems: "center",
   flexWrap: "wrap",
   gap: 10,
-  margin: "8px 0",
 };
 
 const videoStatusTextStyle: CSSProperties = {
   fontSize: 12,
   color: "var(--text-muted)",
   overflowWrap: "anywhere",
-};
-
-const mediaActionsStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
 };
 
 const cancelStyle: CSSProperties = {
