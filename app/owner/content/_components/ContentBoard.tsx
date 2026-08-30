@@ -14,7 +14,10 @@ import {
   deleteContentItemAction,
 } from "../_actions";
 import { cycleStatusLabelFor, cycleStatusToneFor } from "../_lib/format";
+import type { ContentCalendarEvent } from "../_lib/calendarEvents";
+import type { ContentView } from "../_lib/href";
 import type { ContentItemWithAssets, CycleWithClient } from "../_lib/queries";
+import { ContentCalendar } from "./ContentCalendar";
 
 interface ContentBoardProps {
   items: ContentItemWithAssets[];
@@ -23,6 +26,12 @@ interface ContentBoardProps {
   clientId: string | null;
   clientName: string;
   monthKey: string;
+  view: ContentView;
+  /**
+   * Calendar events for `view="calendar"` — mapped and thumb-minted
+   * server-side by the page. Empty in list view, where they aren't needed.
+   */
+  events: ContentCalendarEvent[];
 }
 
 /**
@@ -42,6 +51,8 @@ export function ContentBoard({
   clientId,
   clientName,
   monthKey,
+  view,
+  events,
 }: ContentBoardProps) {
   const router = useRouter();
   const [panel, setPanel] = useState<OpenPanel>(null);
@@ -164,12 +175,26 @@ export function ContentBoard({
         </div>
       )}
 
-      <ContentItemsList
-        items={items}
-        showClient={allClients}
-        onEdit={(item) => setPanel({ kind: "item", item })}
-        onDelete={(item) => setConfirmDeleteItem(item)}
-      />
+      {view === "calendar" ? (
+        <ContentCalendar
+          monthKey={monthKey}
+          clientId={clientId}
+          events={events}
+          onEditItem={(itemId) => {
+            // Tiles carry only the item id; the full item (what the panel
+            // needs) is looked up here so events stay lean.
+            const item = items.find((i) => i.id === itemId);
+            if (item) setPanel({ kind: "item", item });
+          }}
+        />
+      ) : (
+        <ContentItemsList
+          items={items}
+          showClient={allClients}
+          onEdit={(item) => setPanel({ kind: "item", item })}
+          onDelete={(item) => setConfirmDeleteItem(item)}
+        />
+      )}
 
       <CycleFormPanel
         open={panel?.kind === "cycle"}

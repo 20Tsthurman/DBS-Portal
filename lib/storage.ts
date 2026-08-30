@@ -112,6 +112,47 @@ export async function createSignedDownloadUrl(
 }
 
 /**
+ * Batch variant of `createSignedDownloadUrl` — one Supabase round-trip for
+ * the whole list instead of one per path. Added in Phase 3 for the content
+ * calendar's photo thumbnails, where the all-clients month view can need
+ * ~100 URLs on a single render.
+ *
+ * Two deliberate differences from the singular helper:
+ *   - No Content-Disposition filename. `createSignedUrls` only takes one
+ *     `download` option for the whole batch, and these URLs feed `<img>`
+ *     tags, not download links.
+ *   - Per-path failures don't throw. Supabase reports them per-row, so a
+ *     missing object maps to `null` and the rest of the batch survives.
+ *     Only a whole-call failure throws.
+ *
+ * Returns a map of storage path → signed URL (or null for that path's
+ * failure). Callers treat a missing/null entry as "no image".
+ */
+export async function createSignedDownloadUrls(
+  storagePaths: string[],
+  bucket: StorageBucket = FILES_BUCKET
+): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  if (storagePaths.length === 0) return out;
+
+  const supabase = getSupabaseServiceClient();
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .createSignedUrls(storagePaths, DOWNLOAD_URL_TTL_SECONDS);
+  if (error || !data) {
+    throw new Error(
+      error?.message ?? "Failed to create signed download URLs"
+    );
+  }
+  for (const row of data) {
+    if (row.path) {
+      out.set(row.path, row.error ? null : row.signedUrl);
+    }
+  }
+  return out;
+}
+
+/**
  * Upload a server-generated buffer (PDF, etc.) directly to storage. The
  * buffer never leaves the server, so going through the signed-URL flow
  * (which is built for browser uploads) would be pointless. Used by the

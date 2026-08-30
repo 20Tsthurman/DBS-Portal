@@ -67,7 +67,13 @@ export function ContentItemsList({
   return (
     <div className="flex flex-col gap-8">
       {groups.map((group) => (
-        <section key={group.dateKey}>
+        // The id anchors the calendar view's day links (#day-YYYY-MM-DD);
+        // scroll-margin keeps the heading clear of the viewport edge.
+        <section
+          key={group.dateKey}
+          id={`day-${group.dateKey}`}
+          style={{ scrollMarginTop: 16 }}
+        >
           <h2 style={dateHeadingStyle}>
             {fullDateLabelForDateKey(group.dateKey)}
           </h2>

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
-import { contentHref } from "../_lib/href";
+import { contentHref, type ContentView } from "../_lib/href";
 import type { ContentClientOption } from "../_lib/queries";
 
 interface ClientFilterPillsProps {
@@ -8,6 +8,7 @@ interface ClientFilterPillsProps {
   /** null = the "All clients" pill is active. */
   activeClientId: string | null;
   monthKey: string;
+  view: ContentView;
 }
 
 /**
@@ -23,6 +24,7 @@ export function ClientFilterPills({
   clients,
   activeClientId,
   monthKey,
+  view,
 }: ClientFilterPillsProps) {
   const items: Array<{ id: string | null; label: string }> = [
     { id: null, label: "All clients" },
@@ -36,7 +38,7 @@ export function ClientFilterPills({
         return (
           <Link
             key={item.id ?? "all"}
-            href={contentHref({ monthKey, clientId: item.id })}
+            href={contentHref({ monthKey, clientId: item.id, view })}
             aria-pressed={isActive}
             style={{
               ...pillStyle,
