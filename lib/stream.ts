@@ -199,11 +199,9 @@ export interface StreamDirectUpload {
  *
  * Two vendor constraints the caller must know about:
  *   - The returned `uploadUrl` accepts exactly one `POST multipart/form-data`
- *     of at most 200 MB. It is NOT a tus endpoint. The resumable path in
- *     slice 2.3 is a different Cloudflare call (`POST /stream?direct_user=true`
- *     with `Tus-Resumable`/`Upload-Length`/`Upload-Metadata` headers, upload
- *     URL returned in the `Location` response header), so it needs its own
- *     function rather than an argument here.
+ *     of at most 200 MB. It is NOT a tus endpoint. The resumable path is a
+ *     separate Cloudflare call, implemented as `createResumableUploadUrl`
+ *     below; that is the one the review-video upload path uses.
  *   - No `expiry` is sent, so Cloudflare applies its default link lifetime
  *     (observed as 24h via the `uploadExpiry` field). With a 120s reservation
  *     an abandoned link holds 0.2% of the 1,000-minute block for a day, which
@@ -234,6 +232,184 @@ export async function createDirectUploadUrl(): Promise<StreamDirectUpload> {
   }
 
   return { uploadUrl: result.uploadURL, uid: result.uid };
+}
+
+// ---------------------------------------------------------------------------
+// Resumable (tus) direct creator upload — slice 2.3
+// ---------------------------------------------------------------------------
+
+/** The only tus protocol version Cloudflare's Stream endpoint speaks. */
+const TUS_RESUMABLE_VERSION = "1.0.0";
+
+export interface StreamResumableUpload {
+  /**
+   * One-time tus endpoint the BROWSER uploads to (HEAD for the offset, PATCH
+   * for each chunk). Never proxied through our server — that is the whole
+   * point (spec §3.6, Vercel's ~4.5 MB body limit).
+   */
+  uploadUrl: string;
+  /** The Stream video UID. Store this on `content_assets.external_id`. */
+  uid: string;
+}
+
+/**
+ * Build the tus `Upload-Metadata` header.
+ *
+ * Format is a comma-separated list of `key base64(value)` pairs. Two keys are
+ * sent, and both are load-bearing:
+ *
+ *   - `maxDurationSeconds` — base64 of MAX_UPLOAD_DURATION_SECONDS. Derived
+ *     from the constant rather than hardcoded so the cap cannot drift between
+ *     the two upload paths; at 120 this renders as `MTIw`.
+ *   - `requiresignedurls` — a VALUELESS key, which the tus spec allows and
+ *     which is how Cloudflare expects this flag. It is the tus-path
+ *     equivalent of `requireSignedURLs: true` in the JSON body of
+ *     `createDirectUploadUrl`, and it is not optional: spec §3.5a requires it
+ *     on every video, and setting it at creation means the video is never
+ *     briefly public between upload and a follow-up PATCH. Note the all
+ *     lowercase spelling — Cloudflare's metadata key is NOT the camelCase
+ *     `requireSignedURLs` used in the JSON body, and an unrecognized metadata
+ *     key is ignored rather than rejected, so a misspelling here would ship a
+ *     public video with nothing anywhere reporting a problem.
+ *
+ * No `expiry` key is sent, matching `createDirectUploadUrl`: Cloudflare's
+ * default link lifetime applies, and the permitted `expiry` range is not
+ * documented well enough to tighten blind.
+ */
+function buildUploadMetadata(): string {
+  const maxDuration = Buffer.from(
+    String(MAX_UPLOAD_DURATION_SECONDS),
+    "utf8"
+  ).toString("base64");
+  return `maxDurationSeconds ${maxDuration},requiresignedurls`;
+}
+
+/**
+ * True when `uid` appears as a path segment of the tus `Location` URL.
+ *
+ * Matched against ANY segment rather than the last one: the observed shape is
+ * `https://upload.videodelivery.net/tus/<uid>?tusv2=true`, but pinning the
+ * position would turn a harmless vendor URL reshuffle into an outage.
+ */
+function locationCarriesUid(location: string, uid: string): boolean {
+  let path: string;
+  try {
+    path = new URL(location).pathname;
+  } catch {
+    // A relative Location is legal per tus; fall back to the raw value with
+    // any query string trimmed off.
+    path = location.split("?")[0];
+  }
+  return path.split("/").some((segment) => segment === uid);
+}
+
+/**
+ * Mint a RESUMABLE (tus) Direct Creator Upload and reserve the video's UID.
+ *
+ * This is the sibling of `createDirectUploadUrl`, not a variant of it, and it
+ * deliberately does NOT go through `callStreamApi`. Two reasons, both
+ * structural rather than stylistic:
+ *   - `callStreamApi` is JSON in, JSON envelope out. A tus creation responds
+ *     `201` with an EMPTY body and puts everything that matters in response
+ *     HEADERS, which `callStreamApi` never reads.
+ *   - The request carries no JSON body at all; its parameters are headers
+ *     (`Upload-Length`, `Upload-Metadata`).
+ * Sharing `requireEnv` and `accountStreamUrl` keeps the account/token
+ * plumbing in one place, which is the part that actually matters.
+ *
+ * Why tus at all, when `createDirectUploadUrl` already exists: that endpoint
+ * takes exactly one `POST multipart/form-data` and a dropped connection
+ * restarts the whole file. Spec §3.7 says a stalled upload on iPhone/Safari
+ * is the NORMAL case here, so the review-video path needs an upload that can
+ * be resumed from its byte offset, which is what tus buys.
+ *
+ * `sizeBytes` is required because tus `Upload-Length` is required at
+ * creation. Deferred-length uploads exist in the protocol, but Cloudflare
+ * uses the declared length to size the reservation, so it is always declared.
+ *
+ * There is no in-band `success: false` check here the way `callStreamApi`
+ * does one — a successful tus creation carries no envelope to check. The
+ * failure path re-parses the body because Cloudflare DOES return its normal
+ * JSON envelope on a non-2xx, and those error codes are the only useful
+ * diagnostic when a token is wrong or the account is out of storage.
+ *
+ * The UID is returned before a single byte is uploaded, and the caller
+ * inserts `content_assets` at THAT point rather than after the upload
+ * finishes. That is deliberate: an upload that completes and then fails to be
+ * recorded leaves a fully-billed video that nothing in the app can find —
+ * spec §3.5c's silent leak, and the one failure mode with no recovery path. A
+ * row minted here and never uploaded to is the harmless inverse; Cloudflare
+ * releases the duration reservation when the link expires.
+ *
+ * Throws on missing env, a non-positive size, non-2xx, a missing `Location`
+ * or `stream-media-id` header, or a UID that disagrees with the one embedded
+ * in the upload URL.
+ */
+export async function createResumableUploadUrl(
+  sizeBytes: number
+): Promise<StreamResumableUpload> {
+  if (!Number.isInteger(sizeBytes) || sizeBytes <= 0) {
+    throw new Error(
+      `Cloudflare Stream tus upload requires a positive integer Upload-Length, got ${sizeBytes}`
+    );
+  }
+
+  const apiToken = requireEnv("CLOUDFLARE_STREAM_TOKEN");
+
+  const res = await fetch(accountStreamUrl("?direct_user=true"), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+      "Tus-Resumable": TUS_RESUMABLE_VERSION,
+      "Upload-Length": String(sizeBytes),
+      "Upload-Metadata": buildUploadMetadata(),
+    },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const raw = await res.text();
+    let envelope: StreamEnvelope<unknown> | null = null;
+    if (raw.trim().length > 0) {
+      try {
+        envelope = JSON.parse(raw) as StreamEnvelope<unknown>;
+      } catch {
+        envelope = null;
+      }
+    }
+    throw new Error(
+      `Cloudflare Stream tus upload creation failed: HTTP ${res.status}${describeErrors(envelope)}`
+    );
+  }
+
+  const uploadUrl = res.headers.get("Location");
+  const uid = res.headers.get("stream-media-id");
+
+  if (!uploadUrl) {
+    throw new Error(
+      "Cloudflare Stream tus upload creation returned no Location header"
+    );
+  }
+  if (!uid) {
+    throw new Error(
+      "Cloudflare Stream tus upload creation returned no stream-media-id header"
+    );
+  }
+
+  // Belt and braces on the one value that can never be wrong. `external_id`
+  // is the ONLY pointer from Postgres back to the video (spec §3.5c — no
+  // foreign key, nothing reconciles), so storing a UID that does not name the
+  // video the bytes land in produces a row that can never be played and a
+  // video that can never be deleted. Both headers describe the same creation,
+  // so a disagreement means the vendor contract moved, and the right response
+  // is to fail loudly before anything is persisted.
+  if (!locationCarriesUid(uploadUrl, uid)) {
+    throw new Error(
+      `Cloudflare Stream tus upload URL does not carry uid ${uid} — refusing to persist a mismatched external_id`
+    );
+  }
+
+  return { uploadUrl, uid };
 }
 
 /**

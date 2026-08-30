@@ -4,6 +4,7 @@ import { createVerify, generateKeyPairSync } from "node:crypto";
 import {
   createDirectUploadUrl,
   createPlaybackToken,
+  createResumableUploadUrl,
   deleteVideo,
   getVideoStatus,
 } from "./stream";
@@ -185,6 +186,178 @@ describe("createDirectUploadUrl", () => {
 
     await expect(createDirectUploadUrl()).rejects.toThrow(
       /CLOUDFLARE_ACCOUNT_ID/
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("createResumableUploadUrl", () => {
+  /**
+   * A tus creation response. Unlike every other Stream endpoint, the payload
+   * is entirely in HEADERS and the body is empty, so this stand-in needs a
+   * case-insensitive `headers.get` the way a real `Response` has.
+   */
+  function tusResponse(
+    status: number,
+    headers: Record<string, string>,
+    body = ""
+  ) {
+    const lower = new Map(
+      Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v])
+    );
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      text: async () => body,
+      headers: { get: (name: string) => lower.get(name.toLowerCase()) ?? null },
+    };
+  }
+
+  const TUS_URL = `https://upload.videodelivery.net/tus/${VIDEO_UID}?tusv2=true`;
+
+  function created(overrides: Record<string, string> = {}) {
+    return tusResponse(201, {
+      Location: TUS_URL,
+      "stream-media-id": VIDEO_UID,
+      ...overrides,
+    });
+  }
+
+  it("POSTs to /stream?direct_user=true with the tus creation headers", async () => {
+    fetchMock.mockResolvedValue(created());
+
+    await createResumableUploadUrl(52_428_800);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = callArgs();
+    expect(url).toBe(`${STREAM_BASE}?direct_user=true`);
+    expect(init.method).toBe("POST");
+    expect(init.headers).toMatchObject({
+      Authorization: `Bearer ${API_TOKEN}`,
+      "Tus-Resumable": "1.0.0",
+      "Upload-Length": "52428800",
+    });
+    // No JSON body: a tus creation's parameters are all headers. Sending one
+    // would be silently ignored, which is how a cap or a flag goes missing.
+    expect(init.body).toBeUndefined();
+    expect(init.cache).toBe("no-store");
+  });
+
+  it("sends maxDurationSeconds and the valueless requiresignedurls key", async () => {
+    fetchMock.mockResolvedValue(created());
+
+    await createResumableUploadUrl(1024);
+
+    // The exact string, not a loose match. `MTIw` is base64 of "120", and
+    // `requiresignedurls` carries NO value — that is the tus spelling of
+    // requireSignedURLs:true. Cloudflare ignores an unrecognized metadata key
+    // rather than rejecting it, so a typo here ships a publicly-readable
+    // video (spec §3.5a) with nothing reporting a problem. This assertion is
+    // the only thing standing between that and production.
+    const [, init] = callArgs();
+    const headers = init.headers as Record<string, string>;
+    expect(headers["Upload-Metadata"]).toBe(
+      "maxDurationSeconds MTIw,requiresignedurls"
+    );
+    expect(Buffer.from("MTIw", "base64").toString("utf8")).toBe("120");
+  });
+
+  it("reads the upload URL from Location and the uid from stream-media-id", async () => {
+    fetchMock.mockResolvedValue(created());
+
+    await expect(createResumableUploadUrl(1024)).resolves.toEqual({
+      uploadUrl: TUS_URL,
+      uid: VIDEO_UID,
+    });
+  });
+
+  it("matches the uid against any path segment, not a fixed position", async () => {
+    // Guards against pinning Cloudflare's URL shape: a vendor reshuffle that
+    // appends a segment must not read as a uid mismatch and take uploads down.
+    fetchMock.mockResolvedValue(
+      created({
+        Location: `https://upload.videodelivery.net/tus/${VIDEO_UID}/resume`,
+      })
+    );
+
+    await expect(createResumableUploadUrl(1024)).resolves.toMatchObject({
+      uid: VIDEO_UID,
+    });
+  });
+
+  it("throws when the upload URL names a different video", async () => {
+    // external_id is the ONLY pointer from Postgres back to the video (spec
+    // §3.5c). Persisting a uid the bytes did not land under yields a row that
+    // can never play and a video that can never be deleted.
+    fetchMock.mockResolvedValue(
+      created({
+        Location: "https://upload.videodelivery.net/tus/some-other-video",
+      })
+    );
+
+    await expect(createResumableUploadUrl(1024)).rejects.toThrow(
+      /does not carry uid .*refusing to persist/
+    );
+  });
+
+  it("throws when Cloudflare returns no Location header", async () => {
+    fetchMock.mockResolvedValue(
+      tusResponse(201, { "stream-media-id": VIDEO_UID })
+    );
+
+    await expect(createResumableUploadUrl(1024)).rejects.toThrow(
+      /no Location header/
+    );
+  });
+
+  it("throws when Cloudflare returns no stream-media-id header", async () => {
+    fetchMock.mockResolvedValue(tusResponse(201, { Location: TUS_URL }));
+
+    await expect(createResumableUploadUrl(1024)).rejects.toThrow(
+      /no stream-media-id header/
+    );
+  });
+
+  it("throws on a non-2xx, surfacing Cloudflare's error codes from the body", async () => {
+    // A tus creation has no success envelope to check, but a FAILURE still
+    // carries the normal v4 error array — the only useful diagnostic when the
+    // token is wrong or the account is out of storage.
+    fetchMock.mockResolvedValue(
+      tusResponse(
+        403,
+        {},
+        JSON.stringify({
+          result: null,
+          success: false,
+          errors: [{ code: 10004, message: "Out of storage" }],
+          messages: [],
+        })
+      )
+    );
+
+    await expect(createResumableUploadUrl(1024)).rejects.toThrow(
+      /HTTP 403.*10004.*Out of storage/
+    );
+  });
+
+  it("rejects a size that cannot be an Upload-Length, without calling Cloudflare", async () => {
+    await expect(createResumableUploadUrl(0)).rejects.toThrow(
+      /positive integer Upload-Length/
+    );
+    await expect(createResumableUploadUrl(-1)).rejects.toThrow(
+      /positive integer Upload-Length/
+    );
+    await expect(createResumableUploadUrl(1.5)).rejects.toThrow(
+      /positive integer Upload-Length/
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("throws before calling Cloudflare when the api token is unset", async () => {
+    vi.stubEnv("CLOUDFLARE_STREAM_TOKEN", "");
+
+    await expect(createResumableUploadUrl(1024)).rejects.toThrow(
+      /CLOUDFLARE_STREAM_TOKEN/
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
