@@ -13,16 +13,21 @@ import {
 import {
   CONTENT_ASSETS_BUCKET,
   buildStoragePath,
-  createSignedDownloadUrl,
   createSignedUploadUrl,
   deleteStorageObject,
   readUploadedObjectMetadata,
 } from "@/lib/storage";
 import {
+  createPlaybackUrls,
   createResumableUploadUrl,
   deleteVideo,
+  describeStreamError,
   getVideoStatus,
 } from "@/lib/stream";
+import {
+  buildAssetPreviews,
+  type AssetPreview,
+} from "@/app/owner/content/_lib/assetPreviews";
 import { combineDateAndTimeInTimezone } from "@/app/owner/calendar/_lib/timezone";
 import type { ActionResult } from "@/lib/actions";
 
@@ -875,6 +880,12 @@ export async function finalizeContentVideoAssetAction(
     .from("content_assets")
     .update({
       status: status.status,
+      // Written on every transition, not only on failure: migration 016's
+      // `content_assets_error_reason_check` requires a reason to belong to a
+      // 'failed' row and nothing else, so a move to 'ready' has to clear it in
+      // the same statement.
+      error_reason:
+        status.status === "failed" ? describeStreamError(status) : null,
       duration_seconds: status.durationSeconds,
       width: status.width,
       height: status.height,
@@ -898,21 +909,7 @@ export async function finalizeContentVideoAssetAction(
 // Assets — read + delete (photos and videos)
 // ---------------------------------------------------------------------------
 
-export interface AssetPreview {
-  id: string;
-  position: number;
-  kind: "video" | "image";
-  status: "processing" | "ready" | "failed";
-  /**
-   * Signed image URL, or null when there is no still to show.
-   *
-   * Null for every Stream video: a thumbnail needs a signed playback token
-   * and a customer-subdomain URL, which is slice 2.4's surface, not this one.
-   * A null here is a PLACEHOLDER instruction, never an error — the tile still
-   * renders, carrying `kind` and `status` instead of an image.
-   */
-  url: string | null;
-}
+export type { AssetPreview };
 
 /**
  * Previews for one item's live assets, minted on panel open rather than for
@@ -940,36 +937,81 @@ export async function fetchContentAssetPreviewsAction(
     .order("position", { ascending: true });
   if (error) return { ok: false, error: error.message };
 
-  const assets = (data ?? []) as ContentAssetRecord[];
-  const previews: AssetPreview[] = [];
-  for (const asset of assets) {
-    const base = {
-      id: asset.id,
-      position: asset.position,
-      kind: asset.kind,
-      status: asset.status,
-    };
-
-    if (asset.provider !== "supabase") {
-      previews.push({ ...base, url: null });
-      continue;
-    }
-
-    try {
-      const url = await createSignedDownloadUrl(
-        asset.external_id,
-        `photo-${asset.position + 1}`,
-        CONTENT_ASSETS_BUCKET
-      );
-      previews.push({ ...base, url });
-    } catch {
-      // A missing object shouldn't blank the whole strip. The tile is still
-      // emitted with a null url so the slot stays accounted for and remains
-      // deletable — dropping it entirely would hide a broken asset.
-      previews.push({ ...base, url: null });
-    }
-  }
+  const previews = await buildAssetPreviews(
+    (data ?? []) as ContentAssetRecord[]
+  );
   return { ok: true, data: previews };
+}
+
+// ---------------------------------------------------------------------------
+// Playback — mint a fresh player URL for one ready video
+// ---------------------------------------------------------------------------
+
+/**
+ * Mint a signed player URL for a single asset, at the moment Kelsey presses
+ * play.
+ *
+ * `fetchContentAssetPreviewsAction` already returns an `iframeUrl` with every
+ * ready video, so this exists for exactly one reason: TOKEN LIFETIME. Those
+ * URLs are signed when the panel opens and die an hour later, and a panel left
+ * open across a long build session would otherwise expand a tile into a player
+ * whose token expired forty minutes ago — a dead frame with no error, because
+ * a cross-origin iframe cannot tell us it failed.
+ *
+ * Minting here instead means the token is always seconds old when playback
+ * starts, and a 6-15 second clip finishes an hour inside its own validity. The
+ * expiry problem is moved from "the URL might be stale when used" to "the URL
+ * is minted at use", which removes it rather than mitigating it.
+ *
+ * Owner-guarded only. Spec §3.5a's ownership check is Pattern B — fetch the
+ * row, compare `client_id`, then mint — and it applies to the CLIENT review
+ * surface in Phase 4, where the caller could be any client. Here the caller is
+ * already proven to be the single owner, for whom every content item is in
+ * scope by definition; there is no second party to distinguish. The row is
+ * still fetched and checked for being a ready Stream video, because handing
+ * `createPlaybackUrls` a storage key or an unencoded video mints a token for
+ * something that cannot play.
+ */
+export async function createContentAssetPlaybackAction(
+  assetId: string
+): Promise<ActionResult<{ iframeUrl: string; expiresAt: number }>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  if (!assetId) return { ok: false, error: "Missing asset id" };
+
+  const supabase = getSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from("content_assets")
+    .select("*")
+    .eq("id", assetId)
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+
+  const asset = data as ContentAssetRecord | null;
+  if (!asset) return { ok: false, error: "Asset not found" };
+  if (asset.provider !== "stream") {
+    return { ok: false, error: "That asset is not a video" };
+  }
+  if (asset.status !== "ready") {
+    return {
+      ok: false,
+      error:
+        asset.status === "failed"
+          ? (asset.error_reason ?? "That video failed to encode.")
+          : "That video is still processing.",
+    };
+  }
+
+  try {
+    const { iframeUrl, expiresAt } = createPlaybackUrls(asset.external_id);
+    return { ok: true, data: { iframeUrl, expiresAt } };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Could not start playback",
+    };
+  }
 }
 
 export async function deleteContentAssetAction(

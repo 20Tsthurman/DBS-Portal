@@ -4,8 +4,10 @@ import { createVerify, generateKeyPairSync } from "node:crypto";
 import {
   createDirectUploadUrl,
   createPlaybackToken,
+  createPlaybackUrls,
   createResumableUploadUrl,
   deleteVideo,
+  describeStreamError,
   getVideoStatus,
 } from "./stream";
 
@@ -32,6 +34,7 @@ const ACCOUNT_ID = "023e105f4ecef8ad9ca31a8372d0c353";
 const API_TOKEN = "test-stream-edit-token";
 const SIGNING_KEY_ID = "8f926b2b01f383510025a78a4dcbf6a";
 const VIDEO_UID = "ea95132c15732412d22c1476fa83f27a";
+const CUSTOMER_SUBDOMAIN = "customer-f33zs165nr7gyfy4.cloudflarestream.com";
 
 const STREAM_BASE = `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/stream`;
 
@@ -83,6 +86,7 @@ beforeEach(() => {
   vi.stubEnv("CLOUDFLARE_STREAM_TOKEN", API_TOKEN);
   vi.stubEnv("CLOUDFLARE_STREAM_SIGNING_KEY_ID", SIGNING_KEY_ID);
   vi.stubEnv("CLOUDFLARE_STREAM_SIGNING_KEY_PEM", SIGNING_KEY_PEM_BASE64);
+  vi.stubEnv("CLOUDFLARE_STREAM_CUSTOMER_SUBDOMAIN", CUSTOMER_SUBDOMAIN);
 
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
@@ -401,6 +405,7 @@ describe("getVideoStatus", () => {
       status: "ready",
       vendorState: "ready",
       errorReason: null,
+      errorCode: null,
       durationSeconds: 5.5,
       width: 1080,
       height: 1920,
@@ -458,6 +463,9 @@ describe("getVideoStatus", () => {
     await expect(getVideoStatus(VIDEO_UID)).resolves.toMatchObject({
       status: "failed",
       errorReason: "The video is longer than the allowed duration.",
+      // The CODE is carried separately from the TEXT because it is the
+      // matchable half — describeStreamError keys off it.
+      errorCode: "ERR_DURATION_EXCEED_CONSTRAINT",
     });
   });
 
@@ -477,6 +485,7 @@ describe("getVideoStatus", () => {
     await expect(getVideoStatus(VIDEO_UID)).resolves.toMatchObject({
       status: "failed",
       errorReason: "The video was deemed to be corrupted or malformed.",
+      errorCode: "ERR_MALFORMED_VIDEO",
     });
   });
 
@@ -628,6 +637,175 @@ describe("createPlaybackToken", () => {
 
     expect(() => createPlaybackToken(VIDEO_UID)).toThrow(
       /CLOUDFLARE_STREAM_SIGNING_KEY_ID/
+    );
+  });
+});
+
+describe("describeStreamError", () => {
+  it("names the duration cap rather than saying 'encoding failed'", () => {
+    // The highest-value message in the map. Every upload is minted with
+    // maxDurationSeconds=120 (§3.5d) and an over-length clip does not fail at
+    // upload time — it uploads fine and errors during processing. It is the
+    // most likely failure this feature will ever produce, and a generic
+    // message would send Kelsey back to re-upload the same too-long file.
+    const message = describeStreamError({
+      errorCode: "ERR_DURATION_EXCEED_CONSTRAINT",
+      errorReason: "The video is longer than the allowed duration.",
+    });
+
+    expect(message).toMatch(/longer than 2 minutes/);
+    expect(message).toMatch(/Trim it/);
+  });
+
+  it("derives the cap from MAX_UPLOAD_DURATION_SECONDS, not from prose", () => {
+    // Guards the wording against the constant moving. 120 renders as
+    // "2 minutes"; if the cap changed and this string were hardcoded, the
+    // message would confidently state the wrong limit.
+    expect(
+      describeStreamError({
+        errorCode: "ERR_DURATION_EXCEED_CONSTRAINT",
+        errorReason: null,
+      })
+    ).toContain("2 minutes");
+  });
+
+  it.each([
+    ["ERR_DURATION_TOO_SHORT", /too short/i],
+    ["ERR_MALFORMED_VIDEO", /damaged/i],
+    ["ERR_FETCH_ORIGIN_ERROR", /couldn't read/i],
+    ["ERR_UNKNOWN", /didn't say why/i],
+  ])("maps %s to plain language with a next step", (code, matcher) => {
+    const message = describeStreamError({
+      errorCode: code,
+      errorReason: "vendor text",
+    });
+    expect(message).toMatch(matcher);
+    // Every branch tells her what to do, not just what broke.
+    expect(message).toMatch(/again/i);
+  });
+
+  it("falls through an unrecognized code to Cloudflare's own text", () => {
+    // A sixth code must degrade the wording, never lose the explanation.
+    const message = describeStreamError({
+      errorCode: "ERR_SOMETHING_NEW",
+      errorReason: "A brand new vendor failure",
+    });
+
+    expect(message).toContain("A brand new vendor failure");
+    expect(message).toMatch(/upload the clip again/);
+  });
+
+  it("still returns actionable copy when there is no code and no text", () => {
+    expect(
+      describeStreamError({ errorCode: null, errorReason: null })
+    ).toMatch(/Remove it and upload the clip again/);
+  });
+});
+
+describe("createPlaybackUrls", () => {
+  /** The token Cloudflare expects in place of the UID, pulled back out. */
+  function tokenFrom(url: string): string {
+    return new URL(url).pathname.split("/")[1];
+  }
+
+  it("substitutes the signed token for the video uid in the path", async () => {
+    const { iframeUrl, posterUrl } = createPlaybackUrls(VIDEO_UID);
+
+    // This is the whole Cloudflare contract for signed playback: the token
+    // goes where the UID would. A URL that still carried the raw UID would
+    // 403 on every requireSignedURLs video.
+    expect(iframeUrl.startsWith(`https://${CUSTOMER_SUBDOMAIN}/`)).toBe(true);
+    expect(iframeUrl).not.toContain(VIDEO_UID);
+    expect(posterUrl).not.toContain(VIDEO_UID);
+
+    const token = tokenFrom(iframeUrl);
+    const payload = JSON.parse(
+      Buffer.from(token.split(".")[1], "base64url").toString("utf8")
+    );
+    expect(payload.sub).toBe(VIDEO_UID);
+
+    expect(new URL(iframeUrl).pathname).toBe(`/${token}/iframe`);
+    expect(new URL(posterUrl).pathname).toBe(
+      `/${token}/thumbnails/thumbnail.jpg`
+    );
+  });
+
+  it("requests a 9:16 poster frame, never a square crop", () => {
+    // Cloudflare's thumbnail endpoint defaults to 640x640 with fit=crop, which
+    // would centre-crop a vertical clip into a square and silently break the
+    // "9:16 throughout, never cropped to square" rule in spec §3.9.
+    const { posterUrl } = createPlaybackUrls(VIDEO_UID);
+    const params = new URL(posterUrl).searchParams;
+
+    const width = Number(params.get("width"));
+    const height = Number(params.get("height"));
+    expect(width / height).toBeCloseTo(9 / 16, 5);
+    expect(params.get("fit")).toBe("crop");
+  });
+
+  it("takes the poster at 0s, an offset every valid clip has", () => {
+    // Cloudflare's docs example uses 1s, but nothing enforces a minimum clip
+    // length above 0.1s, so 1s can land past the end of a short video. A dark
+    // first frame is cosmetic; a broken poster on a good video is not.
+    expect(
+      new URL(createPlaybackUrls(VIDEO_UID).posterUrl).searchParams.get("time")
+    ).toBe("0s");
+  });
+
+  it("hands the player the same poster the tile shows", () => {
+    const { iframeUrl, posterUrl } = createPlaybackUrls(VIDEO_UID);
+    expect(new URL(iframeUrl).searchParams.get("poster")).toBe(posterUrl);
+  });
+
+  it("absorbs a subdomain pasted with a scheme or a trailing slash", () => {
+    // Both produce `https://https://…`, which fails only in front of a client.
+    vi.stubEnv(
+      "CLOUDFLARE_STREAM_CUSTOMER_SUBDOMAIN",
+      `https://${CUSTOMER_SUBDOMAIN}/`
+    );
+
+    const { iframeUrl } = createPlaybackUrls(VIDEO_UID);
+    expect(new URL(iframeUrl).host).toBe(CUSTOMER_SUBDOMAIN);
+    expect(iframeUrl).not.toContain("https://https://");
+    expect(new URL(iframeUrl).pathname).not.toContain("//");
+  });
+
+  it("reports an expiry an hour out, matching the token it signed", () => {
+    const before = Math.floor(Date.now() / 1000);
+    const { iframeUrl, expiresAt } = createPlaybackUrls(VIDEO_UID);
+
+    const payload = JSON.parse(
+      Buffer.from(tokenFrom(iframeUrl).split(".")[1], "base64url").toString(
+        "utf8"
+      )
+    );
+    expect(payload.exp).toBe(expiresAt);
+    expect(expiresAt).toBeGreaterThanOrEqual(before + 3600);
+  });
+
+  it("signs a verifiable token — the URL is not just a formatted string", () => {
+    const { iframeUrl } = createPlaybackUrls(VIDEO_UID);
+    const [rawHeader, rawPayload, signature] = tokenFrom(iframeUrl).split(".");
+
+    const verifier = createVerify("RSA-SHA256");
+    verifier.update(`${rawHeader}.${rawPayload}`);
+    expect(
+      verifier.verify(publicKey, Buffer.from(signature, "base64url"))
+    ).toBe(true);
+  });
+
+  it("never calls Cloudflare — assembly is local, like the signing", () => {
+    createPlaybackUrls(VIDEO_UID);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("throws when the customer subdomain is unset", () => {
+    // Without it there is no host to play from, and a silently malformed URL
+    // would surface as a dead player rather than a build error.
+    vi.stubEnv("CLOUDFLARE_STREAM_CUSTOMER_SUBDOMAIN", "");
+
+    expect(() => createPlaybackUrls(VIDEO_UID)).toThrow(
+      /CLOUDFLARE_STREAM_CUSTOMER_SUBDOMAIN/
     );
   });
 });

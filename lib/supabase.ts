@@ -476,6 +476,15 @@ export interface ContentAssetRecord {
    * Release is blocked while any asset in the cycle is not 'ready'.
    */
   status: "processing" | "ready" | "failed";
+  /**
+   * Plain-language explanation of an encoding failure — already mapped out of
+   * Cloudflare's vendor codes by `describeStreamError` in lib/stream.ts, so it
+   * renders as-is. Non-NULL only while status is 'failed'; the
+   * `content_assets_error_reason_check` constraint enforces that, and every
+   * transition back to 'ready' or 'processing' clears it.
+   * Added in migration 016.
+   */
+  error_reason: string | null;
   duration_seconds: number | null;
   width: number | null;
   height: number | null;

@@ -14,10 +14,15 @@ import { createSign } from "node:crypto";
  * Postgres is the source of truth (spec §3.1). Stream holds bytes and nothing
  * else — no query in this module is a substitute for reading `content_assets`.
  *
- * NOT read here: CLOUDFLARE_STREAM_CUSTOMER_SUBDOMAIN. A playback token is
- * only half a playback URL; the other half is the customer subdomain, and the
- * URL is assembled by the playback surface in slice 2.4, not by this module.
- * The shape it needs is recorded on `createPlaybackToken` below.
+ * CLOUDFLARE_STREAM_CUSTOMER_SUBDOMAIN is read here, by `createPlaybackUrls`.
+ * Slice 2.2 left that assembly to "the playback surface in slice 2.4" on the
+ * assumption the surface would want the token; building 2.4 showed it wants a
+ * URL, and lib/storage.ts had already settled the question — its
+ * `createSignedDownloadUrl` hands back a complete URL, not a signature for
+ * the caller to finish. Keeping the vendor's URL SHAPES in the vendor module
+ * means a Cloudflare path change touches one file instead of every surface
+ * that plays a video. `createPlaybackToken` stays exported as the signing
+ * primitive underneath it.
  */
 
 const STREAM_API_BASE = "https://api.cloudflare.com/client/v4";
@@ -427,6 +432,13 @@ export interface StreamVideoStatus {
   vendorState: string | null;
   /** Human-readable failure reason; null unless `status === "failed"`. */
   errorReason: string | null;
+  /**
+   * Cloudflare's raw `errorReasonCode` (e.g. ERR_DURATION_EXCEED_CONSTRAINT);
+   * null unless `status === "failed"`. Separated from `errorReason` because
+   * the CODE is the stable, matchable half of the pair — the TEXT is prose
+   * Cloudflare is free to reword. `describeStreamError` keys off this.
+   */
+  errorCode: string | null;
   /** `content_assets.duration_seconds`; null while Cloudflare reports -1. */
   durationSeconds: number | null;
   /** `content_assets.width`; null while Cloudflare reports -1. */
@@ -521,11 +533,19 @@ export async function getVideoStatus(uid: string): Promise<StreamVideoStatus> {
       ) ?? "Cloudflare Stream reported an encoding error with no reason")
     : null;
 
+  const errorCode = isFailed
+    ? firstNonEmpty(
+        video.status?.errorReasonCode,
+        video.status?.errReasonCode
+      )
+    : null;
+
   return {
     uid: video.uid ?? uid,
     status,
     vendorState,
     errorReason,
+    errorCode,
     durationSeconds: normalizeSentinel(video.duration),
     width: normalizeSentinel(video.input?.width),
     height: normalizeSentinel(video.input?.height),
@@ -617,6 +637,174 @@ export function createPlaybackToken(uid: string): StreamPlaybackToken {
   const signature = createSign("RSA-SHA256").update(signingInput).sign(pem);
 
   return { token: `${signingInput}.${base64Url(signature)}`, expiresAt };
+}
+
+/**
+ * Render a second count the way a person would say it. Used only to keep the
+ * duration-cap message in `describeStreamError` derived from
+ * MAX_UPLOAD_DURATION_SECONDS rather than restating "2 minutes" in prose that
+ * would silently go wrong the day the cap moves.
+ */
+function describeDuration(seconds: number): string {
+  if (seconds % 60 === 0) {
+    const minutes = seconds / 60;
+    return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+  }
+  return `${seconds} seconds`;
+}
+
+/**
+ * Turn a Cloudflare encoding failure into something Kelsey can act on.
+ *
+ * Cloudflare documents five `errorReasonCode` values. Each maps to prose that
+ * names the actual problem AND the next step, because the owner surface has
+ * exactly one place to put this and a message that only says "failed" leads
+ * to the same file being uploaded a second time — a second carousel slot and
+ * a second reservation against the prepaid block in spec §3.3.
+ *
+ * ERR_DURATION_EXCEED_CONSTRAINT is the one that matters. Every upload is
+ * minted with `maxDurationSeconds` = MAX_UPLOAD_DURATION_SECONDS (spec §3.5d)
+ * and an over-length clip does not fail at upload time — the POST succeeds and
+ * the video errors during processing. It is the most likely failure this
+ * feature will ever produce, it is self-inflicted, and it is trivially
+ * fixable, but only if the message says the clip is too long.
+ *
+ * An unrecognized code falls through to Cloudflare's own `errorReasonText`,
+ * with a generic remedy appended so the tile is never a dead end. A vendor
+ * adding a sixth code degrades the wording; it never breaks the write.
+ */
+export function describeStreamError(
+  failure: Pick<StreamVideoStatus, "errorCode" | "errorReason">
+): string {
+  switch (failure.errorCode) {
+    case "ERR_DURATION_EXCEED_CONSTRAINT":
+      return (
+        `This clip is longer than ${describeDuration(MAX_UPLOAD_DURATION_SECONDS)}. ` +
+        `Trim it and upload it again.`
+      );
+    case "ERR_DURATION_TOO_SHORT":
+      return (
+        "This clip is too short to encode — Cloudflare needs at least a tenth " +
+        "of a second. Check that the whole file finished exporting, then " +
+        "upload it again."
+      );
+    case "ERR_MALFORMED_VIDEO":
+      return (
+        "This is a video file, but its data is damaged and can't be encoded. " +
+        "Re-export it from the original and upload it again."
+      );
+    case "ERR_FETCH_ORIGIN_ERROR":
+      return (
+        "Cloudflare couldn't read the uploaded file. Upload it again — if it " +
+        "fails a second time, re-export it first."
+      );
+    case "ERR_UNKNOWN":
+      return (
+        "Cloudflare couldn't encode this video and didn't say why. Re-export " +
+        "it and upload it again; if it fails again, the file itself is the " +
+        "problem."
+      );
+    default:
+      break;
+  }
+
+  // No code, or one this map has not met. Cloudflare's own text is the best
+  // description available, so lead with it and add the remedy it lacks.
+  const vendorText = failure.errorReason?.trim();
+  if (vendorText) {
+    return `Cloudflare couldn't encode this video: ${vendorText}. Remove it and upload the clip again.`;
+  }
+  return "Cloudflare couldn't encode this video. Remove it and upload the clip again.";
+}
+
+/**
+ * Poster frame dimensions, 9:16 — media is vertical throughout and is never
+ * cropped to square or 16:9 (spec §3.9). Sent explicitly because Cloudflare's
+ * thumbnail endpoint defaults to 640x640 with `fit=crop`, which would
+ * centre-crop a vertical clip into a square and silently violate that rule.
+ */
+const POSTER_WIDTH = 360;
+const POSTER_HEIGHT = 640;
+
+/**
+ * Offset the poster frame is taken from.
+ *
+ * `0s` rather than Cloudflare's `1s` example. A first frame is occasionally
+ * black, which `1s` would avoid — but nothing enforces a MINIMUM clip length
+ * (their own floor is 0.1s, below which the video errors outright), so `1s`
+ * can land past the end of a short clip while `0s` is in range for every
+ * video that encoded at all. A dark thumbnail on a valid video is cosmetic; a
+ * broken one is not.
+ */
+const POSTER_TIME = "0s";
+
+export interface StreamPlaybackUrls {
+  /** `src` for the Stream player iframe. Already carries the poster. */
+  iframeUrl: string;
+  /** Signed still for the tile, before anyone presses play. */
+  posterUrl: string;
+  /** Unix seconds — both URLs die together. Mirrors `createPlaybackToken`. */
+  expiresAt: number;
+}
+
+/**
+ * Mint a signed token and assemble the URLs a playback surface actually needs.
+ *
+ * Like `createPlaybackToken`, this authorizes nothing: handing it a UID
+ * unlocks that video for an hour, so ownership MUST be verified first (spec
+ * §3.5a, Pattern B from the integration audit).
+ *
+ * Cloudflare's rule is that the token substitutes for the video UID in the
+ * path — the same token works for the player, the manifests, and the
+ * thumbnails:
+ *   https://<subdomain>/<token>/iframe
+ *   https://<subdomain>/<token>/thumbnails/thumbnail.jpg
+ *   https://<subdomain>/<token>/manifest/video.m3u8   (unused here)
+ *
+ * The IFRAME player is what this returns, not an HLS manifest, and that is a
+ * browser-support decision rather than a preference: Safari plays HLS in a
+ * bare <video> element, Chrome and Firefox do not and need hls.js. Kelsey
+ * builds months on desktop Chrome (spec §3.7), so the manifest path would be
+ * dead in the one browser this has to work in — and it would cost a runtime
+ * dependency to revive. The iframe also brings the adaptive ladder that is the
+ * entire reason Stream was chosen over object storage (spec §3.2).
+ *
+ * The trade is that a cross-origin iframe hides `currentTime` from the DOM,
+ * which §3.8's `revision_notes.timestamp_seconds` will eventually want for
+ * scrubber comments. That is a client-side, later-phase surface, and
+ * Cloudflare's player SDK exposes `currentTime` over postMessage from this
+ * same iframe — so this choice defers that dependency rather than foreclosing
+ * the feature.
+ *
+ * Both URLs expire together, one hour out. `expiresAt` is returned so a
+ * caller can refresh before a still goes stale rather than after it 403s.
+ *
+ * Throws on missing env (including the customer subdomain) or a bad signing
+ * key — see `createPlaybackToken`.
+ */
+export function createPlaybackUrls(uid: string): StreamPlaybackUrls {
+  // Tolerate a value pasted with a scheme or a trailing slash. Cloudflare
+  // shows this as a bare host and that is what the env var holds, but the two
+  // mistakes that produce `https://https://…` are silent everywhere except in
+  // front of a client, so they are absorbed here.
+  const subdomain = requireEnv("CLOUDFLARE_STREAM_CUSTOMER_SUBDOMAIN")
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "");
+
+  const { token, expiresAt } = createPlaybackToken(uid);
+  const base = `https://${subdomain}/${token}`;
+
+  const posterUrl =
+    `${base}/thumbnails/thumbnail.jpg` +
+    `?time=${POSTER_TIME}&width=${POSTER_WIDTH}&height=${POSTER_HEIGHT}&fit=crop`;
+
+  // Handing the player our own poster keeps the still identical to the tile it
+  // expands from; without it the player generates its own frame and the image
+  // visibly changes on press.
+  const iframeUrl = `${base}/iframe?poster=${encodeURIComponent(posterUrl)}`;
+
+  return { iframeUrl, posterUrl, expiresAt };
 }
 
 /**

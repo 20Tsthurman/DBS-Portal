@@ -1,0 +1,64 @@
+-- 016_content_asset_error_reason.sql
+-- Content & Approval feature, Phase 2B slice 2.4: record WHY a video failed.
+-- See docs/DBS_Content_Approval_Feature.md §3.5b.
+--
+-- PURELY ADDITIVE: one nullable column on content_assets plus one CHECK
+-- constraint. No table is created or dropped, no existing column is modified,
+-- no data is written. Safe to run top-to-bottom in the Supabase SQL Editor,
+-- and safe to re-run.
+--
+-- Conventions match 015_content_approval.sql: idempotent guards throughout,
+-- CHECKs as separate named constraints applied with DROP CONSTRAINT IF EXISTS
+-- + ADD CONSTRAINT, no triggers and no functions.
+
+-- ----------------------------------------------------------------------------
+-- content_assets.error_reason — the Kelsey-facing explanation for a video
+-- that Cloudflare Stream could not encode.
+--
+-- WHY THIS COLUMN EXISTS
+--
+-- Migration 015 gave content_assets a three-value status (processing / ready /
+-- failed) but nowhere to put the reason behind 'failed'. Without one, every
+-- encoding failure renders identically, and the owner surface can only say
+-- "this video failed" — which does not tell Kelsey whether to trim the clip,
+-- re-export it, or re-shoot it.
+--
+-- That gap is not hypothetical. lib/stream.ts mints every Direct Creator
+-- Upload with maxDurationSeconds = 120 (spec §3.5d), and a video that exceeds
+-- it does NOT fail at upload time: the upload succeeds and the video lands in
+-- status.state = 'error' with ERR_DURATION_EXCEED_CONSTRAINT during
+-- processing. An over-length clip is therefore the single most likely failure
+-- this feature will ever produce, and it is entirely self-inflicted and
+-- entirely fixable — but only if the surface can say "this clip is longer
+-- than 2 minutes" rather than "encoding failed". A generic message invites a
+-- re-upload of the same too-long file, which claims a second carousel slot
+-- and bills a second reservation against the prepaid block in spec §3.3.
+--
+-- The stored value is PLAIN LANGUAGE, not a vendor code. Cloudflare's five
+-- documented reason codes are mapped to prose in lib/stream.ts
+-- (`describeStreamError`), which falls through to Cloudflare's own
+-- errorReasonText when it meets a code it does not recognize. The column is
+-- therefore always renderable as-is; nothing downstream has to interpret
+-- vendor vocabulary. It is free text and deliberately unconstrained in
+-- content — a vendor adding a sixth code must widen the message, never break
+-- the write.
+--
+-- NULLABLE, and null is the normal state: it is meaningful only on a row
+-- whose status is 'failed'. Every other row — every photo, every processing
+-- or ready video — carries null.
+-- ----------------------------------------------------------------------------
+alter table content_assets add column if not exists error_reason text;
+
+-- The invariant the column only makes sense under: a reason belongs to a
+-- failure and to nothing else. lib/stream.ts writes status and error_reason
+-- together on every transition, clearing the reason on any move back to
+-- 'ready' or 'processing', and this constraint is what makes that rule
+-- STRUCTURAL rather than conventional — a future call site that flips a row
+-- out of 'failed' and forgets to clear the reason fails loudly here instead
+-- of leaving a stale explanation attached to a healthy video.
+--
+-- Validates cleanly against existing rows: 015 shipped no error_reason
+-- column, so every pre-existing row has null here regardless of its status.
+alter table content_assets drop constraint if exists content_assets_error_reason_check;
+alter table content_assets add constraint content_assets_error_reason_check
+  check (error_reason is null or status = 'failed');

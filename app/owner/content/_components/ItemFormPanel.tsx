@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -23,15 +24,17 @@ import {
 } from "@/app/owner/clients/_components/formStyles";
 import type { Platform, PostFormat } from "@/lib/supabase";
 import { dateKeyInTimezone } from "@/lib/date";
+import { useVisibilityPolling } from "@/lib/hooks/useVisibilityPolling";
 import {
+  createContentAssetPlaybackAction,
   createContentAssetUploadUrlAction,
   createContentItemAction,
   deleteContentAssetAction,
   fetchContentAssetPreviewsAction,
   finalizeContentAssetAction,
   updateContentItemAction,
-  type AssetPreview,
 } from "../_actions";
+import type { AssetPreview } from "../_lib/assetPreviews";
 import {
   FORMAT_OPTIONS,
   PLATFORM_OPTIONS,
@@ -81,6 +84,31 @@ const MAX_PHOTO_BYTES = 25 * 1024 * 1024;
  * rejected before a tus upload is minted and a carousel slot is claimed.
  */
 const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
+
+/**
+ * How often the panel asks whether a processing video has become playable.
+ *
+ * Six seconds, deliberately not the DEFAULT_POLL_INTERVAL_MS = 30_000 that all
+ * four messages consumers use. That cadence is tuned for a person on the other
+ * end who might reply at any point over hours; this one is tuned for a machine
+ * finishing a job in seconds. Review clips run 6–15s (spec §3.5d) and
+ * Cloudflare encodes at roughly real time, so the flip to ready usually lands
+ * within a few seconds of the last byte. At 30s Kelsey would sit in front of a
+ * "Processing" tile for up to half a minute after the video was already
+ * playable — a stall in the exact place spec §3.5b says should be "largely
+ * invisible to her".
+ *
+ * Not shorter than this. Below roughly 5s the encode is unlikely to have
+ * finished anyway, so the extra requests buy no responsiveness and only spend
+ * Cloudflare API calls.
+ *
+ * The cost is bounded by construction rather than by the interval: the poll
+ * runs only while a video that is NOT currently uploading sits in 'processing'
+ * inside an OPEN panel on a VISIBLE tab, and it stops the moment none does.
+ * That is a few seconds of polling per upload, for one owner — not a
+ * background ticker.
+ */
+const CONTENT_ASSET_POLL_INTERVAL_MS = 6_000;
 
 /**
  * What a tile says when it has no image.
@@ -191,8 +219,26 @@ export function ItemFormPanel({
   const [confirmDeleteAsset, setConfirmDeleteAsset] =
     useState<AssetPreview | null>(null);
   const [deletingAsset, setDeletingAsset] = useState(false);
+  /** The tile currently expanded into a player, if any. One at a time. */
+  const [playingAssetId, setPlayingAssetId] = useState<string | null>(null);
+  /** Freshly minted iframe src; null while the mint is in flight. */
+  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const videoInputRef = useRef<HTMLInputElement | null>(null);
+  /**
+   * The asset the most recent play request was for. Two quick presses on
+   * different tiles race, and without this the slower mint can land last and
+   * drop the wrong video into the tile the user is actually looking at.
+   */
+  const playbackRequestRef = useRef<string | null>(null);
+  /**
+   * One free reload when a signed URL fails to load. Both photo URLs and
+   * Stream posters live an hour, so a panel open longer than that shows broken
+   * images until something re-mints them; `onError` is what notices, since
+   * nothing else can. Latched so a genuinely missing object cannot turn a
+   * failed image into a reload loop.
+   */
+  const staleUrlReloadRef = useRef(false);
 
   /**
    * The video upload lives in module scope, not in this component. It has to
@@ -237,8 +283,151 @@ export function ItemFormPanel({
     setMediaError(null);
     setPreviews([]);
     setUploadProgress(0);
+    setPlayingAssetId(null);
+    setPlaybackUrl(null);
+    playbackRequestRef.current = null;
+    staleUrlReloadRef.current = false;
     if (item) void loadPreviews(item.id);
   }, [open, item, monthKey, loadPreviews]);
+
+  /**
+   * The assets worth asking Cloudflare about.
+   *
+   * The video whose bytes are still moving is excluded even though its row
+   * reads 'processing'. Cloudflare has not been handed a complete file yet, so
+   * it can only answer `pendingupload`, and a 500 MB upload would spend
+   * minutes generating one pointless API call every interval. Its tile is
+   * already reporting the upload itself through `tileLabel`, and the finalize
+   * call at the end of the upload takes the first reading.
+   */
+  const processingAssetIds = useMemo(
+    () =>
+      previews
+        .filter((p) => p.status === "processing" && p.id !== videoUpload?.assetId)
+        .map((p) => p.id),
+    [previews, videoUpload?.assetId]
+  );
+
+  /**
+   * Failed assets paired with the position number their tile shows.
+   *
+   * The reason is rendered here rather than inside the tile because the tiles
+   * are a `minmax(96px, 1fr)` grid — roughly 110px wide in a 520px panel,
+   * about fourteen characters a line. "This clip is longer than 2 minutes.
+   * Trim it and upload it again." is unreadable in that column and is the
+   * whole point of storing it, so the tile carries the alarm and this block
+   * carries the sentence.
+   */
+  const failedPreviews = useMemo(
+    () =>
+      previews
+        .map((preview, index) => ({ preview, position: index + 1 }))
+        .filter(({ preview }) => preview.status === "failed"),
+    [previews]
+  );
+
+  const refreshAssetStatuses = useCallback(
+    async (signal: AbortSignal) => {
+      if (processingAssetIds.length === 0) return;
+      try {
+        const res = await fetch("/api/owner/content/asset-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assetIds: processingAssetIds }),
+          cache: "no-store",
+          signal,
+        });
+        if (!res.ok) {
+          // Silent on screen, loud in the console. A failed poll is not worth
+          // an error banner over a tile that is already saying "Processing" —
+          // the next tick recovers, and the route leaves the row untouched
+          // when Cloudflare is unreachable.
+          console.error("[ItemFormPanel] asset status poll failed", res.status);
+          return;
+        }
+        const json = (await res.json()) as { previews?: AssetPreview[] };
+        const fresh = json.previews ?? [];
+
+        // Only a STATUS change is worth committing. The route re-mints signed
+        // URLs on every call, so taking its payload unconditionally would
+        // replace the preview list — and every poster `src` on screen — once
+        // every interval for no visible gain.
+        const changed = fresh.filter((next) => {
+          const prev = previews.find((p) => p.id === next.id);
+          return prev !== undefined && prev.status !== next.status;
+        });
+        if (changed.length === 0) return;
+
+        const byId = new Map(changed.map((p) => [p.id, p]));
+        setPreviews((current) => current.map((p) => byId.get(p.id) ?? p));
+        // Deliberately no router.refresh() here. The board behind the panel
+        // renders an asset COUNT, and a processing video already counts — a
+        // status transition changes nothing it displays, so refreshing the
+        // server tree on every transition would buy a round trip and no pixel.
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error("[ItemFormPanel] asset status poll error", err);
+      }
+    },
+    [processingAssetIds, previews]
+  );
+
+  /**
+   * Visibility-aware poll of the transition route — see `useVisibilityPolling`
+   * for the contract (immediate fetch on mount, pause on hidden, resume plus
+   * an immediate fetch on visible, one abort controller per fetch).
+   *
+   * `enabled` is the stop condition the panel needs: nothing in view is
+   * processing, so nothing polls. It also does the right thing on the way back
+   * in — flipping it true when a new upload lands re-arms the interval AND
+   * fires one immediate fetch, so the first reading is not an interval late.
+   * An idle panel, and a closed one, tick zero times.
+   */
+  useVisibilityPolling(refreshAssetStatuses, {
+    intervalMs: CONTENT_ASSET_POLL_INTERVAL_MS,
+    enabled: open && processingAssetIds.length > 0,
+  });
+
+  const handlePlay = useCallback(async (assetId: string) => {
+    setMediaError(null);
+    setPlayingAssetId(assetId);
+    setPlaybackUrl(null);
+    playbackRequestRef.current = assetId;
+
+    // Minted here rather than reused from the preview payload: preview URLs
+    // are signed when the panel opens and expire an hour later, so a long
+    // build session would otherwise expand a tile into a player whose token
+    // died — and a cross-origin iframe cannot tell us that it did. Minting at
+    // press time makes the token seconds old whenever playback starts.
+    const result = await createContentAssetPlaybackAction(assetId);
+
+    // A second press on another tile while this mint was in flight wins.
+    if (playbackRequestRef.current !== assetId) return;
+
+    if (!result.ok || !result.data) {
+      setPlayingAssetId(null);
+      setMediaError(result.error ?? "Could not start playback");
+      return;
+    }
+    setPlaybackUrl(result.data.iframeUrl);
+  }, []);
+
+  const handleStopPlayback = useCallback(() => {
+    playbackRequestRef.current = null;
+    setPlayingAssetId(null);
+    setPlaybackUrl(null);
+  }, []);
+
+  /**
+   * A signed URL that will not load is almost always an expired one. Re-mint
+   * the whole strip once and let the images retry with fresh URLs.
+   */
+  const handlePreviewImageError = useCallback(() => {
+    if (staleUrlReloadRef.current) return;
+    if (!activeItemId) return;
+    staleUrlReloadRef.current = true;
+    void loadPreviews(activeItemId);
+  }, [activeItemId, loadPreviews]);
 
   /**
    * Completion is observed as a counter rather than a callback, because the
@@ -411,6 +600,9 @@ export function ItemFormPanel({
     if (videoUpload?.assetId === confirmDeleteAsset.id) {
       dismissVideoUpload();
     }
+    // Close the player if it is the one being removed — its token is about to
+    // point at a video that no longer exists.
+    if (playingAssetId === confirmDeleteAsset.id) handleStopPlayback();
     const result = await deleteContentAssetAction(confirmDeleteAsset.id);
     setDeletingAsset(false);
     if (!result.ok) {
@@ -571,7 +763,54 @@ export function ItemFormPanel({
                     <div style={thumbGridStyle}>
                       {previews.map((preview, index) => (
                         <figure key={preview.id} style={thumbFigureStyle}>
-                          {preview.url ? (
+                          {playingAssetId === preview.id ? (
+                            /* Cloudflare's own player, in an iframe. The HLS
+                               manifest alternative would need hls.js to play
+                               anywhere but Safari, and Kelsey builds months on
+                               desktop Chrome (spec §3.7). 9:16 like every other
+                               tile — the video is vertical and is never
+                               letterboxed into a landscape frame (§3.9). */
+                            playbackUrl ? (
+                              <iframe
+                                src={playbackUrl}
+                                title={`Video ${index + 1}`}
+                                style={thumbPlayerStyle}
+                                allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
+                                allowFullScreen
+                              />
+                            ) : (
+                              <div
+                                role="status"
+                                style={thumbPlaceholderStyle}
+                              >
+                                <span style={placeholderTextStyle}>
+                                  Opening…
+                                </span>
+                              </div>
+                            )
+                          ) : preview.url && preview.status === "ready" &&
+                            preview.kind === "video" ? (
+                            /* Ready video: the signed poster frame, pressable.
+                               A button rather than a click handler on the image
+                               so it is reachable by keyboard and announces
+                               itself. */
+                            <button
+                              type="button"
+                              onClick={() => void handlePlay(preview.id)}
+                              style={thumbPlayButtonStyle}
+                              aria-label={`Play video ${index + 1}`}
+                            >
+                              <img
+                                src={preview.url}
+                                alt=""
+                                style={thumbImgStyle}
+                                onError={handlePreviewImageError}
+                              />
+                              <span aria-hidden="true" style={playOverlayStyle}>
+                                ▶
+                              </span>
+                            </button>
+                          ) : preview.url ? (
                             /* Plain <img>: these are short-lived signed URLs
                                against a private bucket, so the Image optimizer
                                has no stable host to whitelist. */
@@ -579,23 +818,33 @@ export function ItemFormPanel({
                               src={preview.url}
                               alt={`Photo ${index + 1}`}
                               style={thumbImgStyle}
+                              onError={handlePreviewImageError}
                             />
                           ) : (
-                            /* Nothing to show as an image: a Stream video has
-                               no thumbnail until the playback surface lands in
-                               2.4, and a photo whose object went missing has
-                               none at all. The tile is still rendered either
-                               way. Omitting it would make an uploaded video
-                               invisible while its row holds a carousel slot,
-                               which reads as a lost upload and invites a
-                               second one into a position already taken. */
+                            /* Nothing to show as an image: a video that is
+                               still processing or has failed has no frame to
+                               ask Cloudflare for, and a photo whose object went
+                               missing has none at all. The tile is still
+                               rendered either way. Omitting it would make an
+                               uploaded video invisible while its row holds a
+                               carousel slot, which reads as a lost upload and
+                               invites a second one into a position already
+                               taken. */
                             <div
                               role="img"
                               aria-label={`${tileLabel(preview, videoUpload)}, position ${index + 1}`}
-                              style={thumbPlaceholderStyle}
+                              style={
+                                preview.status === "failed"
+                                  ? thumbFailedPlaceholderStyle
+                                  : thumbPlaceholderStyle
+                              }
                             >
                               <span aria-hidden="true" style={placeholderMarkStyle}>
-                                {preview.kind === "video" ? "▶" : "!"}
+                                {preview.status === "failed"
+                                  ? "!"
+                                  : preview.kind === "video"
+                                    ? "▶"
+                                    : "!"}
                               </span>
                               <span style={placeholderTextStyle}>
                                 {tileLabel(preview, videoUpload)}
@@ -604,15 +853,37 @@ export function ItemFormPanel({
                           )}
                           <figcaption style={thumbCaptionStyle}>
                             <span>#{index + 1}</span>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteAsset(preview)}
-                              style={thumbDeleteStyle}
-                            >
-                              Remove
-                            </button>
+                            {playingAssetId === preview.id ? (
+                              <button
+                                type="button"
+                                onClick={handleStopPlayback}
+                                style={thumbDeleteStyle}
+                              >
+                                Close
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteAsset(preview)}
+                                style={thumbDeleteStyle}
+                              >
+                                Remove
+                              </button>
+                            )}
                           </figcaption>
                         </figure>
+                      ))}
+                    </div>
+                  )}
+
+                  {failedPreviews.length > 0 && (
+                    <div role="alert" style={assetFailureStyle}>
+                      {failedPreviews.map(({ preview, position }) => (
+                        <p key={preview.id} style={assetFailureLineStyle}>
+                          <strong>#{position}</strong>{" "}
+                          {preview.errorReason ??
+                            "Cloudflare couldn't encode this video. Remove it and upload the clip again."}
+                        </p>
                       ))}
                     </div>
                   )}
@@ -875,6 +1146,65 @@ const thumbPlaceholderStyle: CSSProperties = {
   color: "var(--text-muted)",
   textAlign: "center",
   padding: 6,
+};
+
+// A failed tile has to be findable at a glance in a strip of otherwise
+// healthy ones — the sentence explaining it lives below the grid, and this is
+// what points at which tile the sentence is about.
+const thumbFailedPlaceholderStyle: CSSProperties = {
+  ...thumbPlaceholderStyle,
+  color: "var(--status-danger)",
+  borderBottom: "2px solid var(--status-danger)",
+};
+
+// Same 9:16 box as every other tile. `border: none` because the panel draws
+// the frame; the player fills it edge to edge.
+const thumbPlayerStyle: CSSProperties = {
+  display: "block",
+  width: "100%",
+  aspectRatio: "9 / 16",
+  border: "none",
+};
+
+const thumbPlayButtonStyle: CSSProperties = {
+  display: "block",
+  position: "relative",
+  width: "100%",
+  padding: 0,
+  border: "none",
+  background: "transparent",
+  cursor: "pointer",
+};
+
+const playOverlayStyle: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontSize: 24,
+  lineHeight: 1,
+  color: "#fff",
+  // The poster is a photograph, so the glyph needs its own contrast rather
+  // than borrowing the tile's — a light frame would otherwise swallow it.
+  textShadow: "0 1px 6px rgba(0,0,0,0.75)",
+  backgroundColor: "rgba(0,0,0,0.12)",
+};
+
+const assetFailureStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  margin: "8px 0",
+  padding: "10px 12px",
+  border: "1px solid var(--status-danger)",
+  color: "var(--status-danger)",
+};
+
+const assetFailureLineStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 12,
+  lineHeight: 1.5,
 };
 
 const placeholderMarkStyle: CSSProperties = {
