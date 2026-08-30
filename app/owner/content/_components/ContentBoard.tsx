@@ -211,6 +211,7 @@ export function ContentBoard({
         item={panel?.kind === "item" ? panel.item : null}
         cycleId={cycle?.id ?? null}
         monthKey={monthKey}
+        clientName={clientName}
       />
 
       <ConfirmDialog

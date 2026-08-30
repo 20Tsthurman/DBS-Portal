@@ -24,7 +24,9 @@ import {
 } from "@/app/owner/clients/_components/formStyles";
 import type { Platform, PostFormat } from "@/lib/supabase";
 import { dateKeyInTimezone } from "@/lib/date";
+import { fullDateLabelForDateKey } from "@/app/owner/calendar/_lib/timezone";
 import { useVisibilityPolling } from "@/lib/hooks/useVisibilityPolling";
+import { VideoPlaybackOverlay } from "./VideoPlaybackOverlay";
 import {
   createContentAssetPlaybackAction,
   createContentAssetUploadUrlAction,
@@ -36,10 +38,13 @@ import {
 } from "../_actions";
 import type { AssetPreview } from "../_lib/assetPreviews";
 import {
+  FORMAT_LABELS,
   FORMAT_OPTIONS,
+  PLATFORM_LABELS,
   PLATFORM_OPTIONS,
   defaultDateForMonth,
   timeInputValueInTimezone,
+  timeLabelFromInputValue,
 } from "../_lib/format";
 import type { ContentItemWithAssets } from "../_lib/queries";
 import {
@@ -60,6 +65,13 @@ interface ItemFormPanelProps {
   item: ContentItemWithAssets | null;
   cycleId: string | null;
   monthKey: string;
+  /**
+   * The board's active client — the playback overlay's headline for the one
+   * case with no `item` to read `client_name` from: a post created this
+   * session that had a video uploaded before any reopen. Empty only in the
+   * all-clients view, where the panel always opens with an `item`.
+   */
+  clientName: string;
 }
 
 interface FormValues {
@@ -109,6 +121,59 @@ const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
  * background ticker.
  */
 const CONTENT_ASSET_POLL_INTERVAL_MS = 6_000;
+
+/**
+ * Where playback changes shape. At and above this width, pressing a video
+ * tile widens the panel and seats the player beside the form; below it the
+ * full-screen VideoPlaybackOverlay takes over (the panel is already
+ * effectively full-width there, so widening has nothing to offer). MUST stay
+ * equal to the overlay's own `@media (min-width: 900px)` breakpoint — the
+ * two surfaces hand off to each other at exactly this line.
+ */
+const DESKTOP_PLAYBACK_QUERY = "(min-width: 900px)";
+
+/** 520 fits the form (the invoices-panel width). */
+const PANEL_WIDTH_PX = 520;
+/**
+ * Widened for playback: a ~360px player plus its gutter beside a slightly
+ * slimmed form column — and still narrower than the 900px viewports that are
+ * the smallest ever to use it, so the panel keeps reading as a panel.
+ */
+const PANEL_WIDTH_PLAYING_PX = 850;
+
+/**
+ * Player sizing, shared by the video box and the column that clips it:
+ * ~360x640, shrunk on short screens so the whole player is visible without
+ * scrolling — the overlay's sizing idiom with this surface's chrome (panel
+ * header, sticky offset, player chrome rows) subtracted instead.
+ */
+const PLAYER_HEIGHT_CSS = "min(640px, 100dvh - 230px)";
+const PLAYER_GUTTER_PX = 24;
+/** The video's width follows from the 9:16 ratio; the gutter rides inside
+ * the column so both collapse to zero together when playback closes. */
+const PLAYER_COL_WIDTH_CSS = `calc((${PLAYER_HEIGHT_CSS}) * 9 / 16 + ${PLAYER_GUTTER_PX}px)`;
+
+/**
+ * Whether the viewport is wide enough for in-panel playback.
+ *
+ * State rather than the ref idiom `useCoarsePointer` documents, because this
+ * value picks which playback surface renders. That is hydration-safe here
+ * only because every render branch on it is also gated on `playingAssetId`,
+ * which cannot be non-null until a press after mount — the server render and
+ * the first client render never reach the branch.
+ */
+function useDesktopPlaybackViewport(): boolean {
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mql = window.matchMedia(DESKTOP_PLAYBACK_QUERY);
+    setIsDesktop(mql.matches);
+    const onChange = (event: MediaQueryListEvent) => setIsDesktop(event.matches);
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+  return isDesktop;
+}
 
 /**
  * What a tile says when it has no image.
@@ -196,6 +261,7 @@ export function ItemFormPanel({
   item,
   cycleId,
   monthKey,
+  clientName,
 }: ItemFormPanelProps) {
   const router = useRouter();
   const [values, setValues] = useState<FormValues>(() =>
@@ -219,10 +285,33 @@ export function ItemFormPanel({
   const [confirmDeleteAsset, setConfirmDeleteAsset] =
     useState<AssetPreview | null>(null);
   const [deletingAsset, setDeletingAsset] = useState(false);
-  /** The tile currently expanded into a player, if any. One at a time. */
+  /** The asset playing in the full-screen overlay, if any. One at a time. */
   const [playingAssetId, setPlayingAssetId] = useState<string | null>(null);
   /** Freshly minted iframe src; null while the mint is in flight. */
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
+  /**
+   * A failed mint, shown inside the overlay rather than back in the panel:
+   * the overlay opens on press (so the response feels immediate), which means
+   * Kelsey is already looking at it when the error lands — closing it again
+   * to point at a message beside the tile would read as a flicker.
+   */
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+  /** Copy-caption feedback for the in-panel player. The overlay owns its own
+   * copy of this state; only one of the two surfaces exists at a time. */
+  const [panelCopyState, setPanelCopyState] = useState<
+    "idle" | "copied" | "failed"
+  >("idle");
+  const panelCopyTimerRef = useRef<number | null>(null);
+  /**
+   * What was focused when playback opened — the play tile. The overlay hands
+   * focus back in its own unmount effect; the in-panel player has no unmount
+   * hook of its own, so the close path restores from here instead.
+   */
+  const playbackOpenerRef = useRef<HTMLElement | null>(null);
+  const isDesktopViewport = useDesktopPlaybackViewport();
+  /** The breakpoint decides the surface: widened panel above 900px, the
+   * full-screen overlay below it. */
+  const playbackInPanel = playingAssetId !== null && isDesktopViewport;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const videoInputRef = useRef<HTMLInputElement | null>(null);
   /**
@@ -285,7 +374,10 @@ export function ItemFormPanel({
     setUploadProgress(0);
     setPlayingAssetId(null);
     setPlaybackUrl(null);
+    setPlaybackError(null);
+    setPanelCopyState("idle");
     playbackRequestRef.current = null;
+    playbackOpenerRef.current = null;
     staleUrlReloadRef.current = false;
     if (item) void loadPreviews(item.id);
   }, [open, item, monthKey, loadPreviews]);
@@ -389,24 +481,31 @@ export function ItemFormPanel({
   });
 
   const handlePlay = useCallback(async (assetId: string) => {
-    setMediaError(null);
+    // The player opens NOW, on the press, showing its chrome and an
+    // "Opening…" box — waiting for the mint before opening would make the
+    // click feel dead for a round trip.
+    playbackOpenerRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     setPlayingAssetId(assetId);
     setPlaybackUrl(null);
+    setPlaybackError(null);
+    setPanelCopyState("idle");
     playbackRequestRef.current = assetId;
 
     // Minted here rather than reused from the preview payload: preview URLs
     // are signed when the panel opens and expire an hour later, so a long
-    // build session would otherwise expand a tile into a player whose token
-    // died — and a cross-origin iframe cannot tell us that it did. Minting at
-    // press time makes the token seconds old whenever playback starts.
+    // build session would otherwise open a player whose token died — and a
+    // cross-origin iframe cannot tell us that it did. Minting at press time
+    // makes the token seconds old whenever playback starts.
     const result = await createContentAssetPlaybackAction(assetId);
 
     // A second press on another tile while this mint was in flight wins.
     if (playbackRequestRef.current !== assetId) return;
 
     if (!result.ok || !result.data) {
-      setPlayingAssetId(null);
-      setMediaError(result.error ?? "Could not start playback");
+      setPlaybackError(result.error ?? "Could not start playback");
       return;
     }
     setPlaybackUrl(result.data.iframeUrl);
@@ -416,7 +515,70 @@ export function ItemFormPanel({
     playbackRequestRef.current = null;
     setPlayingAssetId(null);
     setPlaybackUrl(null);
+    setPlaybackError(null);
+    setPanelCopyState("idle");
+    // Hand focus back to the play tile so a keyboard user is not dropped on
+    // <body> when the in-panel player's close button unmounts under them. On
+    // the overlay path this is redundant but harmless: the overlay's own
+    // restore runs after and lands on the same element. `isConnected` guards
+    // a tile deleted mid-playback; an inert (closing) panel makes the call a
+    // no-op, which is also right.
+    const opener = playbackOpenerRef.current;
+    playbackOpenerRef.current = null;
+    if (opener?.isConnected) opener.focus();
   }, []);
+
+  // Escape closes the desktop player ONLY, leaving the panel open — the
+  // in-panel mirror of the overlay's capture-phase handler. SlidePanel
+  // listens for Escape on window in the bubble phase, so an unstopped press
+  // would close player and panel together and drop Kelsey back on the board
+  // with her form gone from view. Capture phase runs first on window;
+  // stopping propagation there means the panel's listener never sees the
+  // press. Disarmed while the delete ConfirmDialog is up: the dialog is the
+  // topmost layer and Escape belongs to it then.
+  useEffect(() => {
+    if (!playbackInPanel || confirmDeleteAsset !== null) return;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      handleStopPlayback();
+    };
+    window.addEventListener("keydown", handleKey, true);
+    return () => window.removeEventListener("keydown", handleKey, true);
+  }, [playbackInPanel, confirmDeleteAsset, handleStopPlayback]);
+
+  // The overlay physically blocks every control that could close the panel
+  // while it is up; the in-panel player does not — Done, the panel's ×, and
+  // the backdrop all stay clickable during playback. SlidePanel stays
+  // mounted through its slide-out animation, so without this the iframe
+  // would keep playing, audio included, behind a closed panel.
+  useEffect(() => {
+    if (!open && playingAssetId !== null) handleStopPlayback();
+  }, [open, playingAssetId, handleStopPlayback]);
+
+  useEffect(
+    () => () => {
+      if (panelCopyTimerRef.current !== null)
+        window.clearTimeout(panelCopyTimerRef.current);
+    },
+    []
+  );
+
+  /** Mirrors the overlay's copy handler; reads the LIVE caption field. */
+  const handlePanelCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(values.caption);
+      setPanelCopyState("copied");
+    } catch {
+      setPanelCopyState("failed");
+    }
+    if (panelCopyTimerRef.current !== null)
+      window.clearTimeout(panelCopyTimerRef.current);
+    panelCopyTimerRef.current = window.setTimeout(
+      () => setPanelCopyState("idle"),
+      2000
+    );
+  };
 
   /**
    * A signed URL that will not load is almost always an expired one. Re-mint
@@ -617,15 +779,108 @@ export function ItemFormPanel({
 
   const isCarousel = values.format === "carousel";
 
+  // From LIVE form values, not the saved row, so the overlay always says what
+  // the form says — including edits not saved yet. The date/time guards cover
+  // a field mid-edit (a cleared `<input type="date">` reports "").
+  const overlayMeta = [
+    values.date ? fullDateLabelForDateKey(values.date) : null,
+    values.time ? timeLabelFromInputValue(values.time) : null,
+    `${PLATFORM_LABELS[values.platform]} ${FORMAT_LABELS[values.format]}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const playbackClientName = item?.client_name || clientName;
+  const hasPanelCaption = values.caption.trim() !== "";
+
   return (
     <>
       <SlidePanel
         open={open}
         onClose={onClose}
         title={activeItemId ? "Edit post" : "New post"}
-        widthPx={520}
+        widthPx={playbackInPanel ? PANEL_WIDTH_PLAYING_PX : PANEL_WIDTH_PX}
       >
-        <form onSubmit={handleSubmit} className="flex h-full flex-col">
+        {/* Row that seats the desktop player beside the form. The player
+            column is ALWAYS in the tree, at width 0 while closed, rather than
+            mounted on demand: its width and the panel's animate in step, so
+            the form column's width interpolates smoothly instead of snapping
+            — and the children array never changes shape, so opening playback
+            never remounts the form (focus, scroll position, and field DOM
+            survive; the values would either way, they live in this
+            component). minHeight 100% is what h-full used to do for the
+            form: full height when content is short so the footer stays at
+            the bottom, free to grow when the form is taller. */}
+        <div className="flex" style={{ minHeight: "100%" }}>
+          <div
+            style={{
+              ...playerColStyle,
+              width: playbackInPanel ? PLAYER_COL_WIDTH_CSS : 0,
+            }}
+          >
+            {playbackInPanel && (
+              <div style={playerStickyStyle}>
+                <div style={playerChromeRowStyle}>
+                  <span style={playerLabelStyle}>Video</span>
+                  <button
+                    type="button"
+                    onClick={handleStopPlayback}
+                    aria-label="Close video"
+                    style={playerCloseStyle}
+                  >
+                    ×
+                  </button>
+                </div>
+                {playbackError ? (
+                  /* Mint failure shown where the video would be, same as the
+                     overlay: she is already looking here when it lands. */
+                  <div role="alert" style={playerNoteStyle}>
+                    {playbackError}
+                  </div>
+                ) : playbackUrl ? (
+                  /* Autoplay and the mauve primaryColor ride on the minted
+                     src itself (see createPlaybackUrls); allow="autoplay"
+                     delegates the press so unmuted autoplay is honoured. */
+                  <iframe
+                    src={playbackUrl}
+                    title={
+                      playbackClientName
+                        ? `${playbackClientName} video`
+                        : "Video"
+                    }
+                    style={playerIframeStyle}
+                    allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
+                    allowFullScreen
+                  />
+                ) : (
+                  <div role="status" style={playerNoteStyle}>
+                    Opening…
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={handlePanelCopy}
+                  disabled={!hasPanelCaption}
+                  style={{
+                    ...playerCopyStyle,
+                    opacity: hasPanelCaption ? 1 : 0.5,
+                    cursor: hasPanelCaption ? "pointer" : "default",
+                  }}
+                >
+                  {panelCopyState === "copied"
+                    ? "Copied"
+                    : panelCopyState === "failed"
+                      ? "Couldn't copy"
+                      : "Copy caption"}
+                </button>
+              </div>
+            )}
+          </div>
+          <form
+            onSubmit={handleSubmit}
+            className="flex flex-col"
+            style={formColStyle}
+          >
           <div className="flex-1 space-y-5">
             <div className="flex gap-4">
               <div style={{ flex: 1 }}>
@@ -763,37 +1018,15 @@ export function ItemFormPanel({
                     <div style={thumbGridStyle}>
                       {previews.map((preview, index) => (
                         <figure key={preview.id} style={thumbFigureStyle}>
-                          {playingAssetId === preview.id ? (
-                            /* Cloudflare's own player, in an iframe. The HLS
-                               manifest alternative would need hls.js to play
-                               anywhere but Safari, and Kelsey builds months on
-                               desktop Chrome (spec §3.7). 9:16 like every other
-                               tile — the video is vertical and is never
-                               letterboxed into a landscape frame (§3.9). */
-                            playbackUrl ? (
-                              <iframe
-                                src={playbackUrl}
-                                title={`Video ${index + 1}`}
-                                style={thumbPlayerStyle}
-                                allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
-                                allowFullScreen
-                              />
-                            ) : (
-                              <div
-                                role="status"
-                                style={thumbPlaceholderStyle}
-                              >
-                                <span style={placeholderTextStyle}>
-                                  Opening…
-                                </span>
-                              </div>
-                            )
-                          ) : preview.url && preview.status === "ready" &&
+                          {preview.url && preview.status === "ready" &&
                             preview.kind === "video" ? (
                             /* Ready video: the signed poster frame, pressable.
                                A button rather than a click handler on the image
                                so it is reachable by keyboard and announces
-                               itself. */
+                               itself. Pressing opens playback — beside the form
+                               in the widened panel on desktop, the full-screen
+                               overlay on mobile. The player never renders in
+                               this ~110px column, where it was unwatchable. */
                             <button
                               type="button"
                               onClick={() => void handlePlay(preview.id)}
@@ -853,23 +1086,13 @@ export function ItemFormPanel({
                           )}
                           <figcaption style={thumbCaptionStyle}>
                             <span>#{index + 1}</span>
-                            {playingAssetId === preview.id ? (
-                              <button
-                                type="button"
-                                onClick={handleStopPlayback}
-                                style={thumbDeleteStyle}
-                              >
-                                Close
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDeleteAsset(preview)}
-                                style={thumbDeleteStyle}
-                              >
-                                Remove
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteAsset(preview)}
+                              style={thumbDeleteStyle}
+                            >
+                              Remove
+                            </button>
                           </figcaption>
                         </figure>
                       ))}
@@ -1030,8 +1253,28 @@ export function ItemFormPanel({
                   : "Create post"}
             </Button>
           </div>
-        </form>
+          </form>
+        </div>
       </SlidePanel>
+
+      {/* Mobile only — at 900px and up the player is seated inside the
+          widened panel instead, where blacking out the screen for a short
+          clip read as a jump cut. A sibling of SlidePanel, never a second
+          SlidePanel: the panel's body scroll-lock is not re-entrant (its
+          lines 56–58), and the overlay relies on the panel underneath
+          staying open — form state, unsaved caption included, is exactly as
+          she left it when this closes. Mounting only while playing is what
+          stops the audio on close, on both surfaces. */}
+      {playingAssetId !== null && !isDesktopViewport && (
+        <VideoPlaybackOverlay
+          onClose={handleStopPlayback}
+          iframeUrl={playbackUrl}
+          error={playbackError}
+          clientName={playbackClientName}
+          meta={overlayMeta}
+          caption={values.caption}
+        />
+      )}
 
       <ConfirmDialog
         open={confirmDeleteAsset !== null}
@@ -1157,15 +1400,6 @@ const thumbFailedPlaceholderStyle: CSSProperties = {
   borderBottom: "2px solid var(--status-danger)",
 };
 
-// Same 9:16 box as every other tile. `border: none` because the panel draws
-// the frame; the player fills it edge to edge.
-const thumbPlayerStyle: CSSProperties = {
-  display: "block",
-  width: "100%",
-  aspectRatio: "9 / 16",
-  border: "none",
-};
-
 const thumbPlayButtonStyle: CSSProperties = {
   display: "block",
   position: "relative",
@@ -1251,4 +1485,110 @@ const cancelStyle: CSSProperties = {
   textTransform: "uppercase",
   color: "var(--text-body)",
   cursor: "pointer",
+};
+
+/**
+ * The clipping column the desktop player lives in. `overflowX: clip`, never
+ * `hidden`: a hidden ancestor becomes a scroll container, which would make
+ * the sticky inner pin to the column itself (which never scrolls) instead of
+ * the panel's scroll area. Its width transition matches SlidePanel's so the
+ * reveal and the widen move as one.
+ */
+const playerColStyle: CSSProperties = {
+  flex: "0 0 auto",
+  overflowX: "clip",
+  transition: "width 200ms ease-out",
+};
+
+/** Sticks while a long form scrolls beside it. `top` matches the scroll
+ * container's 20px padding so pinning doesn't shift the player. The gutter
+ * rides here as padding so it collapses with the column. */
+const playerStickyStyle: CSSProperties = {
+  position: "sticky",
+  top: 20,
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+  paddingRight: PLAYER_GUTTER_PX,
+};
+
+const playerChromeRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+};
+
+const playerLabelStyle: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+  color: "var(--text-muted)",
+};
+
+// Matches SlidePanel's own header close button, so the player column reads
+// as part of the panel rather than a layer floating over it.
+const playerCloseStyle: CSSProperties = {
+  width: 32,
+  height: 32,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "var(--text-body)",
+  backgroundColor: "transparent",
+  border: "1px solid var(--border)",
+  cursor: "pointer",
+  fontSize: 16,
+  lineHeight: 1,
+  flex: "0 0 auto",
+};
+
+/** ~360x640 (width follows from the ratio). --sidebar-deep behind the
+ * player while it boots — the overlay's video-box idiom, and the same green
+ * the minted URL's letterboxColor pads non-9:16 clips with, so the box
+ * reads intentional in every state. */
+const playerVideoBoxStyle: CSSProperties = {
+  height: PLAYER_HEIGHT_CSS,
+  aspectRatio: "9 / 16",
+  backgroundColor: "var(--sidebar-deep)",
+};
+
+const playerIframeStyle: CSSProperties = {
+  ...playerVideoBoxStyle,
+  display: "block",
+  border: "none",
+};
+
+// Cream on the deep green, like the overlay's "Opening…" and error notes.
+const playerNoteStyle: CSSProperties = {
+  ...playerVideoBoxStyle,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 24,
+  textAlign: "center",
+  fontSize: 13,
+  lineHeight: 1.5,
+  color: "rgba(242, 237, 228, 0.8)",
+};
+
+const playerCopyStyle: CSSProperties = {
+  alignSelf: "flex-start",
+  background: "transparent",
+  border: "1px solid var(--border)",
+  minHeight: 36,
+  padding: "0 14px",
+  fontSize: 11,
+  fontWeight: 600,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  color: "var(--accent)",
+};
+
+/** Flexes into whatever the player column leaves; full width while it is
+ * collapsed, so the closed-player layout is pixel-identical to before. */
+const formColStyle: CSSProperties = {
+  flex: "1 1 0%",
+  minWidth: 0,
 };

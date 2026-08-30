@@ -7,7 +7,8 @@ interface SlidePanelProps {
   onClose: () => void;
   title: string;
   /** Panel width in pixels. Defaults to 400; invoices pass 520 to fit
-   * the line-items editor without cramping descriptions. */
+   * the line-items editor without cramping descriptions. A change while
+   * open animates (the content panel widens to seat a video player). */
   widthPx?: number;
   children: ReactNode;
 }
@@ -151,7 +152,11 @@ export function SlidePanel({
           backgroundColor: "var(--surface-raised)",
           borderLeft: "1px solid var(--border)",
           transform: open ? "translateX(0)" : "translateX(100%)",
-          transition: "transform 200ms ease-out",
+          // Width is in the list so a live `widthPx` change reads as the
+          // panel accommodating its content, not a jump cut — the content
+          // panel widens for video playback. Anchored right, so widening
+          // grows leftward and the content at the right edge stays put.
+          transition: "transform 200ms ease-out, width 200ms ease-out",
           zIndex: 50,
           display: "flex",
           flexDirection: "column",

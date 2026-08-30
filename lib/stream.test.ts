@@ -757,6 +757,21 @@ describe("createPlaybackUrls", () => {
     expect(new URL(iframeUrl).searchParams.get("poster")).toBe(posterUrl);
   });
 
+  it("brands and autostarts the player via documented query params", () => {
+    const { iframeUrl } = createPlaybackUrls(VIDEO_UID);
+    const params = new URL(iframeUrl).searchParams;
+
+    // --accent and --sidebar-bg from app/globals.css, duplicated server-side.
+    expect(params.get("primaryColor")).toBe("#A8788A");
+    expect(params.get("letterboxColor")).toBe("#1B3827");
+    expect(params.get("autoplay")).toBe("true");
+
+    // The raw string must carry the hex percent-encoded — a literal `#` would
+    // end the URL at the fragment and silently drop what follows.
+    expect(iframeUrl).toContain("primaryColor=%23A8788A");
+    expect(iframeUrl).not.toContain("primaryColor=#");
+  });
+
   it("absorbs a subdomain pasted with a scheme or a trailing slash", () => {
     // Both produce `https://https://…`, which fails only in front of a client.
     vi.stubEnv(

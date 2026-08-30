@@ -109,6 +109,24 @@ export function timeInputValueInTimezone(d: Date): string {
   return `${map.hour ?? "00"}:${map.minute ?? "00"}`;
 }
 
+/**
+ * "14:30" (an `<input type="time">` value) → "2:30pm", matching
+ * `formatShortTimeInTimezone`'s style. The display-direction counterpart of
+ * `timeInputValueInTimezone`, for surfaces that show the form's LIVE value
+ * rather than a stored instant — no Date and no timezone math, because the
+ * input string already IS the wall clock.
+ */
+export function timeLabelFromInputValue(value: string): string {
+  const [hRaw, mRaw] = value.split(":");
+  const h24 = Number(hRaw);
+  const mi = Number(mRaw);
+  if (!Number.isFinite(h24) || !Number.isFinite(mi)) return value;
+  const ampm = h24 >= 12 ? "pm" : "am";
+  let h12 = h24 % 12;
+  if (h12 === 0) h12 = 12;
+  return mi === 0 ? `${h12}${ampm}` : `${h12}:${String(mi).padStart(2, "0")}${ampm}`;
+}
+
 export function formatAssetCount(count: number): string {
   if (count === 0) return "—";
   return count === 1 ? "1 photo" : `${count} photos`;

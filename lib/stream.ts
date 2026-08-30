@@ -799,10 +799,35 @@ export function createPlaybackUrls(uid: string): StreamPlaybackUrls {
     `${base}/thumbnails/thumbnail.jpg` +
     `?time=${POSTER_TIME}&width=${POSTER_WIDTH}&height=${POSTER_HEIGHT}&fit=crop`;
 
-  // Handing the player our own poster keeps the still identical to the tile it
-  // expands from; without it the player generates its own frame and the image
-  // visibly changes on press.
-  const iframeUrl = `${base}/iframe?poster=${encodeURIComponent(posterUrl)}`;
+  // Player customization rides on the src as query params — Cloudflare's
+  // documented "basic options" for the Stream player. URLSearchParams so the
+  // hex colors and the nested poster URL are each encoded exactly once; a
+  // literal `#` would end the URL at the fragment and silently drop every
+  // parameter after it.
+  //
+  // - poster: our own frame, so the still is identical to the tile it opened
+  //   from; without it the player generates its own and the image visibly
+  //   changes on press.
+  // - primaryColor: the mauve accent, so the scrubber and controls read as
+  //   DBS rather than Cloudflare-default blue. Duplicated from --accent in
+  //   app/globals.css because this module runs server-side, where CSS custom
+  //   properties do not exist; keep the two in sync.
+  // - autoplay: this URL is minted at press time, so play intent has already
+  //   been expressed — landing on a paused player would demand a second press
+  //   inside the frame. Browsers honour unmuted autoplay only when the
+  //   embedding page delegates its click via allow="autoplay" (the playback
+  //   overlay's iframe does); where a browser still refuses, the player just
+  //   waits at the poster, which is the pre-autoplay behavior.
+  // - letterboxColor: the playback overlay's backdrop (--sidebar-bg), so a
+  //   clip whose ratio is not exactly 9:16 pads in the overlay's green
+  //   instead of black bars that outline the iframe.
+  const iframeParams = new URLSearchParams({
+    poster: posterUrl,
+    primaryColor: "#A8788A",
+    autoplay: "true",
+    letterboxColor: "#1B3827",
+  });
+  const iframeUrl = `${base}/iframe?${iframeParams.toString()}`;
 
   return { iframeUrl, posterUrl, expiresAt };
 }
