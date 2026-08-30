@@ -41,16 +41,18 @@ Calendar work sits at Phase 3 so Kelsey's building surface is finished before Ph
 | # | Phase | Slices | Risk | Client-visible | Status |
 |---|---|---|---|---|---|
 | 0 | Prep and decisions | 3 | None | No | **Complete** |
-| 1 | Schema, types, owner CRUD (photos) | 4 | Low | No | 1.1–1.2 done |
-| 2 | Cloudflare Stream, owner-side | 4 | **High** | No |
-| 3 | Calendar extraction + content calendar | 3 | Medium | No |
-| 4 | Release + client queue + Approve | 4 | Medium | **Yes** |
+| 1 | Schema, types, owner CRUD (photos) | 4 | Low | No | **Complete** |
+| 2 | Cloudflare Stream, owner-side | 4 | **High** | No | **Complete** |
+| 3 | Calendar extraction + content calendar | 3 | Medium | No | **Complete** |
+| — | UI polish pass (unplanned) | — | Low | No | **Complete** |
+| — | **DESIGN PASS** — client-facing screens | — | — | — | Not started |
+| 4 | Release + client queue + Approve | 4 | Medium | **Yes** | |
 | 5 | Request-changes form + rounds | 3 | Medium | Yes |
 | 6 | Accept / deny / replace / re-release | 4 | Medium | Yes |
 | 7 | Deadline cron + auto-approve + lock | 2 | Low | Yes |
 | 8 | Billing accrual + invoice injection | 3 | **High** | Yes |
 
-Phases 0–3 ship to production invisibly. Nothing reaches a client until Phase 4.
+Phases 0–3 ship to production invisibly. Nothing reaches a client until Phase 4. Phases 0–3 and the polish pass that followed them are shipped; the design pass is the next step.
 
 ---
 
@@ -194,7 +196,72 @@ Owner-side playback of ready assets, 9:16 vertical.
 
 ## Phase 3 — Calendar extraction + content calendar
 
+**Status: complete.** Shipped in `f52a104`. What was built differs from the
+options this plan left open, so the resolved shape is recorded below each slice.
+
 ### Slice 3.1 — Parameterize `MonthView`
+**Status: done — extracted, not parameterized in place.**
+
+`MonthView` was split rather than widened. The 6×7 layout moved into a generic
+`MonthGrid` (`app/owner/calendar/_components/MonthGrid.tsx`), and `MonthView`
+stayed as the owner calendar's entry point, now a thin consumer that supplies
+the pill renderer the grid no longer knows about.
+
+`MonthGrid` is generic over `MonthGridEvent = { id, dateKey }` — the only two
+fields it reads. It buckets by `dateKey` and keys children by `id`; every other
+field belongs to the consumer's event type and is seen only by its own
+renderer. The four coupling points resolved as:
+
+| Coupling point | Resolution |
+|---|---|
+| `CalendarEvent.source` | **Not widened.** The content calendar defines its own `ContentCalendarEvent` view-model that satisfies `MonthGridEvent`. `CalendarEvent` is untouched, so no owner-calendar code had to learn a `content_item` variant. |
+| `MonthEventPill` | Left in `MonthView`. Injected as `renderDayContent(events, day)`, which draws a whole day's event area — pills, tiles, the overflow link — rather than one event at a time. The content calendar passes a completely different renderer. |
+| Day-cell hrefs | Injected as `dayHref(dateKey) => string`. The grid hands the resolved URL back to `renderDayContent` via `MonthGridDay.href`, so the empty-cell target and the overflow link agree by construction. |
+| Location | **Stayed under `app/owner/calendar/_components/`.** Both consumers are owner-side. The client review queue is a queue, not a calendar, so the move to neutral `components/` was not earned. Revisit only if a client surface ever needs a month grid. |
+
+Widening `CalendarEvent` was the option this plan named first and it was
+rejected on purpose: the two event types render, link, and color completely
+differently, and the union would have pulled the content vocabulary into
+`eventColors.ts` and `MonthEventPill` for no gain.
+
+The owner calendar was regression-checked manually. `eventColors.ts`,
+`MonthEventPill`, and the DayPanel deep-links were not modified.
+
+### Slice 3.2 — Content item mapper
+**Status: done — as a fourth mapper, deliberately not assembled.**
+
+`contentItemToEvent` lives in `app/owner/content/_lib/calendarEvents.ts`,
+written in the same style as `shootToEvent` / `timeBlockToEvent` /
+`externalEventToEvent`.
+
+**It is deliberately NOT called from `fetchEventsInRange`.** That function
+feeds the live owner calendar; merging content items into it would put every
+draft post onto the calendar Kelsey uses to run her shoot schedule. The content
+calendar is fed from its own cycle-scoped fetches in
+`app/owner/content/_lib/queries.ts` instead. The audit's "a new source only
+touches the mapper" isolation still holds — this source simply has a different
+consumer.
+
+The module is pure and client-safe, because `ContentCalendarEvent` crosses into
+the client `ContentCalendar` component. Signed thumbnail URLs are minted
+server-side in `_lib/calendarThumbs.ts` and passed in; a null URL is a
+placeholder instruction, never an error, so a post stays visible on the
+calendar while its video transcodes.
+
+### Slice 3.3 — Kelsey's content calendar view
+**Status: done.** Month grid over `MonthGrid`, with the all-clients /
+single-client filter. The 9:16-thumbnail-in-a-day-cell problem this plan called
+the hardest layout problem in the feature was solved twice — see the polish
+pass below for the shape that shipped.
+
+### Original slice notes
+
+Kept for the reasoning; superseded by the status blocks above. Two things
+below were decided the other way and should not be acted on: widening
+`CalendarEvent`, and assembling the content mapper into
+`fetchEventsInRange`.
+
+#### Slice 3.1 (original) — Parameterize `MonthView`
 The grid is already presentational — `app/owner/calendar/_components/MonthView.tsx` takes `{ monthKey, events, now? }` and fetches nothing. Four coupling points remain:
 
 1. **`CalendarEvent.source`** (`app/owner/calendar/_lib/types.ts:40–70`) — a union of exactly `shoot | time_block | external`. Either widen it with a `content_item` variant, or define a minimal generic event shape the calendar types satisfy.
@@ -206,13 +273,129 @@ Already pure and reusable as-is: `monthGridDateKeys` / `dateKeyInMonth` (`_lib/t
 
 **Risk:** this touches the live owner calendar, which has no tests. The extraction is mechanical, but `eventColors.ts` and the DayPanel deep-links are load-bearing. Regression-check the existing calendar manually before moving on.
 
-### Slice 3.2 — Content item mapper
+#### Slice 3.2 (original) — Content item mapper
 A fourth mapper alongside `shootToEvent` / `timeBlockToEvent` / `externalEventToEvent` (`app/owner/calendar/_lib/queries.ts:128–195`), assembled in `fetchEventsInRange` (lines 59–126). The audit notes this isolation was designed so a new source only touches the mapper.
 
-### Slice 3.3 — Kelsey's content calendar view
+#### Slice 3.3 (original) — Kelsey's content calendar view
 Month grid fed from `content_items`, with the all-clients / single-client filter toggle from spec §4.1. 9:16 thumbnails inside day cells — the audit does not address this and it is the hardest layout problem in the feature.
 
-**Done when:** Kelsey builds a month from the calendar view and the existing owner calendar is unchanged in behavior.
+**Done when:** Kelsey builds a month from the calendar view and the existing owner calendar is unchanged in behavior. **Met.**
+
+---
+
+## UI polish pass — after Phase 3, before the design pass
+
+Not in the original plan. Three unplanned commits that followed Phase 3, all
+owner-side, all on surfaces Phase 3 had just built. Recorded because they
+changed shapes this plan describes.
+
+### Client filter: dropdown, not pills
+`ClientFilterPills.tsx` was deleted and replaced by `ClientFilterSelect.tsx`.
+Five clients already filled the pill row; thirty would have wrapped into a
+wall. The select navigates to the same `contentHref`, so month and view are
+preserved and back-button behavior is unchanged. Built from the house form
+styles (`formStyles.ts`) — no other owner surface had a client-filter dropdown
+to copy, so this establishes the pattern. 16px font size to prevent iOS
+Safari's focus zoom; 48px min height for the tap target. One toolbar row on
+desktop (stepper, filter, view toggle); the filter drops to its own full-width
+row on mobile.
+
+This supersedes the plan's "copy the pattern, not the component" note about
+`StatusFilterPills` for the content surface.
+
+### Day cells: thumb + text pills, not bare thumbnails
+The first pass rendered a 32×56px thumbnail with no text — platform, time, and
+client lived only in a `title` tooltip, which does not exist on a phone, and a
+32px crop of a vertical video is unrecognizable anyway.
+
+Each post now renders as a horizontal pill: a small 9:16 thumbnail strip on the
+left, then time plus platform (or time plus client in the all-clients view),
+truncated with ellipsis. It matches `MonthEventPill`'s visual language — 3px
+accent left border, `--surface-raised` fill, same padding and font size — so
+the content calendar reads like the shoots calendar Kelsey already uses daily.
+Processing videos get a muted strip with the text still legible; failed gets a
+danger left border. Overflow keeps the `+N more` convention, linking to the
+list view anchored to that day.
+
+**The thumbnail is an identity strip, not a preview.** The real preview is one
+click away in the item panel. That reframing is what made the "hardest layout
+problem in the feature" tractable.
+
+Contained entirely within `ContentCalendar.tsx`. `MonthGrid`, `MonthView`,
+`MonthEventPill`, `eventColors`, and everything under `app/owner/calendar/`
+were untouched — the Slice 3.1 seam held.
+
+### Video playback: overlay on mobile, widened panel on desktop
+Blacking out the whole screen to watch a 10-second clip read as being yanked
+out of the thing you were doing.
+
+At **900px and up**, pressing a video tile widens the item `SlidePanel` from
+520px to 850px and seats a ~360×640 player beside the form. Below 900px,
+`VideoPlaybackOverlay` renders exactly as before — on mobile the panel is
+already full-width, so the overlay is the right shape there.
+
+Implementation notes worth keeping:
+- `SlidePanel`'s transition covered only `transform`, so a live width change
+  would have snapped. `width` was added to the transition — safe for other
+  consumers, whose widths never change while open.
+- The player column is always in the tree at width 0 when closed, not mounted
+  on demand, so the children array never changes shape and opening playback
+  never remounts the form. The iframe still mounts only while playing, so audio
+  stops on close.
+- The player column is sticky, with `overflow-x: clip` rather than `hidden` —
+  a `hidden` ancestor becomes a scroll container and would break the sticky.
+- Escape has three layers. A capture-phase handler closes the player without
+  letting `SlidePanel`'s bubble listener also close the panel, and disarms
+  while the delete `ConfirmDialog` owns Escape as the topmost layer.
+- An effect stops playback the moment the panel closes, so audio cannot
+  continue behind a slide-out.
+
+### Player branding
+The Stream player is branded through the minted iframe URL, not CSS — it is a
+cross-origin iframe. `lib/stream.ts` sets `primaryColor: "#A8788A"` (mauve, so
+the scrubber and controls read as portal chrome) and `letterboxColor:
+"#1B3827"` (forest — the playback backdrop, so a non-9:16 clip pads into the
+surrounding surface instead of onto black). Both are asserted in
+`lib/stream.test.ts`.
+
+---
+
+## DESIGN PASS — before Phase 4
+
+**A design step, not a build step. It comes before Phase 4 and gates it.**
+
+Everything through the polish pass is Kelsey's surface. She is in the portal
+daily, she knows what every control does, and a rough edge costs her a second.
+**Phases 4 and 5 are the only genuinely new UX in this feature, and the only
+screens a non-technical client ever sees.** A client opens the review queue a
+handful of times a month, has never been trained on it, and — per the standing
+design constraint — some of them are older and less technically confident.
+Every existing client-facing page in the portal is a list of things (invoices,
+files, messages). The review queue is the first one that asks a client to *do*
+something in sequence.
+
+Screens to design before they are built:
+
+| Screen | Phase |
+|---|---|
+| Release email | 4.2 |
+| Client review queue — the list, and the resume-where-you-left-off state | 4.3 |
+| Single item review — video, caption, Approve, Request changes | 4.3–4.4 |
+| Request-changes form — categories, per-category comment, timestamp notes | 5.1 |
+| Submit confirmation and the locked-item state | 5.2 |
+| Cycle states the client can land in — working, locked, deadline passed | 4.8, 6.4 |
+| Round 2+ consent screen | 8.1 |
+
+The risk register already names this: *"Client-facing UX too complex for older
+clients — design pass before build. The Claude Design prompt from the planning
+thread is stale and needs rewriting against the final spec."* That prompt
+rewrite is the first task of this step.
+
+**Still blocked on the client nav label** — the queue's route path and the
+release email's link both need it, and neither can be designed around a
+placeholder without churn.
+
+**STOP.** Phase 4 does not start until the client-facing screens are designed.
 
 ---
 
@@ -222,6 +405,22 @@ Month grid fed from `content_items`, with the all-clients / single-client filter
 
 ### Slice 4.1 — Release action
 Per spec §4.2: per-client, per-cycle, single action. Blocked until every asset in the cycle is `ready` — otherwise clients open dead players. Sets cycle to `in_review`. Includes unrelease and re-release (spec §4.4), which must preserve client progress because the deadline is a stored timestamp, not a countdown.
+
+**The Release gate must read asset status from its own query.** Carried forward
+from Phase 3: `ContentBoard` holds the open slide-over as
+`{ kind: "item"; item: ContentItemWithAssets | null }` in client state, and
+`panel.item` is a **snapshot captured at open time**. Slice actions call
+`router.refresh()`, which re-renders the page with fresh `items` — but
+`panel.item` still points at the object captured when the panel opened, so it
+does not update. A video that finished transcoding after the panel opened is
+still `processing` as far as `panel.item` is concerned.
+
+That is harmless for the current panel, which refetches what it needs. It is
+not harmless for a gate: reading `ready`-ness off anything descended from
+`panel.item` would let Release fire on a cycle whose assets are stale in one
+direction, or block a cycle that is actually ready in the other. The gate query
+runs server-side against `content_assets` at action time, and the client-side
+button state is a hint, never the authority.
 
 ### Slice 4.2 — Release email
 New builder module over `buildShell` (`lib/messageEmails.ts:9–93`), following `lib/invoiceEmails.ts` (builders at :11, :52, :90). All interpolations through `lib/escapeHtml.ts`. Link via `resolveBaseUrl()` + the client path.
@@ -348,11 +547,12 @@ Then: `createInvoiceAction` / `updateInvoiceAction` (`_actions.ts:141–216, 230
 |---|---|---|
 | Storage bucket | Phase 1 | **Decided** — new `content-assets` bucket |
 | Owner nav label | Phase 1 (route path) | **Decided** — "Content", route `/owner/content` |
-| Client nav label | Phase 4 (email URL) | Not decided |
+| Client nav label | **Design pass**, then Phase 4 (email URL) | Not decided |
 | Default deadline length | Phase 7 | Not decided |
 | `extra_round_price` | Phase 8 | Not set |
 | Round-2+ framing and wording | Phase 8 | Not decided |
 | Contract language | **Before any client sees Phase 4** | Not done |
+| Client-facing screen designs | Phase 4 | Not started — see the DESIGN PASS step |
 
 **The contract item is not a software task and it is the one that can't be caught up later.** The revision cap, deadline, and extra-round price must be in the client agreement before the software starts enforcing them. Phase 4 is the deadline for it.
 
@@ -370,6 +570,29 @@ Applies to every phase.
 - **All media is 9:16 vertical.** Never cropped to square or 16:9.
 - **PowerShell** for all terminal commands.
 - **Claude Code does not deploy.**
+
+---
+
+## Known issues
+
+Open, not scheduled. Recorded so they aren't rediscovered as new.
+
+### Escape closes the ConfirmDialog and the SlidePanel together
+With a delete `ConfirmDialog` open on top of a `SlidePanel`, one Escape press
+closes both. Expected behavior is that Escape dismisses only the topmost layer.
+
+**Pre-existing — it predates this feature.** Both components register a
+bubble-phase `keydown` listener on `window`
+(`ConfirmDialog.tsx:36–39`, `SlidePanel.tsx:47–50`) and neither stops
+propagation, so both handlers run on the same event. It reproduces anywhere the
+two are stacked, including the clients and invoices surfaces that shipped long
+before Phase 1.
+
+The desktop in-panel video player works around it locally with a capture-phase
+handler that disarms while the `ConfirmDialog` owns Escape. That is a local
+patch, not a fix. A real fix is a shared topmost-layer registry, which is a
+refactor of two house primitives used across the app — out of scope for this
+feature and not worth doing mid-build.
 
 ---
 

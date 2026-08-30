@@ -438,12 +438,15 @@ Kelsey is phone-first for most of her portal use. The exception is bulk month-bu
 
 ## 9. Open Items
 
+*Reviewed after Phase 3 shipped (August 2026). No decision below changed; the
+two items that gate Phase 4 were re-confirmed as still open.*
+
 | Item | Status |
 |---|---|
-| `extra_round_price` value | Not set |
+| `extra_round_price` value | **Still not set** — re-confirmed after Phase 3. Blocks Phase 8 (§5.8 consent screen), not Phase 4. |
 | Default deadline length | Not set — 3 days and 48 business hours both discussed |
 | Nav label, owner side | **Decided** — "Content", route `/owner/content` |
-| Nav label, client side | Not decided |
+| Nav label, client side | **Still not decided** — re-confirmed after Phase 3. Now the nearest blocker: the release email's link and the review queue's route path both need it, and the client-facing design pass ahead of Phase 4 cannot settle on a placeholder without churn. |
 | Round 2+ framing and wording | Not decided — must not feel punitive |
 | Cloudflare account creation | Deferred until code is in development. Payment method to be the Amex under the LLC, not personal. |
 | Contract language | Revision cap, deadline, and extra-round price must be in the client agreement **before any client sees this feature**. The software will enforce terms the client must have already agreed to. |
