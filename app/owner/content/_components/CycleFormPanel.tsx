@@ -13,6 +13,7 @@ import {
   labelStyle,
 } from "@/app/owner/clients/_components/formStyles";
 import { formatMonthLabel } from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import {
   createContentCycleAction,
   updateContentCycleAction,
@@ -32,25 +33,52 @@ interface CycleFormPanelProps {
 interface FormValues {
   includedRounds: string;
   extraRoundPrice: string;
+  revisionDeadline: string;
 }
 
 const DEFAULT_INCLUDED_ROUNDS = "1";
 
+/**
+ * The stored instant -> the `<input type="date">` value.
+ *
+ * Read through PORTAL_TIMEZONE, not off the raw Date. The deadline is stored
+ * at 23:59 Central, which in UTC is the FOLLOWING day for most of the year —
+ * `toISOString().slice(0,10)` would show Kelsey a date one day later than the
+ * one she picked, and saving that unchanged form would walk the deadline
+ * forward a day on every edit.
+ */
+function deadlineInputValue(iso: string | null): string {
+  if (!iso) return "";
+  return dateKeyInTimezone(new Date(iso));
+}
+
 function valuesFor(cycle: CycleWithClient | null): FormValues {
   if (!cycle) {
-    return { includedRounds: DEFAULT_INCLUDED_ROUNDS, extraRoundPrice: "" };
+    return {
+      includedRounds: DEFAULT_INCLUDED_ROUNDS,
+      extraRoundPrice: "",
+      revisionDeadline: "",
+    };
   }
   return {
     includedRounds: String(cycle.included_rounds),
     extraRoundPrice:
       cycle.extra_round_price === null ? "" : String(cycle.extra_round_price),
+    revisionDeadline: deadlineInputValue(cycle.revision_deadline),
   };
 }
 
 /**
- * Create/edit the month's cycle. `revision_deadline` is deliberately absent —
- * it is set at Release, which is a later phase; a cycle built here is always
- * `drafting`.
+ * Create/edit the month's cycle.
+ *
+ * `revision_deadline` lives HERE rather than inside the Release flow, and the
+ * reason is spec §4.3: extending a deadline "does not require re-release, does
+ * not reset the cycle, and does not affect any client progress". A deadline
+ * that could only be set at Release would make every extension a
+ * unrelease/re-release round trip, which would pull the queue out from under a
+ * client mid-review to change one date. Release refuses to fire while the
+ * field is empty (see `evaluateReleaseGate`), so the requirement is enforced
+ * without the field having to live inside the release step.
  */
 export function CycleFormPanel({
   open,
@@ -83,6 +111,7 @@ export function CycleFormPanel({
       setError("Included rounds must be a whole number.");
       return;
     }
+    const trimmedDeadline = values.revisionDeadline.trim();
     const trimmedPrice = values.extraRoundPrice.trim();
     const extraRoundPrice = trimmedPrice === "" ? null : Number(trimmedPrice);
     if (extraRoundPrice !== null && !(extraRoundPrice >= 0)) {
@@ -96,12 +125,14 @@ export function CycleFormPanel({
           cycleId: cycle.id,
           includedRounds,
           extraRoundPrice,
+          revisionDeadline: trimmedDeadline === "" ? null : trimmedDeadline,
         })
       : await createContentCycleAction({
           clientId: clientId ?? "",
           monthKey,
           includedRounds,
           extraRoundPrice,
+          revisionDeadline: trimmedDeadline === "" ? null : trimmedDeadline,
         });
     setSubmitting(false);
 
@@ -127,8 +158,30 @@ export function CycleFormPanel({
               {clientName || "—"} · {formatMonthLabel(monthKey)}
             </p>
             <p style={helperStyle}>
-              One cycle per client per month. The review deadline is set later,
-              when the month is released.
+              One cycle per client per month.
+            </p>
+          </div>
+
+          <div>
+            <label htmlFor="cycle-revision-deadline" style={labelStyle}>
+              Review deadline
+            </label>
+            <input
+              id="cycle-revision-deadline"
+              type="date"
+              value={values.revisionDeadline}
+              onChange={(e) =>
+                setValues((v) => ({ ...v, revisionDeadline: e.target.value }))
+              }
+              onFocus={applyFocus}
+              onBlur={clearFocus}
+              style={fieldStyle}
+            />
+            <p style={helperStyle}>
+              Reviews close at the end of this day. Required before the month
+              can be released. Changing it later is a single edit — it does not
+              re-release the month or affect anything the client has already
+              done.
             </p>
           </div>
 

@@ -28,7 +28,19 @@ import {
   buildAssetPreviews,
   type AssetPreview,
 } from "@/app/owner/content/_lib/assetPreviews";
-import { combineDateAndTimeInTimezone } from "@/app/owner/calendar/_lib/timezone";
+import { Resend } from "resend";
+import {
+  combineDateAndTimeInTimezone,
+  monthNameForMonthKey,
+  weekdayDateLabelForDateKey,
+} from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
+import { resolveBaseUrl } from "@/lib/baseUrl";
+import {
+  buildContentReleaseEmailHtml,
+  buildContentReleaseEmailSubject,
+} from "@/lib/contentEmails";
+import { evaluateReleaseGate } from "@/app/owner/content/_lib/releaseGate";
 import type { ActionResult } from "@/lib/actions";
 
 const CONTENT_PATH = "/owner/content";
@@ -132,6 +144,44 @@ function resolveScheduledFor(
   return {
     ok: true,
     scheduledFor: combineDateAndTimeInTimezone(date, time).toISOString(),
+  };
+}
+
+/**
+ * The wall-clock time a review deadline lands on, in PORTAL_TIMEZONE.
+ *
+ * Kelsey picks a DAY ("Review by Friday, September 25") and the client copy
+ * reads that day as inclusive — "anything you haven't reviewed by then is
+ * approved automatically". So the instant stored is the END of that day, not
+ * its start. A deadline stored at 00:00 would expire a full day early and
+ * auto-approve a month on the morning the client was told they still had.
+ */
+const DEADLINE_WALL_CLOCK = "23:59";
+
+/**
+ * A deadline date key -> the stored instant, or null for "not set yet".
+ *
+ * Deliberately NOT pinned to the cycle's month, which is the one way this
+ * differs from `resolveScheduledFor`. A review deadline normally falls BEFORE
+ * the content month — October's posts are reviewed in September — so the month
+ * pin that protects `scheduled_for` would reject every correct value here.
+ *
+ * `combineDateAndTimeInTimezone` for the same reason it is used above: the
+ * `new Date(y, m-1, d)` path reads the server's offset, which is UTC in
+ * production (spec §3.9).
+ */
+function resolveRevisionDeadline(
+  raw: string | null
+): { ok: true; deadline: string | null } | { ok: false; error: string } {
+  if (raw === null || raw.trim() === "") return { ok: true, deadline: null };
+  const date = raw.trim();
+  if (!DATE_RE.test(date)) return { ok: false, error: "Invalid review deadline" };
+  return {
+    ok: true,
+    deadline: combineDateAndTimeInTimezone(
+      date,
+      DEADLINE_WALL_CLOCK
+    ).toISOString(),
   };
 }
 
@@ -280,6 +330,8 @@ export interface CreateContentCycleInput {
   monthKey: string;
   includedRounds: number;
   extraRoundPrice: number | null;
+  /** YYYY-MM-DD, or null for "not set yet". Required before Release. */
+  revisionDeadline: string | null;
 }
 
 export async function createContentCycleAction(
@@ -298,6 +350,8 @@ export async function createContentCycleAction(
   if (input.extraRoundPrice !== null && !(input.extraRoundPrice >= 0)) {
     return { ok: false, error: "Extra round price must be zero or more" };
   }
+  const deadline = resolveRevisionDeadline(input.revisionDeadline);
+  if (!deadline.ok) return { ok: false, error: deadline.error };
 
   const supabase = getSupabaseServiceClient();
   const { data, error } = await supabase
@@ -305,6 +359,7 @@ export async function createContentCycleAction(
     .insert({
       client_id: input.clientId,
       month: `${input.monthKey}-01`,
+      revision_deadline: deadline.deadline,
       included_rounds: input.includedRounds,
       extra_round_price: input.extraRoundPrice,
       status: "drafting",
@@ -330,6 +385,8 @@ export interface UpdateContentCycleInput {
   cycleId: string;
   includedRounds: number;
   extraRoundPrice: number | null;
+  /** YYYY-MM-DD, or null to clear. Editable while `in_review` — see below. */
+  revisionDeadline: string | null;
 }
 
 export async function updateContentCycleAction(
@@ -347,11 +404,19 @@ export async function updateContentCycleAction(
   if (input.extraRoundPrice !== null && !(input.extraRoundPrice >= 0)) {
     return { ok: false, error: "Extra round price must be zero or more" };
   }
+  const deadline = resolveRevisionDeadline(input.revisionDeadline);
+  if (!deadline.ok) return { ok: false, error: deadline.error };
 
+  // Editing a RELEASED cycle is allowed here, and only the deadline field
+  // makes that meaningful: spec §4.3 says extending is a single field change
+  // that "does not require re-release, does not reset the cycle, and does not
+  // affect any client progress". Nothing about this write touches item state,
+  // so that property holds by construction.
   const supabase = getSupabaseServiceClient();
   const { data, error } = await supabase
     .from("content_cycles")
     .update({
+      revision_deadline: deadline.deadline,
       included_rounds: input.includedRounds,
       extra_round_price: input.extraRoundPrice,
     })
@@ -409,6 +474,258 @@ export async function deleteContentCycleAction(
   if (error) return { ok: false, error: error.message };
 
   await sweepStorageObjects(paths);
+  revalidatePath(CONTENT_PATH);
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Release / unrelease
+//
+// The first client-visible write in the whole feature. `content_cycles.status`
+// is the switch: nothing under /client/review reads a cycle that is not
+// 'in_review', so this pair of actions is the entire visibility boundary.
+// ---------------------------------------------------------------------------
+
+/**
+ * Make a month visible to its client (spec §4.2). Per client, per cycle, one
+ * action — there is no per-post send and no partial release.
+ *
+ * RE-RELEASE IS THIS SAME ACTION. Spec §4.4's recovery path is unrelease ->
+ * add the post -> release again, so a second call after an unrelease is the
+ * ordinary path, not a special case. What makes that safe is the item filter
+ * below.
+ *
+ * The gate is re-evaluated HERE, after the press, against its own queries.
+ * Whatever the button looked like is a hint that may be seconds stale; this is
+ * the decision. See `evaluateReleaseGate`.
+ *
+ * WRITE ORDER IS DELIBERATE: items first, cycle second. The two writes are not
+ * in a transaction (the service client has no transaction API here), so one
+ * can land without the other, and the two failure modes are not equal:
+ *
+ *   items then cycle  — a crash between them leaves items at 'in_review'
+ *                       inside a 'drafting' cycle. The client sees nothing,
+ *                       because visibility is the cycle's status. Kelsey
+ *                       presses Release again and it completes.
+ *   cycle then items  — a crash between them leaves a RELEASED cycle whose
+ *                       posts are all still 'draft'. The client gets the email
+ *                       and opens a queue with nothing in it.
+ *
+ * The first is invisible and self-healing. The second is the bad one, in front
+ * of a client. So: items first.
+ */
+export async function releaseContentCycleAction(
+  cycleId: string
+): Promise<ActionResult<{ releasedItemCount: number }>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const cycleCheck = await loadCycle(cycleId);
+  if (!cycleCheck.ok) return { ok: false, error: cycleCheck.error };
+  const { cycle } = cycleCheck;
+
+  if (cycle.status === "in_review") {
+    return { ok: false, error: "This month is already released." };
+  }
+  if (cycle.status === "locked") {
+    return {
+      ok: false,
+      error: "This month is locked. Reviews are closed for it.",
+    };
+  }
+
+  let gate;
+  try {
+    gate = await evaluateReleaseGate(cycle);
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err instanceof Error
+          ? err.message
+          : "Could not check whether this month is ready to release",
+    };
+  }
+  if (!gate.ok) return { ok: false, error: gate.reason };
+
+  const supabase = getSupabaseServiceClient();
+
+  // Only 'draft' items are promoted. Everything else is CLIENT PROGRESS and is
+  // left exactly as it stands — an approved post stays approved across an
+  // unrelease/re-release cycle, which is the property spec §4.4 depends on
+  // ("submitted items remain submitted; the client sees one new item appear").
+  //
+  // It also means a post Kelsey adds to an already-released month stays
+  // invisible until she releases again: it is created 'draft', and 'draft' is
+  // what the client queue filters out.
+  const { data: promoted, error: itemError } = await supabase
+    .from("content_items")
+    .update({ status: "in_review" })
+    .eq("cycle_id", cycle.id)
+    .eq("status", "draft")
+    .select("id");
+  if (itemError) {
+    return { ok: false, error: itemError.message };
+  }
+
+  // Guarded on the status this action already read, so two concurrent presses
+  // cannot both succeed — the second matches no row and is reported as the
+  // already-released case rather than sending a second email in slice 4.2.
+  const { data: released, error: cycleError } = await supabase
+    .from("content_cycles")
+    .update({ status: "in_review" })
+    .eq("id", cycle.id)
+    .eq("status", "drafting")
+    .select("id")
+    .maybeSingle();
+  if (cycleError) return { ok: false, error: cycleError.message };
+  if (!released) {
+    return { ok: false, error: "This month is already released." };
+  }
+
+  await sendReleaseEmail(cycle);
+
+  revalidatePath(CONTENT_PATH);
+  return { ok: true, data: { releasedItemCount: (promoted ?? []).length } };
+}
+
+/**
+ * Tell the client their month is ready (spec §5.1, copy deck Screen 8).
+ *
+ * BEST-EFFORT, and never throws. The cycle is already released by the time
+ * this runs; a Resend outage, a client with no email on file, or a missing API
+ * key must not report the release as failed or roll it back. This is the same
+ * contract the payment-confirmation send uses
+ * (`app/owner/invoices/_actions.ts`, "Confirmation email is best-effort"),
+ * down to the console.error-and-continue on failure.
+ *
+ * Resend is constructed inline with the same `from` fallback as every other
+ * send site in the codebase. There is no shared wrapper anywhere, and
+ * introducing one here — mid-feature, for the fifth caller — would be a
+ * refactor smuggled into a feature phase.
+ */
+async function sendReleaseEmail(cycle: ContentCycleRecord): Promise<void> {
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!resendKey) return;
+
+  try {
+    const supabase = getSupabaseServiceClient();
+
+    const { data: clientRow, error: clientError } = await supabase
+      .from("clients")
+      .select("name, email")
+      .eq("id", cycle.client_id)
+      .maybeSingle();
+    if (clientError) throw new Error(clientError.message);
+
+    const client = clientRow as { name: string; email: string | null } | null;
+    if (!client?.email) {
+      // Email is nullable on `clients` (migration 004 — a client can be on
+      // file with only a phone). Nothing to send to, and nothing broken.
+      console.error(
+        `[content] release email skipped for cycle ${cycle.id}: client has no email on file`
+      );
+      return;
+    }
+
+    // The count the client will actually face, not the number of rows this
+    // release promoted. On a re-release after adding one post those differ:
+    // one row was promoted, but the queue still holds everything the client
+    // had not got to, and "Kelsey has 1 post ready for your review" would be
+    // wrong in front of eleven others.
+    const { data: awaiting, error: awaitingError } = await supabase
+      .from("content_items")
+      .select("id")
+      .eq("cycle_id", cycle.id)
+      .eq("status", "in_review");
+    if (awaitingError) throw new Error(awaitingError.message);
+
+    // Non-null by the time this runs: the release gate refuses a cycle with no
+    // deadline. Guarded anyway rather than asserted, because this function is
+    // best-effort and a wrong date in a client's inbox is worse than no email.
+    if (!cycle.revision_deadline) {
+      console.error(
+        `[content] release email skipped for cycle ${cycle.id}: no revision deadline`
+      );
+      return;
+    }
+    const deadlineLabel = weekdayDateLabelForDateKey(
+      dateKeyInTimezone(new Date(cycle.revision_deadline))
+    );
+    const monthName = monthNameForMonthKey(cycle.month.slice(0, 7));
+
+    const resend = new Resend(resendKey);
+    const fromAddress =
+      process.env.RESEND_FROM_EMAIL ||
+      "Digital Bloom Socials <onboarding@resend.dev>";
+
+    const { error: sendError } = await resend.emails.send({
+      from: fromAddress,
+      to: client.email,
+      subject: buildContentReleaseEmailSubject(monthName),
+      html: buildContentReleaseEmailHtml({
+        recipientName: client.name,
+        monthName,
+        postCount: (awaiting ?? []).length,
+        deadlineLabel,
+        reviewUrl: `${resolveBaseUrl()}/client/review`,
+      }),
+    });
+    if (sendError) {
+      console.error(
+        `[content] release email failed for cycle ${cycle.id}:`,
+        sendError.message
+      );
+    }
+  } catch (err) {
+    console.error(`[content] release email threw for cycle ${cycle.id}:`, err);
+  }
+}
+
+/**
+ * Take a released month back out of the client's hands (spec §4.4, step 1).
+ *
+ * ONLY THE CYCLE ROW IS TOUCHED. Item statuses are left alone on purpose:
+ * they ARE the client's progress, and the queue is resumable precisely because
+ * progress lives in per-item status rather than in a separate table. Flipping
+ * items back to 'draft' here would erase an approval the client already gave
+ * and then silently re-ask for it on re-release.
+ *
+ * The deadline is likewise untouched. It is a stored timestamp, not a
+ * countdown from release (spec §4.3), so an unrelease does not extend it and a
+ * re-release does not restart it.
+ */
+export async function unreleaseContentCycleAction(
+  cycleId: string
+): Promise<ActionResult> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const cycleCheck = await loadCycle(cycleId);
+  if (!cycleCheck.ok) return { ok: false, error: cycleCheck.error };
+  const { cycle } = cycleCheck;
+
+  if (cycle.status === "locked") {
+    return {
+      ok: false,
+      error: "This month is locked. Reviews are closed for it.",
+    };
+  }
+  if (cycle.status !== "in_review") {
+    return { ok: false, error: "This month has not been released." };
+  }
+
+  const supabase = getSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from("content_cycles")
+    .update({ status: "drafting" })
+    .eq("id", cycle.id)
+    .eq("status", "in_review")
+    .select("id")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!data) return { ok: false, error: "This month has not been released." };
+
   revalidatePath(CONTENT_PATH);
   return { ok: true };
 }

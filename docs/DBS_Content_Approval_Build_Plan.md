@@ -45,14 +45,14 @@ Calendar work sits at Phase 3 so Kelsey's building surface is finished before Ph
 | 2 | Cloudflare Stream, owner-side | 4 | **High** | No | **Complete** |
 | 3 | Calendar extraction + content calendar | 3 | Medium | No | **Complete** |
 | — | UI polish pass (unplanned) | — | Low | No | **Complete** |
-| — | **DESIGN PASS** — client-facing screens | — | — | — | Not started |
+| — | **DESIGN PASS** — client-facing screens | — | — | — | **Complete** — 30 boards, 9 screens, copy deck |
 | 4 | Release + client queue + Approve | 4 | Medium | **Yes** | |
 | 5 | Request-changes form + rounds | 3 | Medium | Yes |
 | 6 | Accept / deny / replace / re-release | 4 | Medium | Yes |
 | 7 | Deadline cron + auto-approve + lock | 2 | Low | Yes |
 | 8 | Billing accrual + invoice injection | 3 | **High** | Yes |
 
-Phases 0–3 ship to production invisibly. Nothing reaches a client until Phase 4. Phases 0–3 and the polish pass that followed them are shipped; the design pass is the next step.
+Phases 0–3 ship to production invisibly. Nothing reaches a client until Phase 4. Phases 0–3, the polish pass, and the design pass are done; Phase 4 is the next build step.
 
 ---
 
@@ -364,6 +364,14 @@ surrounding surface instead of onto black). Both are asserted in
 
 **A design step, not a build step. It comes before Phase 4 and gates it.**
 
+**Status: COMPLETE (2026-08-30).** 30 boards across 9 screens on the design
+canvas (https://claude.ai/code/artifact/5126b6c5-a061-4afc-917e-98e0c849477d),
+every screen and state drawn mobile-first with desktop variants, plus a full
+copy deck rescued into `docs/DBS_Content_Approval_Copy_Deck.md`. Decisions the
+pass produced are written back into the feature doc: client nav label (§9),
+approve confirmation (§5.3), message-link placement (§5.6), no-cycle states
+(§5.9), round-2+ wording (§5.8/§9).
+
 Everything through the polish pass is Kelsey's surface. She is in the portal
 daily, she knows what every control does, and a rough edge costs her a second.
 **Phases 4 and 5 are the only genuinely new UX in this feature, and the only
@@ -391,11 +399,11 @@ clients — design pass before build. The Claude Design prompt from the planning
 thread is stale and needs rewriting against the final spec."* That prompt
 rewrite is the first task of this step.
 
-**Still blocked on the client nav label** — the queue's route path and the
-release email's link both need it, and neither can be designed around a
-placeholder without churn.
+The nav-label blocker resolved during the pass itself: **"Review & Approve"**,
+route `/client/review`.
 
 **STOP.** Phase 4 does not start until the client-facing screens are designed.
+*This gate is cleared.*
 
 ---
 
@@ -425,7 +433,9 @@ button state is a hint, never the authority.
 ### Slice 4.2 — Release email
 New builder module over `buildShell` (`lib/messageEmails.ts:9–93`), following `lib/invoiceEmails.ts` (builders at :11, :52, :90). All interpolations through `lib/escapeHtml.ts`. Link via `resolveBaseUrl()` + the client path.
 
-**Blocked on the client nav label** — the URL path can't be written until it's named.
+**Unblocked** — the client nav label is decided: "Review & Approve", route `/client/review`.
+
+**Implementation note from the design pass:** `buildShell` (`lib/messageEmails.ts:9–93`) hard-codes the CTA label "Open Portal" and has no hidden-preheader slot. The release email needs two small optional params added to the shell — a button label (the design uses "Review your posts") and a preheader string — not a new shell. Subject, preview text, and all body strings: `docs/DBS_Content_Approval_Copy_Deck.md` (Screen 8).
 
 Note: every existing send site constructs `new Resend(...)` inline with the same `from` fallback. There is no shared wrapper. Match the existing pattern rather than introducing one mid-feature.
 
@@ -440,8 +450,12 @@ Signed playback token minting is Pattern B verbatim: verify the requesting clien
 
 **Design constraint:** some clients are older and less technically confident. Simplicity governs every decision on this surface.
 
+**All client-facing strings come from `docs/DBS_Content_Approval_Copy_Deck.md` — the source of truth. No improvising copy at build time.**
+
 ### Slice 4.4 — Approve + Kelsey's rollup
-Per-item Approve. Kelsey's approved / revised / untouched counts (spec §4.5), arriving via `useVisibilityPolling` against a guarded route.
+Per-item Approve, behind the lightweight approve confirmation from the design pass (feature doc §5.3). Kelsey's approved / revised / untouched counts (spec §4.5), arriving via `useVisibilityPolling` against a guarded route.
+
+Client-facing strings (approve dialog, approved state, status pills): `docs/DBS_Content_Approval_Copy_Deck.md`, the source of truth — no improvising copy at build time.
 
 **Done when:** a real cycle is released to one client, they approve items, and Kelsey sees the counts move.
 
@@ -547,12 +561,12 @@ Then: `createInvoiceAction` / `updateInvoiceAction` (`_actions.ts:141–216, 230
 |---|---|---|
 | Storage bucket | Phase 1 | **Decided** — new `content-assets` bucket |
 | Owner nav label | Phase 1 (route path) | **Decided** — "Content", route `/owner/content` |
-| Client nav label | **Design pass**, then Phase 4 (email URL) | Not decided |
-| Default deadline length | Phase 7 | Not decided |
-| `extra_round_price` | Phase 8 | Not set |
-| Round-2+ framing and wording | Phase 8 | Not decided |
+| Client nav label | — | **Decided** — "Review & Approve", route `/client/review` |
+| Default deadline length | **The client contract, signed before the first real release (end of Phase 4)**; also the Phase 7 cycle-creation default | Not decided |
+| `extra_round_price` | **The client contract, signed before the first real release (end of Phase 4)**; also Phase 8 | Not set |
+| Round-2+ framing and wording | Phase 8 | **Decided** — `docs/DBS_Content_Approval_Copy_Deck.md` (Screen 9) |
 | Contract language | **Before any client sees Phase 4** | Not done |
-| Client-facing screen designs | Phase 4 | Not started — see the DESIGN PASS step |
+| Client-facing screen designs | Phase 4 | **Complete** — 30 boards, 9 screens, copy deck; see the DESIGN PASS step |
 
 **The contract item is not a software task and it is the one that can't be caught up later.** The revision cap, deadline, and extra-round price must be in the client agreement before the software starts enforcing them. Phase 4 is the deadline for it.
 
@@ -576,6 +590,24 @@ Applies to every phase.
 ## Known issues
 
 Open, not scheduled. Recorded so they aren't rediscovered as new.
+
+### ConfirmDialog's buttons are under the 48px tap floor
+
+`ConfirmDialog`'s confirm and cancel buttons are roughly 38px tall — `padding:
+"10px 18px"` on `buttonBase` (`components/ui/ConfirmDialog.tsx`) with no
+`minHeight`. The design system's floor is 48px.
+
+**Pre-existing**, and on a house primitive consumed across both surfaces —
+clients, invoices, content, and the Phase 4 release/unrelease confirmations all
+render it. Found while building Phase 4's approve dialog; not fixed there,
+because raising the height of a shared primitive changes the layout of every
+dialog in the app and that is not a change to smuggle into a feature phase.
+
+`ApproveDialog` (`app/client/review/_components/ApproveDialog.tsx`) does **not**
+inherit the problem. It is a separate component — the copy deck specifies a
+deliberately lighter dialog, no accent bar and a plain-face title — and its
+buttons carry `minHeight: 48`. The deck's "compact buttons" was read as less
+padding, not a smaller target.
 
 ### Escape closes the ConfirmDialog and the SlidePanel together
 With a delete `ConfirmDialog` open on top of a `SlidePanel`, one Escape press
@@ -604,7 +636,7 @@ feature and not worth doing mid-build.
 | Regressing the live owner calendar during extraction | 3 | No tests exist. Manual regression check before proceeding. |
 | Stream orphans accumulating invisibly | 6 | Deliberate delete-on-replace ordering. The house best-effort pattern is insufficient here. |
 | Invoice injection breaking existing invoice creation | 8 | Isolated to its own phase. Payment pipeline provably untouched. |
-| Client-facing UX too complex for older clients | 4, 5 | Design pass before build. The Claude Design prompt from the planning thread is stale and needs rewriting against the final spec. |
+| Client-facing UX too complex for older clients | 4, 5 | **Mitigated** — design pass complete: 30 boards, 9 screens, every state drawn mobile-first, copy deck in `docs/DBS_Content_Approval_Copy_Deck.md`. |
 | Cron granularity insufficient on current Vercel plan | 7 | Verify plan before relying on sub-daily sweeps. |
 
 ---
@@ -621,4 +653,4 @@ Deferred by decision, recorded so they aren't lost:
 
 ---
 
-*Plan complete. Phase 0 slices 0.2 and 0.3 are the immediate next actions.*
+*Phases 0–3, the polish pass, and the design pass are done. Phase 4 is the next build step — and the client contract (revision cap, deadline terms, `extra_round_price`) must be signed before its first real release.*

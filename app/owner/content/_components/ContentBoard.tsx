@@ -5,19 +5,28 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { StatusPill } from "@/components/ui/StatusPill";
-import { formatMonthLabel } from "@/app/owner/calendar/_lib/timezone";
+import {
+  formatMonthLabel,
+  fullDateLabelForDateKey,
+} from "@/app/owner/calendar/_lib/timezone";
+import { dateKeyInTimezone } from "@/lib/date";
 import { ContentItemsList } from "./ContentItemsList";
 import { CycleFormPanel } from "./CycleFormPanel";
 import { ItemFormPanel } from "./ItemFormPanel";
 import {
   deleteContentCycleAction,
   deleteContentItemAction,
+  releaseContentCycleAction,
+  unreleaseContentCycleAction,
 } from "../_actions";
 import { cycleStatusLabelFor, cycleStatusToneFor } from "../_lib/format";
 import type { ContentCalendarEvent } from "../_lib/calendarEvents";
 import type { ContentView } from "../_lib/href";
 import type { ContentItemWithAssets, CycleWithClient } from "../_lib/queries";
+import type { ReleaseGateResult } from "../_lib/releaseGate";
 import { ContentCalendar } from "./ContentCalendar";
+import { ContentRollup } from "./ContentRollup";
+import type { CycleRollup } from "../_lib/rollup";
 
 interface ContentBoardProps {
   items: ContentItemWithAssets[];
@@ -32,6 +41,24 @@ interface ContentBoardProps {
    * server-side by the page. Empty in list view, where they aren't needed.
    */
   events: ContentCalendarEvent[];
+  /**
+   * Server-computed release readiness for the visible cycle, or null when
+   * there is nothing releasable on screen (all-clients view, no cycle, or a
+   * cycle that is not `drafting`).
+   *
+   * A HINT, NOT THE AUTHORITY. It is a snapshot from the last server render
+   * and goes stale the moment a video finishes transcoding, so it only decides
+   * what the button looks like. `releaseContentCycleAction` re-runs the same
+   * gate against its own queries after the press, and that result is the one
+   * that counts.
+   */
+  releaseGate: ReleaseGateResult | null;
+  /**
+   * Client review progress for a released cycle, or null when there is no
+   * released cycle on screen. Informational only (spec 4.5) — nothing on this
+   * board keys off it.
+   */
+  rollup: CycleRollup | null;
 }
 
 /**
@@ -53,12 +80,16 @@ export function ContentBoard({
   monthKey,
   view,
   events,
+  releaseGate,
+  rollup,
 }: ContentBoardProps) {
   const router = useRouter();
   const [panel, setPanel] = useState<OpenPanel>(null);
   const [confirmDeleteItem, setConfirmDeleteItem] =
     useState<ContentItemWithAssets | null>(null);
   const [confirmDeleteCycle, setConfirmDeleteCycle] = useState(false);
+  const [confirmRelease, setConfirmRelease] = useState(false);
+  const [confirmUnrelease, setConfirmUnrelease] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,6 +129,45 @@ export function ContentBoard({
     router.refresh();
   };
 
+  const handleConfirmRelease = async () => {
+    if (!cycle) return;
+    setError(null);
+    setBusy(true);
+    const result = await releaseContentCycleAction(cycle.id);
+    setBusy(false);
+    setConfirmRelease(false);
+    if (!result.ok) {
+      // The gate re-ran server-side and said no, or the write failed. Either
+      // way the reason is the server's, never the stale hint the button used.
+      setError(result.error ?? "Could not release this month");
+      return;
+    }
+    router.refresh();
+  };
+
+  const handleConfirmUnrelease = async () => {
+    if (!cycle) return;
+    setError(null);
+    setBusy(true);
+    const result = await unreleaseContentCycleAction(cycle.id);
+    setBusy(false);
+    setConfirmUnrelease(false);
+    if (!result.ok) {
+      setError(result.error ?? "Could not unrelease this month");
+      return;
+    }
+    router.refresh();
+  };
+
+  const deadlineLabel = cycle?.revision_deadline
+    ? fullDateLabelForDateKey(dateKeyInTimezone(new Date(cycle.revision_deadline)))
+    : null;
+  const releaseBlockedReason =
+    releaseGate && !releaseGate.ok ? releaseGate.reason : null;
+  // The rollup strip renders joined to the bottom of the cycle bar, so the bar
+  // gives up its bottom margin and the strip drops its top border.
+  const showRollup = Boolean(cycle && rollup && cycle.status === "in_review");
+
   return (
     <div>
       {allClients ? (
@@ -106,7 +176,7 @@ export function ContentBoard({
           Pick a client to add or edit content.
         </div>
       ) : (
-        <div style={cycleBarStyle}>
+        <div style={{ ...cycleBarStyle, marginBottom: showRollup ? 0 : 16 }}>
           <div className="min-w-0">
             <div style={cycleTitleStyle}>
               {clientName} · {formatMonthLabel(monthKey)}
@@ -125,11 +195,22 @@ export function ContentBoard({
                     ? "Extra round price not set"
                     : `Extra round $${cycle.extra_round_price.toFixed(2)}`}
                 </span>
+                <span>
+                  {deadlineLabel
+                    ? `Reviews close ${deadlineLabel}`
+                    : "No review deadline set"}
+                </span>
               </div>
             ) : (
               <div style={cycleMetaStyle}>
                 <span>No cycle for this month yet.</span>
               </div>
+            )}
+
+            {releaseBlockedReason && (
+              <p style={gateNoteStyle}>
+                Not ready to release — {releaseBlockedReason}
+              </p>
             )}
           </div>
 
@@ -153,12 +234,42 @@ export function ContentBoard({
                 >
                   Delete cycle
                 </button>
+                {cycle.status === "in_review" && (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmUnrelease(true)}
+                    disabled={busy}
+                    style={secondaryActionStyle}
+                  >
+                    Unrelease
+                  </button>
+                )}
                 <Button
                   type="button"
                   onClick={() => setPanel({ kind: "item", item: null })}
                 >
                   New post
                 </Button>
+                {cycle.status === "drafting" && (
+                  // `variant="secondary"` (forest) rather than the mauve
+                  // primary: "New post" is the control Kelsey presses twenty
+                  // times a month and Release is the one she presses once, so
+                  // Release reads as the distinct, heavier action instead of
+                  // competing for the same slot.
+                  //
+                  // Disabled here is a HINT from the last server render. The
+                  // action re-checks; a stale enabled button fails with the
+                  // real reason rather than releasing something unready.
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={busy || releaseBlockedReason !== null}
+                    title={releaseBlockedReason ?? undefined}
+                    onClick={() => setConfirmRelease(true)}
+                  >
+                    Release
+                  </Button>
+                )}
               </>
             ) : (
               <Button type="button" onClick={() => setPanel({ kind: "cycle" })}>
@@ -167,6 +278,10 @@ export function ContentBoard({
             )}
           </div>
         </div>
+      )}
+
+      {showRollup && cycle && rollup && (
+        <ContentRollup cycleId={cycle.id} initial={rollup} />
       )}
 
       {error && (
@@ -250,6 +365,51 @@ export function ContentBoard({
         variant="danger"
         busy={busy}
       />
+
+      <ConfirmDialog
+        open={confirmRelease}
+        onCancel={() => {
+          if (busy) return;
+          setConfirmRelease(false);
+        }}
+        onConfirm={handleConfirmRelease}
+        title="Release this month?"
+        body={
+          <>
+            <strong>
+              {items.length} {items.length === 1 ? "post" : "posts"}
+            </strong>{" "}
+            become visible to {clientName || "this client"} right away, and
+            they get an email with a link to review them.
+            {deadlineLabel ? ` Reviews close ${deadlineLabel}.` : ""} You can
+            unrelease afterwards — anything they have already approved is kept.
+          </>
+        }
+        confirmLabel="Release"
+        variant="success"
+        busy={busy}
+      />
+
+      <ConfirmDialog
+        open={confirmUnrelease}
+        onCancel={() => {
+          if (busy) return;
+          setConfirmUnrelease(false);
+        }}
+        onConfirm={handleConfirmUnrelease}
+        title="Unrelease this month?"
+        body={
+          <>
+            The month goes back to drafting and disappears from{" "}
+            {clientName || "this client"}&apos;s portal, even if they are
+            partway through reviewing it. Nothing they have done is lost —
+            approvals stay approved, and releasing again picks up where they
+            left off and adds any new posts.
+          </>
+        }
+        confirmLabel="Unrelease"
+        busy={busy}
+      />
     </div>
   );
 }
@@ -289,6 +449,12 @@ const cycleMetaStyle: CSSProperties = {
   marginTop: 6,
   fontSize: 12,
   color: "var(--text-muted)",
+};
+
+const gateNoteStyle: CSSProperties = {
+  margin: "6px 0 0",
+  fontSize: 12,
+  color: "var(--status-warning)",
 };
 
 const cycleActionsStyle: CSSProperties = {

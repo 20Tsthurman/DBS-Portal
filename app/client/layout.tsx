@@ -10,6 +10,9 @@ const clientNav: SidebarNavSection[] = [
   {
     items: [
       { label: "My Project", href: "/client/dashboard" },
+      // Above Messages on purpose: when a month is out for review this is the
+      // reason the client opened the portal at all.
+      { label: "Review & Approve", href: "/client/review" },
       { label: "Messages", href: "/client/messages" },
       { label: "Book a Shoot", href: "/client/book" },
       { label: "Files & Content", href: "/client/files" },

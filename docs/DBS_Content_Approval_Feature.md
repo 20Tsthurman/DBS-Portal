@@ -327,6 +327,8 @@ For each post the client can:
 - **Approve** it
 - **Request changes**
 
+**Approve requires a lightweight confirmation.** The design pass added it: approving is as irreversible as sending feedback, and both final actions should follow the same rule — one plain dialog before anything irreversible happens. The approve dialog is deliberately lighter than the send-feedback dialog (no accent bar, smaller plain-face title, one-line body, compact buttons); the weight difference is the signal for which action deserves the longer pause.
+
 Requesting changes uses a guided form rather than an open text box:
 
 - **Preset categories** — clips, caption, music, pacing, text overlay, cover, schedule, other
@@ -351,6 +353,8 @@ When the client finishes the queue, they take no further action. The portal info
 
 Once the cycle locks — by deadline or by Kelsey — the client sees an informative state indicating Kelsey is working on their revisions. No further edits are possible.
 
+The cycle-level working state carries the one "Forgot something? Send Kelsey a message" escape hatch. It appears **once, at cycle level, and never on individual locked posts** — repeated on every locked item it becomes a feedback side-channel that defeats the per-item lock (§5.4).
+
 ### 5.7 Deadline
 
 The deadline is set by Kelsey per cycle. Clients cannot extend it themselves; they contact Kelsey, who extends it if she chooses.
@@ -363,13 +367,22 @@ After Kelsey re-releases, the client can request changes again. From round 2 onw
 
 **The price must be shown before submission,** in a confirmation step naming the round number and the amount added to their next invoice. This is captured consent and is what prevents billing disputes.
 
-**Tone requirement:** the framing must not feel punitive. This is a stated design goal; specific wording is undecided.
+**Tone requirement:** the framing must not feel punitive. This is a stated design goal. Wording is **decided** — see `docs/DBS_Content_Approval_Copy_Deck.md` (Screen 9).
+
+### 5.9 Between cycles and before the first cycle
+
+A client with no active cycle sees a deliberate state, never an empty page or anything that reads as an error.
+
+- **Nothing released yet** (new client): a short explanation that their month of posts will appear here when Kelsey has it ready, and that an email will announce it. Nothing for them to do.
+- **Between cycles** (last cycle finished and closed): the same explanation, plus a recap card of the last closed month — month, post count, and when reviews closed — so the page reflects work that actually happened rather than looking broken.
+
+Final strings for both states are in `docs/DBS_Content_Approval_Copy_Deck.md` (Screen 7).
 
 ---
 
 ## 6. Billing
 
-### 6.1 Rounds
+### 6.1 Rounds and billing mode
 
 | Round | Billable |
 |---|---|
@@ -377,6 +390,16 @@ After Kelsey re-releases, the client can request changes again. From round 2 onw
 | 2+ | Yes — `extra_round_price` |
 
 A round in which **every** item was denied by Kelsey is not billed.
+
+**Billing granularity: DECIDED (2026-08-30) — configurable per cycle, defaulting to per-round.**
+
+- New column on `content_cycles`: `billing_mode`, text + CHECK (`'per_round'`, `'per_item'`), default `'per_round'`. Additive migration, Phase 8.
+- **`per_round`** (default): one charge per round per cycle, regardless of how many items the client sends feedback on. This matches the fully-denied exemption above, which is already written as cycle-level language.
+- **`per_item`**: one charge per item revised. Available but not the default, and it requires a much smaller price than per-round pricing — $75 per item is ~$900 on a twelve-post month.
+- **`extra_round_price = 0` turns billing off entirely for that cycle**: unlimited rounds, no consent dialog, the round reads as included. No separate enable/disable flag is needed.
+- `revision_rounds` stays per item — it holds the notes. The charge is computed over the cycle at the round level in Phase 8.
+
+**Contract constraint:** cycle settings may only be *more generous* than the signed contract, never harsher. The contract names one set of terms; these settings exist to waive or reduce them, not to raise them mid-engagement.
 
 ### 6.2 Accrual model
 
@@ -386,7 +409,7 @@ Reasoning: multiple drafts per month would require Kelsey to remember to merge t
 
 Flow:
 
-1. Client submits a billable round → an unbilled charge is recorded against that client
+1. Client submits a billable round → an unbilled charge is recorded against that client. In `per_round` mode (the default) there is **one** charge per round per cycle: the first billable submission of the round opens it, and later submissions in the same round add nothing — and must not show a new charge to the client (copy for that state is an open item, §9). In `per_item` mode each revised item records its own charge.
 2. Kelsey sees the accrued charge immediately, as pending — not as income
 3. When she builds that month's invoice, unbilled charges appear as one-click additions
 4. Adding a charge stamps it as billed (`revision_rounds.invoice_id`)
@@ -431,23 +454,28 @@ Kelsey is phone-first for most of her portal use. The exception is bulk month-bu
 | Deny | Requires written reason and confirmation. Client sees reason. |
 | Fully-denied round | Not billed |
 | Billing mechanism | Unbilled line item accrual, not invoice draft |
+| Billing granularity | Configurable per cycle: `content_cycles.billing_mode`, `per_round` default, `per_item` optional; `extra_round_price = 0` disables billing for the cycle |
 | Income recognition | On invoice payment (cash basis) |
+| Nav label, client side | "Review & Approve", route `/client/review` — avoids sharing a word with the existing "Files & Content" nav item |
 | Social publishing | Never. Kelsey posts manually. |
 
 ---
 
 ## 9. Open Items
 
-*Reviewed after Phase 3 shipped (August 2026). No decision below changed; the
-two items that gate Phase 4 were re-confirmed as still open.*
+*Reviewed after Phase 3 shipped (August 2026). Updated again after the
+client-facing design pass (2026-08-30): nav label and round-2+ wording decided;
+`extra_round_price` and default deadline length re-scoped to the client
+contract.*
 
 | Item | Status |
 |---|---|
-| `extra_round_price` value | **Still not set** — re-confirmed after Phase 3. Blocks Phase 8 (§5.8 consent screen), not Phase 4. |
-| Default deadline length | Not set — 3 days and 48 business hours both discussed |
+| `extra_round_price` value | **Still not set.** Re-scoped 2026-08-30: it now blocks the **client contract**, which must be signed before the first real release at the end of Phase 4 — not just Phase 8's consent screen. |
+| Default deadline length | Not set — 3 days and 48 business hours both discussed. Same re-scope: a contract term, needed before the first real release at the end of Phase 4. |
 | Nav label, owner side | **Decided** — "Content", route `/owner/content` |
-| Nav label, client side | **Still not decided** — re-confirmed after Phase 3. Now the nearest blocker: the release email's link and the review queue's route path both need it, and the client-facing design pass ahead of Phase 4 cannot settle on a placeholder without churn. |
-| Round 2+ framing and wording | Not decided — must not feel punitive |
+| Nav label, client side | **Decided (2026-08-30)** — "Review & Approve", route `/client/review`. Renamed from the working label "Content Review" so no two nav items share a word with "Files & Content". |
+| Round 2+ framing and wording | **Decided (2026-08-30)** — see `docs/DBS_Content_Approval_Copy_Deck.md` (Screen 9). |
+| Round 2+ repeat-submission and zero-price copy | **Open.** In `per_round` mode, the second and later submissions within one cycle's round must **not** show a new charge — that copy does not exist yet (something along the lines of "Already covered by round 2 — no additional charge"). Also missing: the `extra_round_price = 0` state, where the consent dialog is skipped entirely. Tracked as a known gap in the copy deck. |
 | Cloudflare account creation | Deferred until code is in development. Payment method to be the Amex under the LLC, not personal. |
 | Contract language | Revision cap, deadline, and extra-round price must be in the client agreement **before any client sees this feature**. The software will enforce terms the client must have already agreed to. |
 | Style guide | Previously flagged as a prerequisite. Reduces revision rounds and helps a contractor hit spec on the first attempt. |

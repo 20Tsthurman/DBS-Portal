@@ -379,6 +379,47 @@ export function fullDateLabelForDateKey(dateKey: string): string {
 }
 
 /**
+ * "Friday, September 25" — weekday and date with NO year.
+ *
+ * The year-less sibling of `fullDateLabelForDateKey`. Client-facing review
+ * copy names deadlines this way throughout (`docs/DBS_Content_Approval_Copy_Deck.md`,
+ * Screen 1's deadline card and Screen 8's release email), because a deadline
+ * days away reads as fussy with a year attached.
+ */
+export function weekdayDateLabelForDateKey(dateKey: string): string {
+  const [, m, d] = dateKey.split("-").map(Number);
+  const weekday = WEEKDAY_LONG_NAMES[weekdayForDateKey(dateKey)] ?? "";
+  return `${weekday}, ${MONTH_LONG_NAMES[m - 1]} ${d}`;
+}
+
+/**
+ * "September 25" — long month and day, no weekday and no year.
+ *
+ * A third date shape, and each of the three is load-bearing in different
+ * client copy: `fullDateLabelForDateKey` ("Friday, September 25, 2026") for
+ * records, `weekdayDateLabelForDateKey` ("Friday, September 25") for a
+ * deadline the client is being asked to act on, and this one for a date
+ * already in the past, where the weekday no longer helps — the review queue's
+ * recap card reads "12 posts · Reviews closed September 25".
+ */
+export function monthDayLabelForDateKey(dateKey: string): string {
+  const [, m, d] = dateKey.split("-").map(Number);
+  return `${MONTH_LONG_NAMES[m - 1]} ${d}`;
+}
+
+/**
+ * "October" — the bare month name, no year.
+ *
+ * `formatMonthLabel` returns "October 2026", which is right for a calendar
+ * header and wrong inside a sentence: the review copy says "Your October
+ * content is ready", not "Your October 2026 content is ready".
+ */
+export function monthNameForMonthKey(monthKey: string): string {
+  const { month } = parseMonthKey(monthKey);
+  return MONTH_LONG_NAMES[month - 1] ?? "";
+}
+
+/**
  * Build a UTC `Date` representing the instant when `tz`'s wall clock reads
  * `dateStr` + `timeStr`. DST-aware.
  *

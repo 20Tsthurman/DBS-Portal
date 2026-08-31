@@ -10,6 +10,11 @@ import {
 import { buildCalendarThumbUrls } from "./_lib/calendarThumbs";
 import type { ContentView } from "./_lib/href";
 import {
+  evaluateReleaseGate,
+  type ReleaseGateResult,
+} from "./_lib/releaseGate";
+import { fetchCycleRollup, type CycleRollup } from "./_lib/rollup";
+import {
   fetchContentClients,
   fetchCyclesForMonth,
   fetchItemsForCycles,
@@ -49,6 +54,29 @@ export default async function OwnerContentPage({ searchParams }: PageProps) {
 
   const cycles = await fetchCyclesForMonth(monthKey, clientId ?? undefined);
   const items = await fetchItemsForCycles(cycles.map((c) => c.id));
+
+  // Release readiness for the cycle bar's button. Computed here so the button
+  // starts out in the right state instead of flashing enabled, and computed
+  // ONLY for a drafting cycle — a released or locked one has no Release
+  // button to gate.
+  //
+  // This is the hint, not the decision. `releaseContentCycleAction` runs the
+  // same gate again against its own queries when Kelsey presses, because this
+  // value is stale the moment a video finishes transcoding and nothing
+  // re-renders the page to say so.
+  const activeCycle = clientId ? (cycles[0] ?? null) : null;
+  let releaseGate: ReleaseGateResult | null = null;
+  if (activeCycle && activeCycle.status === "drafting") {
+    releaseGate = await evaluateReleaseGate(activeCycle);
+  }
+
+  // Client progress for a released month (spec 4.5). Server-rendered so the
+  // strip has real numbers on first paint; `ContentRollup` polls the same
+  // computation afterwards.
+  let rollup: CycleRollup | null = null;
+  if (activeCycle && activeCycle.status === "in_review") {
+    rollup = await fetchCycleRollup(activeCycle.id);
+  }
 
   // Thumbnail minting is calendar-only work — the list view renders no
   // media, so it skips the signed-URL round-trip entirely.
@@ -91,6 +119,8 @@ export default async function OwnerContentPage({ searchParams }: PageProps) {
         monthKey={monthKey}
         view={view}
         events={events}
+        releaseGate={releaseGate}
+        rollup={rollup}
       />
     </section>
   );

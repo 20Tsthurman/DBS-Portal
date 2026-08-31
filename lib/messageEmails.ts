@@ -6,6 +6,14 @@ interface MessageEmailParams {
   portalUrl: string;
 }
 
+/**
+ * Invisible run appended after a preheader so the inbox snippet stops at the
+ * intended sentence instead of continuing into the headline. Figure space +
+ * zero-width no-break space: both render as nothing, and neither collapses
+ * away the way a plain space does.
+ */
+const PREHEADER_PADDING = "&#8199;&#65279;".repeat(40);
+
 export function buildShell(opts: {
   headline: string;
   bodyParagraph: string;
@@ -15,6 +23,14 @@ export function buildShell(opts: {
   showEyebrow?: boolean;
   showGreeting?: boolean;
   showButton?: boolean;
+  /** CTA text. Defaults to "Open Portal", which is what every pre-existing
+   *  caller renders — so omitting it leaves those emails byte-identical. */
+  buttonLabel?: string;
+  /** Hidden inbox-snippet line. When absent, nothing is emitted but the
+   *  blank line it would have occupied — verified against the pre-change
+   *  output: existing emails differ by one whitespace-only line inside
+   *  <body> and are otherwise byte-identical. */
+  preheader?: string;
   extraBodyHtml?: string;
 }): string {
   const safeRecipient = escapeHtml(opts.recipientName);
@@ -25,6 +41,16 @@ export function buildShell(opts: {
   const showEyebrow = opts.showEyebrow ?? true;
   const showGreeting = opts.showGreeting ?? true;
   const showButton = opts.showButton ?? true;
+  const safeButtonLabel = escapeHtml(opts.buttonLabel ?? "Open Portal");
+
+  // Must be the FIRST element inside <body>, ahead of the layout table: mail
+  // clients build the snippet from the first visible text run, so a preheader
+  // placed any later is simply never read.
+  const preheaderHtml = opts.preheader
+    ? `<div style="display:none;max-height:0;max-width:0;overflow:hidden;opacity:0;font-size:1px;line-height:1px;color:#E8E4D8;mso-hide:all;">${escapeHtml(
+        opts.preheader
+      )}${PREHEADER_PADDING}</div>`
+    : "";
 
   const eyebrowHtml = showEyebrow
     ? `<p style="margin:0 0 6px;color:rgba(255,255,255,0.55);font-size:11px;letter-spacing:0.18em;text-transform:uppercase;font-family:'DM Sans',Arial,sans-serif;">Client Portal</p>`
@@ -41,7 +67,7 @@ export function buildShell(opts: {
     ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:8px auto 0;">
                   <tr>
                     <td align="center" style="background-color:#A8788A;">
-                      <a href="${safeUrl}" style="display:inline-block;background-color:#A8788A;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-size:13px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-family:'DM Sans',Arial,sans-serif;">Open Portal</a>
+                      <a href="${safeUrl}" style="display:inline-block;background-color:#A8788A;color:#FFFFFF;text-decoration:none;padding:14px 28px;font-size:13px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-family:'DM Sans',Arial,sans-serif;">${safeButtonLabel}</a>
                     </td>
                   </tr>
                 </table>`
@@ -59,6 +85,7 @@ export function buildShell(opts: {
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   </head>
   <body style="margin:0;padding:0;background-color:#E8E4D8;font-family:'DM Sans',Arial,sans-serif;color:#1A2B1C;">
+    ${preheaderHtml}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#E8E4D8;padding:32px 16px;">
       <tr>
         <td align="center">
