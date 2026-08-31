@@ -9,11 +9,23 @@ import { requireCurrentClient } from "@/lib/currentClient";
 import { ApprovedState } from "../_components/ApprovedState";
 import { PostActions } from "../_components/PostActions";
 import { PostMedia } from "../_components/PostMedia";
-import { BACK_LINK, CAPTION_LABEL, positionLabel, scheduledLine } from "../_lib/copy";
-import { needsClientReview, platformLabel } from "../_lib/format";
+import { WithKelseyState } from "../_components/WithKelseyState";
+import {
+  BACK_LINK,
+  CAPTION_LABEL,
+  positionLabel,
+  requestChangesContext,
+  scheduledLine,
+} from "../_lib/copy";
+import {
+  needsClientReview,
+  platformLabel,
+  shortWeekdayDateLabelForDateKey,
+} from "../_lib/format";
 import {
   fetchMyReviewItems,
   fetchMyReviewableCycleForItem,
+  fetchMySubmittedRound,
 } from "../_lib/queries";
 import { buildReviewSlides } from "../_lib/slides";
 
@@ -57,6 +69,15 @@ export default async function ClientReviewItemPage({ params }: PageProps) {
   const item = items[index];
   const slides = await buildReviewSlides(item.assets);
 
+  // The sent round, for the locked state's readback. Fetched only when the
+  // status says one exists; a null result on a changes_requested item is a
+  // half-written state the standing read rule makes invisible — the page
+  // renders no state block rather than an empty receipt.
+  const submitted =
+    item.status === "changes_requested"
+      ? await fetchMySubmittedRound(client.id, item.id)
+      : null;
+
   const scheduledKey = dateKeyInTimezone(new Date(item.scheduled_for));
   const goesOutWeekday = weekdayDateLabelForDateKey(scheduledKey);
   const goesOutBare = monthDayLabelForDateKey(scheduledKey);
@@ -97,13 +118,29 @@ export default async function ClientReviewItemPage({ params }: PageProps) {
             <p style={captionStyle}>{item.caption?.trim() || "—"}</p>
           </div>
 
-          {/* Three states are representable. 'changes_requested' has none yet:
-              its copy is Screen 5's "Your notes are with Kelsey" block, which
-              Phase 5 builds alongside the form that produces the status. It is
-              unreachable until then, so nothing is rendered rather than
-              something improvised. */}
           {needsClientReview(item.status) && (
-            <PostActions itemId={item.id} goesOutLabel={goesOutWeekday} />
+            <PostActions
+              itemId={item.id}
+              goesOutLabel={goesOutWeekday}
+              contextLine={requestChangesContext(
+                shortWeekdayDateLabelForDateKey(scheduledKey),
+                platformLabel(item.platform, item.format)
+              )}
+              hasVideo={item.assets.some((asset) => asset.kind === "video")}
+            />
+          )}
+
+          {/* The locked state (Screen 5, "With Kelsey"): the item was sent
+              and cannot be reopened — the state block IS the lock's face, a
+              receipt of what they asked for rather than a wall. No actions,
+              no message link (spec §5.4/§5.6). */}
+          {submitted?.round.submitted_at && (
+            <WithKelseyState
+              sentLabel={weekdayDateLabelForDateKey(
+                dateKeyInTimezone(new Date(submitted.round.submitted_at))
+              )}
+              notes={submitted.notes}
+            />
           )}
 
           {(item.status === "approved" || item.status === "published") &&

@@ -1,3 +1,7 @@
+import {
+  shortDateLabelForDateKey,
+  weekdayForDateKey,
+} from "@/app/owner/calendar/_lib/timezone";
 import type {
   ContentItemStatus,
   Platform,
@@ -117,4 +121,40 @@ export function postLabel(
   const firstLine = (caption ?? "").split("\n")[0]?.trim() ?? "";
   if (firstLine === "") return `Post ${positionInQueue}`;
   return firstLine;
+}
+
+/**
+ * Only formatter in the review surface with a local weekday table:
+ * `timezone.ts` does not export its name arrays, and the deck's Screen 3
+ * context line is the one place needing "Saturday, Oct 10" — long weekday,
+ * SHORT month. Composed from the exported `weekdayForDateKey` +
+ * `shortDateLabelForDateKey` ("Oct 10") so only the weekday half is local.
+ */
+const WEEKDAY_LONG = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+/** "Saturday, Oct 10" — deck Screen 3's context-line date shape. */
+export function shortWeekdayDateLabelForDateKey(dateKey: string): string {
+  const weekday = WEEKDAY_LONG[weekdayForDateKey(dateKey)] ?? "";
+  return `${weekday}, ${shortDateLabelForDateKey(dateKey)}`;
+}
+
+/**
+ * "0:12" — a scrubber position the way the deck's moments button says it.
+ * m:ss with the seconds floored: 12.7s of playback is a note "at 0:12", and
+ * the stored `timestamp_seconds` keeps the precise value — this is display
+ * only. Clips are capped at 120s (lib/stream.ts), so no hours form is needed.
+ */
+export function formatTimecode(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(whole / 60);
+  const s = whole % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }

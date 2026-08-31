@@ -1,4 +1,5 @@
 import { DEADLINE_AUTO_APPROVE_SENTENCE } from "@/lib/contentEmails";
+import type { RevisionCategory } from "@/lib/supabase";
 
 /**
  * Every client-facing string on the review queue, in one module.
@@ -148,6 +149,165 @@ export function approveDialogBody(goesOutLabel: string): string {
 export const APPROVE_DIALOG_CANCEL = "Not yet";
 export const APPROVE_DIALOG_CONFIRM = "Approve post";
 
+// --- Screen 3: request changes -----------------------------------------------
+
+/** Screen 3, "Panel title". Same words as the Screen 2 button, own export so
+ * each deck row stays individually traceable. */
+export const REQUEST_CHANGES_TITLE = "Request changes";
+
+/**
+ * Screen 3, "Context line" — "Saturday, Oct 10 · Instagram Reel". The date is
+ * the deck's short form (see `shortWeekdayDateLabelForDateKey`), not Screen 2's
+ * long one.
+ */
+export function requestChangesContext(
+  dateLabel: string,
+  platform: string
+): string {
+  return `${dateLabel} · ${platform}`;
+}
+
+/** Screen 3, "Helper". */
+export const REQUEST_CHANGES_HELPER =
+  "Pick what you'd like changed, then tell Kelsey what you have in mind.";
+
+/**
+ * Screen 3, the eight category rows. `label` and `hint` are the deck's
+ * "Label — hint" pairs split at the em dash; `prompt` is the deck's
+ * per-category question, shown once the category is selected.
+ *
+ * Declared as a Record over `RevisionCategory` so adding a ninth category to
+ * the enum fails the typecheck here rather than silently rendering a row with
+ * no copy.
+ */
+export const CATEGORY_COPY: Record<
+  RevisionCategory,
+  { label: string; hint: string; prompt: string }
+> = {
+  clips: {
+    label: "Clips",
+    hint: "The video footage",
+    prompt: "What should change about the clips?",
+  },
+  caption: {
+    label: "Caption",
+    hint: "The written text below the post",
+    prompt: "What should change about the caption?",
+  },
+  music: {
+    label: "Music",
+    hint: "The song or sound",
+    prompt: "What should change about the music?",
+  },
+  pacing: {
+    label: "Pacing",
+    hint: "How fast or slow it moves",
+    prompt: "What should change about the pacing?",
+  },
+  text_overlay: {
+    label: "Text overlay",
+    hint: "The words shown on screen",
+    prompt: "What should change about the on-screen text?",
+  },
+  cover: {
+    label: "Cover",
+    hint: "The image people see first",
+    prompt: "What should change about the cover?",
+  },
+  schedule: {
+    label: "Schedule",
+    hint: "The date it goes out",
+    prompt: "When should this go out instead?",
+  },
+  other: {
+    label: "Other",
+    hint: "Anything else",
+    prompt: "What else would you like changed?",
+  },
+};
+
+/** The deck's row order for Screen 3 — also the order of the fixed enum. */
+export const CATEGORY_ORDER: RevisionCategory[] = [
+  "clips",
+  "caption",
+  "music",
+  "pacing",
+  "text_overlay",
+  "cover",
+  "schedule",
+  "other",
+];
+
+/** Screen 3, "Field placeholder" — shared by every category comment field. */
+export const CATEGORY_FIELD_PLACEHOLDER = "Tell Kelsey what you'd like instead.";
+
+/** Screen 3, "Moments — heading". Video posts only. */
+export const MOMENTS_HEADING = "Notes on moments";
+
+/** Screen 3, "Moments — helper". */
+export const MOMENTS_HELPER =
+  "Optional. Pause the video where you want to point, then add your note.";
+
+/** Screen 3, "Moments — add button". `timecode` is live — "0:12". */
+export function momentsAddLabel(timecode: string): string {
+  return `Add a note at ${timecode}`;
+}
+
+/**
+ * Screen 3, "Moments — no timecode yet" (deck row added 2026-08-31): helper
+ * text rendered IN PLACE OF the add button until the video has a position.
+ * Never render a disabled "Add a note at 0:00".
+ */
+export const MOMENTS_NO_TIMECODE =
+  "Play the video, then pause where you want to point.";
+
+/** Screen 3, "Moments — placeholder". */
+export const MOMENTS_PLACEHOLDER = "What about this moment?";
+
+/** Screen 3, "Footer helper (round 1)". */
+export const FOOTER_HELPER_ROUND_1 =
+  "One round of changes is included with your month.";
+
+/** Screen 3, "Send button". Also Screen 4's confirm label. */
+export const SEND_BUTTON = "Send to Kelsey";
+
+/** Screen 3, "Disabled-send helper". Shown only while nothing is selected. */
+export const DISABLED_SEND_HELPER =
+  "Pick at least one thing above to get started.";
+
+// --- Screen 4: send confirmation (round 1) -----------------------------------
+
+export const SEND_DIALOG_TITLE = "Send to Kelsey?";
+
+/** Screen 4, "Body, line 1". */
+export const SEND_DIALOG_LINE_1 =
+  "Kelsey will get these notes and start on the changes.";
+
+/**
+ * Screen 4, "Body, line 2" — split because the deck emphasizes exactly
+ * "Once you send, nothing more can be added to this post" and no more.
+ */
+export const SEND_DIALOG_FINALITY = {
+  emphasized: "Once you send, nothing more can be added to this post",
+  rest: " — so take a moment to make sure it covers everything.",
+} as const;
+
+/** Screen 4, "Body, line 3" — the round-1 framing. */
+export const SEND_DIALOG_LINE_3 =
+  "This is part of your included round of changes.";
+
+export const SEND_DIALOG_CANCEL = "Go back";
+// The confirm label is SEND_BUTTON — the deck uses "Send to Kelsey" for both.
+
+/**
+ * Screen 4, the moments summary chip — "2 notes on moments", singular row
+ * added 2026-08-31. Category chips are the bare `CATEGORY_COPY` labels; this
+ * is the only chip that carries a count.
+ */
+export function momentsChip(count: number): string {
+  return count === 1 ? "1 note on moments" : `${count} notes on moments`;
+}
+
 // --- Screen 5: after the client acts -----------------------------------------
 
 export const APPROVED_TITLE = "Approved";
@@ -169,6 +329,48 @@ export function approvedBody(
 
 /** Screen 5, "Approved — actions" is "Next post · All posts". */
 export const ACTION_NEXT_POST = "Next post";
+
+/** Screen 5, "With Kelsey — title". */
+export const WITH_KELSEY_TITLE = "Your notes are with Kelsey";
+
+/**
+ * Screen 5, "With Kelsey — body". `sentLabel` is "Saturday, September 19" —
+ * the same weekday shape the approved receipt uses, for the same reason: it
+ * dates something the client did. No message link here — the escape hatch
+ * lives on the cycle-level working state only (Screen 6, spec §5.6).
+ */
+export function withKelseyBody(sentLabel: string): string {
+  return `Sent ${sentLabel}. Kelsey is on it — the updated post will show up here, and you'll get an email when it's ready.`;
+}
+
+/** Screen 5, "Sent-notes heading" — above the readback of what they sent. */
+export const SENT_NOTES_HEADING = "What you asked for";
+
+// --- Screen 6: cycle states ---------------------------------------------------
+
+/** Screen 6, "Working — title". */
+export const WORKING_TITLE = "Kelsey is making your changes";
+
+/**
+ * Screen 6, "Working — body", with the one-post variant added 2026-08-31.
+ * `changedCount` counts the posts with changes sent, not the whole month.
+ */
+export function workingBody(changedCount: number): string {
+  return changedCount === 1
+    ? "You asked for changes on 1 post. She's on it — you'll get an email when the updated post is ready to review. You can still open any post to read it."
+    : `You asked for changes on ${changedCount} posts. She's on it — you'll get an email when the updated posts are ready to review. You can still open any post to read it.`;
+}
+
+/**
+ * Screen 6, "Working — footer" — THE escape hatch, split at the link the way
+ * `MEDIA_ERROR` is. It appears here and nowhere else: repeated on locked
+ * posts it becomes a feedback side-channel that defeats the per-item lock
+ * (spec §5.6).
+ */
+export const WORKING_FOOTER = {
+  beforeLink: "Forgot something? ",
+  linkText: "Send Kelsey a message",
+} as const;
 
 // --- Status pills ------------------------------------------------------------
 
@@ -227,6 +429,15 @@ export function recapMeta(
 /** Errors, "Approve failed". */
 export const APPROVE_FAILED =
   "That didn't go through. Give it another try in a moment — nothing was approved.";
+
+/**
+ * Errors, "Send failed" (deck row added 2026-08-31). One message for every
+ * send failure, same reasoning as APPROVE_FAILED — and its "nothing was sent"
+ * promise is kept by the write sequence: a partial write is invisible
+ * everywhere until the final commit step lands (see `submitChangeRequestAction`).
+ */
+export const SEND_FAILED =
+  "That didn't go through. Give it another try in a moment — nothing was sent to Kelsey.";
 
 /**
  * Errors, "Video won't play" and "Photo won't load", split at the link.

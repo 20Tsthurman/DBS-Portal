@@ -3,6 +3,7 @@
 import { useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { ApproveDialog } from "./ApproveDialog";
+import { RequestChangesPanel } from "./RequestChangesPanel";
 import {
   ACTION_APPROVE,
   ACTION_REQUEST_CHANGES,
@@ -14,27 +15,40 @@ interface PostActionsProps {
   itemId: string;
   /** "Saturday, October 10" - the dialog names the send date. */
   goesOutLabel: string;
+  /** "Saturday, Oct 10 · Instagram Reel" - the form panel's context line. */
+  contextLine: string;
+  /** Whether the post has a video - gates the form's moments section. */
+  hasVideo: boolean;
 }
 
 /**
  * The two actions on a post awaiting review (copy deck Screen 2).
  *
- * REQUEST CHANGES IS DELIBERATELY INERT IN THIS PHASE. It renders as a real,
- * disabled button with no handler; Phase 5 builds the guided form behind it.
- * It is here rather than hidden so the surface a client learns now is the
- * surface they keep - but until Phase 5 lands, no cycle should be released to
- * a real client, because a dead control with no explanation is exactly the
- * kind of thing this design constraint exists to avoid.
+ * Request changes opens the guided form (Screen 3, `RequestChangesPanel`).
+ * The panel stays mounted while closed - SlidePanel's inert idiom - so a
+ * client can close it, pause the video somewhere new, and reopen without
+ * losing a word of what they typed.
+ *
+ * The ApproveDialog and the panel never stack: each opens from its own
+ * button, and each button is unreachable while the other surface is up
+ * (backdrop in front of the page). That keeps SlidePanel's non-re-entrant
+ * scroll lock safe and the known Escape-closes-both issue unreachable here.
  *
  * There is no approve-all and no global submit anywhere on this surface, in
  * this phase or any later one (spec 5.4). Per-item action is the mechanism the
  * whole round structure rests on.
  */
-export function PostActions({ itemId, goesOutLabel }: PostActionsProps) {
+export function PostActions({
+  itemId,
+  goesOutLabel,
+  contextLine,
+  hasVideo,
+}: PostActionsProps) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [requestingChanges, setRequestingChanges] = useState(false);
 
   const handleConfirm = async () => {
     if (busy) return;
@@ -64,7 +78,12 @@ export function PostActions({ itemId, goesOutLabel }: PostActionsProps) {
         >
           {ACTION_APPROVE}
         </button>
-        <button type="button" disabled style={requestStyle}>
+        <button
+          type="button"
+          onClick={() => setRequestingChanges(true)}
+          disabled={busy}
+          style={requestStyle}
+        >
           {ACTION_REQUEST_CHANGES}
         </button>
       </div>
@@ -84,6 +103,14 @@ export function PostActions({ itemId, goesOutLabel }: PostActionsProps) {
         onConfirm={handleConfirm}
         goesOutLabel={goesOutLabel}
         busy={busy}
+      />
+
+      <RequestChangesPanel
+        open={requestingChanges}
+        onClose={() => setRequestingChanges(false)}
+        itemId={itemId}
+        contextLine={contextLine}
+        hasVideo={hasVideo}
       />
     </div>
   );
@@ -123,8 +150,6 @@ const requestStyle: CSSProperties = {
   backgroundColor: "transparent",
   border: "1px solid var(--border)",
   color: "var(--text-body)",
-  opacity: 0.5,
-  cursor: "not-allowed",
 };
 
 const errorStyle: CSSProperties = {

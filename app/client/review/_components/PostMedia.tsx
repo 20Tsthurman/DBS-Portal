@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MediaError } from "./MediaError";
 import { carouselCounter } from "../_lib/copy";
 import { createReviewPlaybackAction } from "../_actions";
+import {
+  attachPositionTracking,
+  ensureStreamSdk,
+} from "../_lib/playerPosition";
 import type { ReviewSlide } from "../_lib/slides";
 
 interface PostMediaProps {
@@ -28,6 +32,18 @@ interface PostMediaProps {
  *
  * The iframe is mounted only while playing, so leaving a slide or the page
  * stops the audio. There is no hidden player left running.
+ *
+ * THE PLAYER'S POSITION IS PUBLISHED, not owned. The moments section of the
+ * request-changes form needs "where the client paused", and this component
+ * has the only handle on the player. `attachPositionTracking` wraps each
+ * freshly mounted iframe with Cloudflare's player SDK and streams
+ * timeupdate/pause positions into the `playerPosition` store; the form reads
+ * the store. Two ordering rules from the SDK verification (2026-08-31), both
+ * enforced here: the SDK script must be loaded BEFORE the iframe mounts
+ * (play awaits it beside the URL mint — a late attach misses the player's
+ * one-shot handshake and hears nothing forever), and the attach itself runs
+ * in the effect of the mounting commit. An SDK that fails to load costs only
+ * the moments timecode, never playback: the iframe mounts regardless.
  */
 export function PostMedia({ slides }: PostMediaProps) {
   const [index, setIndex] = useState(0);
@@ -35,8 +51,10 @@ export function PostMedia({ slides }: PostMediaProps) {
   const [pending, setPending] = useState(false);
   const [playFailed, setPlayFailed] = useState(false);
   const [brokenImages, setBrokenImages] = useState<string[]>([]);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const slide = slides[index];
+  const slideAssetId = slide?.assetId ?? null;
 
   // Moving between slides tears down the player. Without this, stepping past a
   // playing video leaves its audio running under a photo.
@@ -45,6 +63,22 @@ export function PostMedia({ slides }: PostMediaProps) {
     setPending(false);
     setPlayFailed(false);
   }, [index]);
+
+  // Start the SDK download the moment a video post renders, so it has long
+  // finished by the first press and the play path never actually waits on it.
+  useEffect(() => {
+    if (slides.some((s) => s.kind === "video")) void ensureStreamSdk();
+  }, [slides]);
+
+  // Wrap the just-mounted iframe. Keyed on iframeUrl: minting a fresh URL is
+  // the only way an iframe mounts, and the cleanup runs before the next
+  // attach or on unmount — a note can never carry a stale video's position.
+  useEffect(() => {
+    if (!iframeUrl || !slideAssetId) return;
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    return attachPositionTracking(iframe, slideAssetId);
+  }, [iframeUrl, slideAssetId]);
 
   if (!slide) return null;
 
@@ -56,7 +90,13 @@ export function PostMedia({ slides }: PostMediaProps) {
     if (pending) return;
     setPlayFailed(false);
     setPending(true);
-    const result = await createReviewPlaybackAction(slide.assetId);
+    // The SDK races the mint, not the client: it must be resident BEFORE the
+    // iframe mounts (see the component docblock), and `false` — script
+    // unreachable — deliberately does not block playback.
+    const [result] = await Promise.all([
+      createReviewPlaybackAction(slide.assetId),
+      ensureStreamSdk(),
+    ]);
     setPending(false);
     if (!result.ok || !result.data) {
       setPlayFailed(true);
@@ -75,6 +115,7 @@ export function PostMedia({ slides }: PostMediaProps) {
           <MediaError kind={slide.kind} />
         ) : iframeUrl ? (
           <iframe
+            ref={iframeRef}
             src={iframeUrl}
             title="Video"
             className="rvw-player"

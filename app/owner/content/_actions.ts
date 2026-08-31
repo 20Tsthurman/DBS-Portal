@@ -41,6 +41,10 @@ import {
   buildContentReleaseEmailSubject,
 } from "@/lib/contentEmails";
 import { evaluateReleaseGate } from "@/app/owner/content/_lib/releaseGate";
+import {
+  fetchLatestRevisionRequest,
+  type RevisionRequestView,
+} from "@/app/owner/content/_lib/revisionRequests";
 import type { ActionResult } from "@/lib/actions";
 
 const CONTENT_PATH = "/owner/content";
@@ -1377,4 +1381,40 @@ export async function deleteContentAssetAction(
 
   revalidatePath(CONTENT_PATH);
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Revision requests — read what a client asked for (Phase 5, slice 5.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * The latest submitted change request on one item, display-ready, or null
+ * when nothing has been submitted.
+ *
+ * READ-ONLY BY DESIGN, and deliberately the only revision surface this phase
+ * gives Kelsey: spec 4.7 says seeing a request does not obligate her to act,
+ * and accept/deny/replace belong to Phase 6. The panel calls this on open —
+ * the `fetchContentAssetPreviewsAction` arrangement — rather than the data
+ * riding in on the page payload, so the request shown is live at open time
+ * instead of as stale as the board's last navigation. Arrival NOTICE is the
+ * rollup poll's job (it already counts `changes_requested`); this is the
+ * detail read behind it.
+ */
+export async function fetchRevisionRequestAction(
+  itemId: string
+): Promise<ActionResult<RevisionRequestView | null>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  if (!itemId) return { ok: false, error: "Missing item id" };
+
+  try {
+    return { ok: true, data: await fetchLatestRevisionRequest(itemId) };
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err instanceof Error ? err.message : "Could not load the request",
+    };
+  }
 }

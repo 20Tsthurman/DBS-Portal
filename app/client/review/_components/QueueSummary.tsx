@@ -25,6 +25,12 @@ interface QueueSummaryProps {
  * still need your review") reports, and finished ("Nothing needs you right
  * now") releases. The meta only appears once there is progress to report —
  * "0 of 12 reviewed" beside an invitation is discouraging and says nothing.
+ *
+ * THE BANNER RENDERS ONLY IN THE ALL-APPROVED CASE. When any post has
+ * changes sent, Screen 6's cycle-level Working state supersedes it (ruling
+ * 2026-08-31) — the page renders `WorkingState` where the banner would have
+ * been. `allHandledBody`'s changes-requested variant stays in copy.ts as the
+ * deck row it is, unreachable from here.
  */
 export function QueueSummary({
   total,
@@ -50,7 +56,7 @@ export function QueueSummary({
         )}
       </div>
 
-      {allHandled && (
+      {allHandled && !hasChangesRequested && (
         <div style={bannerStyle}>
           <h2 style={bannerTitleStyle}>{ALL_HANDLED_TITLE}</h2>
           <p style={bannerBodyStyle}>

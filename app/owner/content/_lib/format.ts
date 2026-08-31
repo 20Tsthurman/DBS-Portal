@@ -4,6 +4,7 @@ import type {
   ContentItemStatus,
   Platform,
   PostFormat,
+  RevisionCategory,
 } from "@/lib/supabase";
 
 export const PLATFORM_LABELS: Record<Platform, string> = {
@@ -130,6 +131,39 @@ export function timeLabelFromInputValue(value: string): string {
 export function formatAssetCount(count: number): string {
   if (count === 0) return "—";
   return count === 1 ? "1 photo" : `${count} photos`;
+}
+
+/**
+ * Kelsey's labels for the revision categories — house voice, deliberately NOT
+ * imported from the client review surface. The client's labels are copy-deck
+ * rows and the deck is client-scope; these are Kelsey's vocabulary over the
+ * same enum, the same two-vocabularies arrangement the status labels use.
+ * (They coincide today; the point is that a deck copy pass can never reword
+ * Kelsey's screen, and vice versa.)
+ */
+export const REVISION_CATEGORY_LABELS: Record<RevisionCategory, string> = {
+  clips: "Clips",
+  caption: "Caption",
+  music: "Music",
+  pacing: "Pacing",
+  text_overlay: "Text overlay",
+  cover: "Cover",
+  schedule: "Schedule",
+  other: "Other",
+};
+
+/**
+ * "0:12" — m:ss with the seconds floored, for a note's scrubber position.
+ * Duplicated from the client review surface's formatter rather than imported:
+ * owner code importing from `app/client/**` would invert the layering
+ * convention, and six lines is cheaper than a neutral-lib move for two call
+ * sites (the same trade lib/stream.ts made with requireEnv).
+ */
+export function formatTimecode(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(whole / 60);
+  const s = whole % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 /**

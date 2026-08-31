@@ -3,6 +3,8 @@ import {
   type ContentAssetRecord,
   type ContentCycleRecord,
   type ContentItemRecord,
+  type RevisionNoteRecord,
+  type RevisionRoundRecord,
 } from "@/lib/supabase";
 
 /**
@@ -183,6 +185,79 @@ export async function countMyCycleItems(
     .neq("status", CLIENT_HIDDEN_ITEM_STATUS);
   if (error) throw new Error(error.message);
   return count ?? 0;
+}
+
+/** A submitted round with its notes — the sent-notes readback (Screen 5). */
+export interface SubmittedRound {
+  round: RevisionRoundRecord;
+  notes: RevisionNoteRecord[];
+}
+
+/**
+ * The item's most recent SUBMITTED round, with every note in it. Null when
+ * nothing has been submitted (including when the item is not this client's —
+ * same silent null as every other read here).
+ *
+ * TWO STANDING RULES live on this function because every later reader of
+ * rounds and notes — the Phase 6 accept/deny surface included — inherits
+ * them:
+ *
+ *   1. ROUNDS ARE READ WITH `submitted_at IS NOT NULL`, ALWAYS. The submit
+ *      write runs without a transaction (see `submitChangeRequestAction`),
+ *      and a failed attempt can leave behind a round row — possibly with
+ *      notes — whose `submitted_at` is still null. That debris is reused and
+ *      replaced by the retry; it is NEVER data, and a read that forgets this
+ *      filter will render a half-written round as if the client sent it.
+ *
+ *   2. NEVER GROUP RAW NOTES BY CATEGORY — PARTITION ON `timestamp_seconds`
+ *      FIRST. A "note on a moment" carries the constant category 'other'
+ *      (the schema requires a category and no listed one is honest for a
+ *      timestamped note — decided 2026-08-31); `timestamp_seconds IS NOT
+ *      NULL` is the discriminator. Group first, and a moment note shows up
+ *      as a phantom "Other" the client never selected.
+ *
+ * Ordered newest round first so re-releases keep working: from Phase 6 on an
+ * item can hold several submitted rounds, and this surface always shows the
+ * latest. Notes come back in created_at order as a stable base; display
+ * ordering (deck order for categories, chronological for moments) is the
+ * renderer's job, because a single batch insert stamps every note with the
+ * same created_at.
+ */
+export async function fetchMySubmittedRound(
+  clientId: string,
+  itemId: string
+): Promise<SubmittedRound | null> {
+  const supabase = getSupabaseServiceClient();
+
+  // Ownership first — rounds carry no client_id, so the item read is the gate.
+  const { data: itemData, error: itemError } = await supabase
+    .from("content_items")
+    .select("id")
+    .eq("id", itemId)
+    .eq("client_id", clientId)
+    .maybeSingle();
+  if (itemError) throw new Error(itemError.message);
+  if (!itemData) return null;
+
+  const { data: roundData, error: roundError } = await supabase
+    .from("revision_rounds")
+    .select("*")
+    .eq("content_item_id", itemId)
+    .not("submitted_at", "is", null)
+    .order("round_number", { ascending: false })
+    .limit(1);
+  if (roundError) throw new Error(roundError.message);
+  const round = ((roundData ?? []) as RevisionRoundRecord[])[0];
+  if (!round) return null;
+
+  const { data: notesData, error: notesError } = await supabase
+    .from("revision_notes")
+    .select("*")
+    .eq("round_id", round.id)
+    .order("created_at", { ascending: true });
+  if (notesError) throw new Error(notesError.message);
+
+  return { round, notes: (notesData ?? []) as RevisionNoteRecord[] };
 }
 
 /**

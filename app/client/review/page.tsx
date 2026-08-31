@@ -9,6 +9,7 @@ import { DeadlineCard } from "./_components/DeadlineCard";
 import { NoCycleState, type RecapSummary } from "./_components/NoCycleState";
 import { QueueSummary } from "./_components/QueueSummary";
 import { ReviewQueue } from "./_components/ReviewQueue";
+import { WorkingState } from "./_components/WorkingState";
 import { NAV_LABEL, QUEUE_INSTRUCTION, queueTitle } from "./_lib/copy";
 import {
   countMyCycleItems,
@@ -69,9 +70,10 @@ export default async function ClientReviewPage() {
   const remaining = items.filter((item) =>
     needsClientReview(item.status)
   ).length;
-  const hasChangesRequested = items.some(
+  const changedCount = items.filter(
     (item) => item.status === "changes_requested"
-  );
+  ).length;
+  const hasChangesRequested = changedCount > 0;
 
   const deadlineLabel = cycle.revision_deadline
     ? weekdayDateLabelForDateKey(
@@ -95,6 +97,14 @@ export default async function ClientReviewPage() {
         hasChangesRequested={hasChangesRequested}
         monthName={monthName}
       />
+
+      {/* Screen 6's Working state supersedes the all-handled banner whenever
+          any post has changes sent (ruling 2026-08-31) — QueueSummary holds
+          its banner back in exactly this case. Cycle-level, so this is the
+          only home of the "Forgot something?" escape hatch (spec §5.6). */}
+      {remaining === 0 && hasChangesRequested && (
+        <WorkingState changedCount={changedCount} />
+      )}
 
       <ReviewQueue items={items} thumbUrls={thumbUrls} />
     </section>

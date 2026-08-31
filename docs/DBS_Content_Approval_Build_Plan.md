@@ -609,6 +609,22 @@ deliberately lighter dialog, no accent bar and a plain-face title — and its
 buttons carry `minHeight: 48`. The deck's "compact buttons" was read as less
 padding, not a smaller target.
 
+### Stream Player SDK: iframeReady fires once, at iframe boot
+
+Cloudflare's Stream Player SDK sends its `iframeReady` handshake exactly once,
+when the player inside the iframe boots. An SDK instance attached to an
+already-loaded iframe hears nothing — silently and permanently: no error, no
+events, no state. Verified against production embeds (signed token, customer
+subdomain, full query params) on 2026-08-31.
+
+The rule, enforced in `app/client/review/_lib/playerPosition.ts` and
+`PostMedia.tsx`: the SDK script must load before any player iframe mounts, and
+the attach must run in the same commit that mounts the iframe.
+
+**Phase 6 inherits this.** The side-by-side old/new playback in slice 6.1
+mounts a second player; that iframe needs the same attach-at-mount treatment,
+or its position/state reads will be silently dead.
+
 ### Escape closes the ConfirmDialog and the SlidePanel together
 With a delete `ConfirmDialog` open on top of a `SlidePanel`, one Escape press
 closes both. Expected behavior is that Escape dismisses only the topmost layer.

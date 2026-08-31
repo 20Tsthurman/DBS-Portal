@@ -101,6 +101,7 @@
 | Moments — heading | Notes on moments | **Video posts only** — the section does not render on photo or photo-carousel posts |
 | Moments — helper | Optional. Pause the video where you want to point, then add your note. | |
 | Moments — add button | Add a note at 0:12 | Timecode is live |
+| Moments — no timecode yet | Play the video, then pause where you want to point. | Added 2026-08-31, not on the canvas. Helper text in place of the button. The button appears once the video has a position. Do not render a disabled "Add a note at 0:00". |
 | Moments — placeholder | What about this moment? | |
 | Footer helper (round 1) | One round of changes is included with your month. | |
 | Send button | Send to Kelsey | |
@@ -112,6 +113,7 @@
 |---|---|---|
 | Title | Send to Kelsey? | |
 | Summary chips | Caption · Music · 2 notes on moments | Built from the form |
+| Summary chips, one moment note | 1 note on moments | Added 2026-08-31, not on the canvas. Replaces only the moments chip; category chips are unchanged |
 | Body, line 1 | Kelsey will get these notes and start on the changes. | |
 | Body, line 2 | Once you send, nothing more can be added to this post — so take a moment to make sure it covers everything. | "Once you send, nothing more can be added to this post" is emphasized |
 | Body, line 3 | This is part of your included round of changes. | |
@@ -145,6 +147,7 @@
 |---|---|---|
 | Working — title | Kelsey is making your changes | |
 | Working — body | You asked for changes on 3 posts. She's on it — you'll get an email when the updated posts are ready to review. You can still open any post to read it. | |
+| Working — body, one post | You asked for changes on 1 post. She's on it — you'll get an email when the updated post is ready to review. You can still open any post to read it. | Added 2026-08-31, not on the canvas |
 | Working — footer | Forgot something? Send Kelsey a message | Appears here only — locked posts don't repeat it |
 | Deadline — title | Your October content is set | |
 | Deadline — body | Reviews ended Friday, September 25. You approved 9 posts, and 3 you hadn't reviewed were approved automatically, the way your content plan works. Everything goes out on schedule. | |
@@ -201,6 +204,7 @@ what happened, what to do next, and that nothing was silently committed.
 | Element | String | Notes |
 |---|---|---|
 | Approve failed | That didn't go through. Give it another try in a moment — nothing was approved. | Added 2026-08-30, not on the canvas |
+| Send failed | That didn't go through. Give it another try in a moment — nothing was sent to Kelsey. | Added 2026-08-31, not on the canvas |
 | Video won't play | This video isn't loading right now. Refresh the page to try again, or send Kelsey a message if it keeps happening. | Added 2026-08-30, not on the canvas. "send Kelsey a message" is a link to Messages, matching Screen 5's declined and auto-approved states |
 | Photo won't load | This photo isn't loading right now. Refresh the page to try again, or send Kelsey a message if it keeps happening. | Added 2026-08-30, not on the canvas. "send Kelsey a message" is a link to Messages, matching Screen 5's declined and auto-approved states |
 

@@ -26,6 +26,7 @@ import type { Platform, PostFormat } from "@/lib/supabase";
 import { dateKeyInTimezone } from "@/lib/date";
 import { fullDateLabelForDateKey } from "@/app/owner/calendar/_lib/timezone";
 import { useVisibilityPolling } from "@/lib/hooks/useVisibilityPolling";
+import { RevisionRequestSection } from "./RevisionRequestSection";
 import { VideoPlaybackOverlay } from "./VideoPlaybackOverlay";
 import {
   createContentAssetPlaybackAction,
@@ -882,6 +883,17 @@ export function ItemFormPanel({
             style={formColStyle}
           >
           <div className="flex-1 space-y-5">
+            {/* What the client asked for — read-only, above the form so it is
+                the first thing Kelsey reads when she opens a submitted item.
+                Fetches its own data on open (live even when the board's item
+                snapshot is stale); renders nothing when no request exists. */}
+            {activeItemId && (
+              <RevisionRequestSection
+                itemId={activeItemId}
+                open={open}
+                expectRequest={item?.status === "changes_requested"}
+              />
+            )}
             {/* Row and helper share one space-y child so the helper sits in
                 normal flow under the inputs. (Its old `marginTop: -12` was
                 written against v4 space-y semantics; under v3, space-y puts
