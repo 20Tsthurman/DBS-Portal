@@ -62,6 +62,8 @@ interface RequestChangesPanelProps {
   contextLine: string;
   /** The moments section renders ONLY on posts with a video (deck rule). */
   hasVideo: boolean;
+  /** The post's `current_round` — governs the two included-round lines. */
+  round: number;
 }
 
 /**
@@ -100,6 +102,16 @@ interface RequestChangesPanelProps {
  * panel open with the deck's send-failed line, and not a word of the draft
  * is lost. Deselecting a category keeps its typed comment in state (kinder
  * to a stray tap) — only selected categories are submitted.
+ *
+ * ROUND 2+ RENDERS NEITHER INCLUDED-ROUND LINE (decided 2026-09-02). The
+ * footer helper ("One round of changes is included with your month") and the
+ * dialog's third line ("This is part of your included round of changes") are
+ * round-1 sentences: both are about the included round, and on round 2 both
+ * would be false. The deck's round-2+ replacements (Screen 9) are Phase 8's
+ * consent copy, and no pre-consent round-2 string exists — so the slots stay
+ * empty rather than carrying either the wrong sentence or an improvised one.
+ * A round-2 request in Phase 6 carries no charge (see the submit action), so
+ * nothing untrue is said by saying nothing.
  */
 export function RequestChangesPanel({
   open,
@@ -107,7 +119,9 @@ export function RequestChangesPanel({
   itemId,
   contextLine,
   hasVideo,
+  round,
 }: RequestChangesPanelProps) {
+  const includedRound = round < 2;
   const router = useRouter();
   const [selected, setSelected] = useState<RevisionCategory[]>([]);
   const [comments, setComments] = useState<
@@ -303,7 +317,9 @@ export function RequestChangesPanel({
             {SEND_FAILED}
           </p>
         )}
-        <p style={footerHelperStyle}>{FOOTER_HELPER_ROUND_1}</p>
+        {includedRound && (
+          <p style={footerHelperStyle}>{FOOTER_HELPER_ROUND_1}</p>
+        )}
         <button
           type="button"
           disabled={!canSend || submitting}
@@ -350,7 +366,9 @@ export function RequestChangesPanel({
               </strong>
               {SEND_DIALOG_FINALITY.rest}
             </p>
-            <p style={dialogLineStyle}>{SEND_DIALOG_LINE_3}</p>
+            {includedRound && (
+              <p style={dialogLineStyle}>{SEND_DIALOG_LINE_3}</p>
+            )}
           </div>
         }
         confirmLabel={SEND_BUTTON}

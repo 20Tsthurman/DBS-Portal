@@ -491,6 +491,15 @@ export interface ContentAssetRecord {
   bytes: number | null;
   /** Soft version history: non-NULL = superseded by a revision. NULL = current. */
   replaced_at: string | null;
+  /**
+   * Non-NULL = this row is a STAGED replacement for the asset it points at,
+   * uploaded but not yet swapped in by an accept. Staged rows are born with
+   * `replaced_at` set (the `content_assets_staged_not_live_check` constraint
+   * requires it) so every live-asset read skips them; the accept commit clears
+   * BOTH columns in one UPDATE to activate the row. Always NULL on a live row
+   * and on genuine version history. Added in migration 017.
+   */
+  replaces_asset_id: string | null;
   created_at: string;
 }
 
@@ -508,8 +517,21 @@ export interface RevisionRoundRecord {
   /** NULL while the client is still assembling the round. */
   submitted_at: string | null;
   submitted_by: string | null;
-  status: "open" | "addressed";
+  /**
+   * 'open' until Kelsey resolves the round; 'addressed' = accepted, 'denied' =
+   * refused with a written reason. 'denied' widened in migration 017 — it is a
+   * status rather than a flag so denied rounds fall out of Phase 8's billable
+   * pool (`status='addressed'`) by their own value.
+   */
+  status: "open" | "addressed" | "denied";
   resolved_at: string | null;
+  /**
+   * Kelsey's words on the resolution, rendered to the client as "A note from
+   * Kelsey" (copy deck Screen 5). Required on a deny (the
+   * `revision_rounds_denied_reason_check` constraint enforces it), optional on
+   * an accept, and never present on an open round. Added in migration 017.
+   */
+  resolution_note: string | null;
   /** Set when the round is added to an invoice as a line item. */
   invoice_id: string | null;
   created_at: string;

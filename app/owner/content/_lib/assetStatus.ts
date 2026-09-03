@@ -146,11 +146,19 @@ export async function refreshAssetStatuses(
   if (assetIds.length === 0) return [];
 
   const supabase = getSupabaseServiceClient();
+  // Deliberately NO `replaced_at is null` filter (removed in Phase 6): a
+  // STAGED replacement — migration 017's born-superseded row awaiting the
+  // accept swap — is exactly the kind of processing video this refresh
+  // exists for, and the filter would strand it in 'processing' forever.
+  // Loosening this changes nothing for genuine history rows: they are
+  // 'ready', and only provider='stream' + status='processing' rows below
+  // cost a Cloudflare call — a settled row is returned from Postgres
+  // untouched whatever its replaced_at says. Callers pass explicit ids
+  // behind requireOwnerApi, so nothing unowned can be reached through it.
   const { data, error } = await supabase
     .from("content_assets")
     .select("*")
     .in("id", assetIds)
-    .is("replaced_at", null)
     .order("position", { ascending: true });
   if (error) throw new Error(error.message);
 

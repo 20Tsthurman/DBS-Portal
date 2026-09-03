@@ -17,13 +17,17 @@ import {
   deleteContentCycleAction,
   deleteContentItemAction,
   releaseContentCycleAction,
+  rereleaseContentCycleAction,
   unreleaseContentCycleAction,
 } from "../_actions";
 import { cycleStatusLabelFor, cycleStatusToneFor } from "../_lib/format";
 import type { ContentCalendarEvent } from "../_lib/calendarEvents";
 import type { ContentView } from "../_lib/href";
 import type { ContentItemWithAssets, CycleWithClient } from "../_lib/queries";
-import type { ReleaseGateResult } from "../_lib/releaseGate";
+import type {
+  ReleaseGateResult,
+  RereleaseGateResult,
+} from "../_lib/releaseGate";
 import { ContentCalendar } from "./ContentCalendar";
 import { ContentRollup } from "./ContentRollup";
 import type { CycleRollup } from "../_lib/rollup";
@@ -54,6 +58,14 @@ interface ContentBoardProps {
    */
   releaseGate: ReleaseGateResult | null;
   /**
+   * Server-computed re-release readiness for an `in_review` cycle, or null
+   * when there is none on screen. The same hint-not-authority contract as
+   * `releaseGate`: `rereleaseContentCycleAction` re-runs the gate after the
+   * press. A blocked gate with a null reason is the idle state — nothing to
+   * send back, nothing waiting — and renders no note, just a disabled button.
+   */
+  rereleaseGate: RereleaseGateResult | null;
+  /**
    * Client review progress for a released cycle, or null when there is no
    * released cycle on screen. Informational only (spec 4.5) — nothing on this
    * board keys off it.
@@ -81,6 +93,7 @@ export function ContentBoard({
   view,
   events,
   releaseGate,
+  rereleaseGate,
   rollup,
 }: ContentBoardProps) {
   const router = useRouter();
@@ -90,6 +103,7 @@ export function ContentBoard({
   const [confirmDeleteCycle, setConfirmDeleteCycle] = useState(false);
   const [confirmRelease, setConfirmRelease] = useState(false);
   const [confirmUnrelease, setConfirmUnrelease] = useState(false);
+  const [confirmRerelease, setConfirmRerelease] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -159,11 +173,33 @@ export function ContentBoard({
     router.refresh();
   };
 
+  const handleConfirmRerelease = async () => {
+    if (!cycle) return;
+    setError(null);
+    setBusy(true);
+    const result = await rereleaseContentCycleAction(cycle.id);
+    setBusy(false);
+    setConfirmRerelease(false);
+    if (!result.ok) {
+      // The gate re-ran server-side and said no, or the write failed — the
+      // reason is the server's, never the stale hint the button used.
+      setError(result.error ?? "Could not re-release this month");
+      return;
+    }
+    router.refresh();
+  };
+
   const deadlineLabel = cycle?.revision_deadline
     ? fullDateLabelForDateKey(dateKeyInTimezone(new Date(cycle.revision_deadline)))
     : null;
   const releaseBlockedReason =
     releaseGate && !releaseGate.ok ? releaseGate.reason : null;
+  // Null both when the gate passes and when it is idle: only an actionable
+  // blocker earns a line under the cycle bar.
+  const rereleaseBlockedReason =
+    rereleaseGate && !rereleaseGate.ok ? rereleaseGate.reason : null;
+  const rereleaseReady = rereleaseGate?.ok === true;
+  const rereleaseCount = rereleaseGate?.ok ? rereleaseGate.promotions.length : 0;
   // The rollup strip renders joined to the bottom of the cycle bar, so the bar
   // gives up its bottom margin and the strip drops its top border.
   const showRollup = Boolean(cycle && rollup && cycle.status === "in_review");
@@ -210,6 +246,11 @@ export function ContentBoard({
             {releaseBlockedReason && (
               <p style={gateNoteStyle}>
                 Not ready to release — {releaseBlockedReason}
+              </p>
+            )}
+            {rereleaseBlockedReason && (
+              <p style={gateNoteStyle}>
+                Not ready to re-release — {rereleaseBlockedReason}
               </p>
             )}
           </div>
@@ -268,6 +309,23 @@ export function ContentBoard({
                     onClick={() => setConfirmRelease(true)}
                   >
                     Release
+                  </Button>
+                )}
+                {cycle.status === "in_review" && (
+                  // Re-release takes Release's slot and weight once the month
+                  // is out: the same forest secondary, the same "heavier
+                  // action" reasoning. Disabled while the gate is blocked OR
+                  // idle — with nothing to send back there is nothing for the
+                  // button to do, and the missing note under the bar says so
+                  // by its absence. The action re-checks; this is a hint.
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={busy || !rereleaseReady}
+                    title={rereleaseBlockedReason ?? undefined}
+                    onClick={() => setConfirmRerelease(true)}
+                  >
+                    Re-release
                   </Button>
                 )}
               </>
@@ -408,6 +466,30 @@ export function ContentBoard({
           </>
         }
         confirmLabel="Unrelease"
+        busy={busy}
+      />
+
+      <ConfirmDialog
+        open={confirmRerelease}
+        onCancel={() => {
+          if (busy) return;
+          setConfirmRerelease(false);
+        }}
+        onConfirm={handleConfirmRerelease}
+        title="Re-release this month?"
+        body={
+          <>
+            <strong>
+              {rereleaseCount} updated {rereleaseCount === 1 ? "post goes" : "posts go"}
+            </strong>{" "}
+            back to {clientName || "this client"} for another look, and they
+            get an email. Everything else stays as it is — approved posts stay
+            approved, denied requests stay denied, and the review deadline
+            {deadlineLabel ? ` (${deadlineLabel})` : ""} doesn&apos;t change.
+          </>
+        }
+        confirmLabel="Re-release"
+        variant="success"
         busy={busy}
       />
     </div>

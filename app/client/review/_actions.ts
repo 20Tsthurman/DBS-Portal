@@ -317,12 +317,16 @@ function validateChangeRequest(
  * is LOCKED to the client (spec §5.4 — the mechanism the whole design rests
  * on; there is no reopen, ever).
  *
- * ROUND 1 ONLY, AND BILLING-INERT BY CONSTRUCTION. `is_billable: false` is
- * the spec's answer for round 1 (§6.1 — included), not a placeholder, and
- * `price: null` — never 0, which the feature reserves to mean "billing
- * disabled for the cycle". Phase 8 computes charges exclusively over
- * billable rounds, so nothing written here is ever read by it. Nothing is
- * computed from `included_rounds`; that comparison is Phase 8's.
+ * ANY ROUND, AND BILLING-INERT BY CONSTRUCTION. The round number is the
+ * item's `current_round`, which starts at 1 and is advanced only by Kelsey's
+ * re-release (`rereleaseContentCycleAction`), so round 2 is reachable from
+ * Phase 6 on. `is_billable: false` and `price: null` are written EXPLICITLY at
+ * every round number as the deliberate Phase 6 value — see the comment on the
+ * insert below for why a round 2 written here is permanently free. `price` is
+ * null, never 0, which the feature reserves to mean "billing disabled for the
+ * cycle". Phase 8 computes charges exclusively over billable rounds, so
+ * nothing written here is ever read by it. Nothing is computed from
+ * `included_rounds`; that comparison is Phase 8's.
  *
  * THE WRITE SEQUENCE RUNS WITHOUT A TRANSACTION — supabase-js has none and
  * the house bans DB functions — so the ordering is the safety mechanism.
@@ -406,14 +410,6 @@ export async function submitChangeRequestAction(
     return { ok: false, error: "This post has already been reviewed" };
   }
 
-  // Round 1 only in this phase. current_round moves only when Phase 6's
-  // re-release opens round 2, so this is unreachable today — it exists so
-  // that shipping Phase 6 without revisiting this action fails loudly here
-  // instead of silently writing a round-2 row with round-1 billing values.
-  if (item.current_round !== 1) {
-    return { ok: false, error: "Only round 1 can be submitted right now" };
-  }
-
   // The deck's video-only rule for moments, enforced against the data rather
   // than trusted from the client.
   if (moments.length > 0) {
@@ -459,6 +455,14 @@ export async function submitChangeRequestAction(
       .insert({
         content_item_id: itemId,
         round_number: item.current_round,
+        // DELIBERATE PHASE 6 VALUE, NOT A COLUMN DEFAULT — written explicitly
+        // at EVERY round number. Round 1 is included (spec §6.1). Any round
+        // >= 2 submitted before Phase 8 is permanently free, because no
+        // consent dialog was shown and no charge would be defensible (spec
+        // §5.8: the price must be shown before submission). Phase 8 replaces
+        // this write with the consent-gated computation; it must not
+        // retroactively re-price rows written here. `price: null`, never 0 —
+        // 0 is reserved for "billing disabled for the cycle".
         is_billable: false,
         price: null,
         status: "open",

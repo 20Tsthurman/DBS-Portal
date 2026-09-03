@@ -765,6 +765,18 @@ describe("createPlaybackUrls", () => {
     expect(params.get("primaryColor")).toBe("#A8788A");
     expect(params.get("letterboxColor")).toBe("#1B3827");
     expect(params.get("autoplay")).toBe("true");
+  });
+
+  it("suppresses autoplay when asked — the side-by-side compare's contract", () => {
+    // Two compare players mount in one commit; if this regressed to "true",
+    // both clips would start together and play two audio tracks at once.
+    const { iframeUrl } = createPlaybackUrls(VIDEO_UID, { autoplay: false });
+    const params = new URL(iframeUrl).searchParams;
+
+    expect(params.get("autoplay")).toBe("false");
+    // The rest of the branding is unaffected by the option.
+    expect(params.get("primaryColor")).toBe("#A8788A");
+    expect(params.get("letterboxColor")).toBe("#1B3827");
 
     // The raw string must carry the hex percent-encoded — a literal `#` would
     // end the URL at the fragment and silently drop what follows.

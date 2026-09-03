@@ -261,6 +261,55 @@ export async function fetchMySubmittedRound(
 }
 
 /**
+ * Which of these items have a DENIED latest round — the set behind every
+ * "Kept as planned" derivation (queue pill, banner selection, the counting
+ * rule of 2026-08-31: a denied request counts as neither changes-in-flight
+ * nor approved).
+ *
+ * Deny writes nothing to `content_items` (migration 017's design), so this
+ * read is the only way the client surface can know. STANDING RULE 1 applies:
+ * rounds are read with `submitted_at IS NOT NULL`, always — an unsubmitted
+ * row is debris, never data. The LATEST submitted round per item decides:
+ * an item whose round 1 was addressed and whose round 2 is open is "with
+ * Kelsey", not "kept as planned", whatever round 1 says.
+ *
+ * Like `fetchLiveAssetsByItem`, this is not ownership-checked on its own —
+ * every caller has already constrained its item ids to one client.
+ */
+export async function fetchMyDeniedItemIds(
+  itemIds: string[]
+): Promise<Set<string>> {
+  const denied = new Set<string>();
+  if (itemIds.length === 0) return denied;
+
+  const supabase = getSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from("revision_rounds")
+    .select("content_item_id, round_number, status")
+    .in("content_item_id", itemIds)
+    .not("submitted_at", "is", null);
+  if (error) throw new Error(error.message);
+
+  const latest = new Map<string, { round: number; status: string }>();
+  for (const raw of (data ?? []) as Array<
+    Pick<RevisionRoundRecord, "content_item_id" | "round_number" | "status">
+  >) {
+    const current = latest.get(raw.content_item_id);
+    if (!current || raw.round_number > current.round) {
+      latest.set(raw.content_item_id, {
+        round: raw.round_number,
+        status: raw.status,
+      });
+    }
+  }
+
+  for (const [itemId, round] of latest) {
+    if (round.status === "denied") denied.add(itemId);
+  }
+  return denied;
+}
+
+/**
  * Live assets for a set of items, keyed by item id, ordered by `position`.
  *
  * `replaced_at is null` matches the partial unique index that guarantees one

@@ -496,7 +496,63 @@ On accept: the superseded Stream video is explicitly deleted, and `content_asset
 Requires a written reason and a confirmation step, using `ConfirmDialog` with `variant: danger`. The client sees the reason.
 
 ### Slice 6.4 — Working state and re-release
+**Status: built 2026-09-02 (Phase 6, Step 5). Awaiting review and deploy.**
+
 Client is locked out of further action while Kelsey works, and sees an informative state (spec §4.8). Re-release opens the next round.
+
+What shipped, and the shape it took:
+
+- **Working state** — already covered by Phase 5's Screen 6 (`WorkingState`,
+  rendered when nothing is left to review and a request is open or
+  addressed). Audited against §4.8 and left alone: the lockout is per-item
+  (a sent post has no actions, and both client actions refuse anything not
+  `in_review`), and the cycle-level state appears once the queue is finished,
+  per the 2026-08-31 ruling. An accepted-but-not-re-released post still reads
+  "With Kelsey", so the lockout holds through the accept-to-re-release gap.
+- **Re-release is its own action**, `rereleaseContentCycleAction` — not a
+  parameter on release, and not routed through unrelease, which stays §4.4's
+  add-a-forgotten-post path. It runs on an `in_review` cycle and never writes
+  `content_cycles`. It promotes every `changes_requested` post whose latest
+  submitted round is `addressed` to `in_review` and sets `current_round` to
+  that round's number + 1. Denied posts stay (deny is final); approved posts
+  and drafts are untouched.
+- **Batch gate**, `evaluateRereleaseGate` in `_lib/releaseGate.ts`: at least
+  one accepted request to send back, no submitted request still open, the
+  deadline still in the future, and the returning posts' live assets ready —
+  checked on the returning posts only, not the whole month, because owner-side
+  asset add and delete are not status-gated. Idle (nothing waiting, nothing to
+  send) is a silently disabled button. The past-deadline message is actionable
+  by ruling (2026-09-02): "Extend it under Edit cycle before sending the
+  updates back." Kelsey's own turnaround running long must not strand accepted
+  work, but a re-release into a past deadline would be locked by the Phase 7
+  sweep on its next run, so it stays refused.
+- **Re-release email** — copy deck Screen 10, new builders in
+  `lib/contentEmails.ts` over the same shell. Body line 2 is byte-identical to
+  Screen 8's, produced by one shared function; `lib/contentEmails.test.ts`
+  asserts that, and asserts the email carries no charge language.
+- **Round 2 is reachable.** The Phase 5 refusal of `current_round !== 1` in
+  the client submit action is gone. `is_billable: false` and `price: null`
+  are still written explicitly at every round number, with the comment that
+  any round ≥ 2 submitted before Phase 8 is permanently free — no consent
+  dialog was shown, so no charge would be defensible. Phase 8 replaces that
+  write with the consent-gated computation.
+- **With Kelsey navigation** — the "Next post · All posts" pair, deck row
+  added 2026-09-02. Before it, the state was a dead end.
+- **Updated state** (Screen 5) — `UpdatedState`, rendered on an `in_review`
+  post at round 2+ whose latest round is `addressed`, with the Round chip and
+  Kelsey's optional note, above the usual Approve / Request changes pair. The
+  deck's small print about a charge is HELD until Phase 8 and has no export in
+  `copy.ts`. No "What you asked for" readback (decided 2026-09-02).
+- **Round-1-only lines** — the form footer helper and the send dialog's third
+  line render on round 1 only; on round 2+ nothing takes their place until
+  Phase 8's Screen 9 copy (decided 2026-09-02).
+
+**Test infrastructure note:** `vitest.config.mts` now exists, solely to
+resolve the `@/` path alias — `lib/contentEmails.ts` imports through it, and
+the previous no-config setup only worked because `lib/stream.ts` uses no
+alias. `.mts` because `package.json` has no `"type": "module"`, so a `.ts`
+config is loaded as CommonJS and Vite warns about its ESM syntax. Defaults
+otherwise; this is not the test infrastructure "Not in this plan" declines.
 
 **Done when:** a full round-1 cycle completes end to end — release, review, submit, accept, re-release.
 
@@ -624,6 +680,24 @@ the attach must run in the same commit that mounts the iframe.
 **Phase 6 inherits this.** The side-by-side old/new playback in slice 6.1
 mounts a second player; that iframe needs the same attach-at-mount treatment,
 or its position/state reads will be silently dead.
+
+### Phase 7 hand-off: the deadline sweep must not overwrite denied items
+
+A denied request (Phase 6, migration 017) leaves its item at
+`changes_requested` — deny writes nothing to `content_items`, and the
+client's "Kept as planned" state derives from the item's latest submitted
+round having `status = 'denied'`.
+
+The Phase 7 sweep is specified as "all non-approved items flip to approved
+with `approved_by = 'auto'`" (spec §3.9). Applied literally, that flip would
+re-render a denied item as "Approved automatically" — the wrong copy for a
+post Kelsey explicitly kept as planned, and a silent overwrite of a decision
+she already communicated. The sweep must treat an item whose latest submitted
+round is `denied` as RESOLVED, not untouched: **the round row is what
+distinguishes a denied item from an untouched one.** Whether the sweep skips
+the item entirely or flips it while the client surface keeps deriving the
+declined rendering from the round is Phase 7's call to make — but the
+derivation rule above is already live on the client side and must survive it.
 
 ### Escape closes the ConfirmDialog and the SlidePanel together
 With a delete `ConfirmDialog` open on top of a `SlidePanel`, one Escape press

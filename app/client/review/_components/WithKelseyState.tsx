@@ -1,6 +1,9 @@
+import Link from "next/link";
 import type { CSSProperties } from "react";
 import type { RevisionNoteRecord } from "@/lib/supabase";
 import {
+  ACTION_NEXT_POST,
+  BACK_LINK,
   CATEGORY_COPY,
   CATEGORY_ORDER,
   SENT_NOTES_HEADING,
@@ -14,13 +17,15 @@ interface WithKelseyStateProps {
   sentLabel: string;
   /** Every note in the submitted round, as stored. Partitioned here. */
   notes: RevisionNoteRecord[];
+  /** Href of the next post in the queue, or null on the last one. */
+  nextHref: string | null;
 }
 
 /**
  * The locked state of a post whose changes were sent (copy deck Screen 5,
  * "With Kelsey"), with the sent-notes readback under "What you asked for".
  *
- * NO ACTIONS AND NO MESSAGE LINK, on purpose. A submitted item is closed
+ * NO EDITING AND NO MESSAGE LINK, on purpose. A submitted item is closed
  * (spec §5.4) and stays closed — no reopen, no add-more, and no "Send Kelsey
  * a message" here: that escape hatch lives on the cycle-level working state
  * ONLY (spec §5.6), because repeated on every locked post it becomes the
@@ -28,13 +33,24 @@ interface WithKelseyStateProps {
  * the point of this panel: the client can always see exactly what they asked
  * for, which is what makes the lock feel like a receipt instead of a wall.
  *
+ * THE WAY ONWARD is the same "Next post · All posts" pair the approved and
+ * declined states have (deck row added 2026-09-02): a sent post is closed,
+ * and the client's next move is the rest of the queue. Before the row existed
+ * this state was a dead end — the only way out was the browser's back button.
+ * Next post hides on the last post rather than disabling, matching
+ * `ApprovedState`'s reasoning.
+ *
  * PARTITION BEFORE GROUPING — the standing rule from `fetchMySubmittedRound`:
  * a note with `timestamp_seconds` is a note on a moment (its stored category
  * is the constant 'other' and means nothing), so moments split out FIRST,
  * then category notes render in deck order and moments chronologically. The
  * timecode chip is bare — "0:12", no preposition (deck decision 2026-08-31).
  */
-export function WithKelseyState({ sentLabel, notes }: WithKelseyStateProps) {
+export function WithKelseyState({
+  sentLabel,
+  notes,
+  nextHref,
+}: WithKelseyStateProps) {
   const categoryNotes = notes.filter((n) => n.timestamp_seconds === null);
   const momentNotes = notes
     .filter((n) => n.timestamp_seconds !== null)
@@ -71,9 +87,48 @@ export function WithKelseyState({ sentLabel, notes }: WithKelseyStateProps) {
           ))}
         </div>
       )}
+
+      <div style={actionsStyle}>
+        {nextHref && (
+          <Link href={nextHref} style={primaryActionStyle}>
+            {ACTION_NEXT_POST}
+          </Link>
+        )}
+        <Link href="/client/review" style={actionStyle}>
+          {BACK_LINK}
+        </Link>
+      </div>
     </div>
   );
 }
+
+const actionsStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 10,
+  marginTop: 16,
+};
+
+const actionStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 48,
+  padding: "0 18px",
+  border: "1px solid var(--border)",
+  color: "var(--text-body)",
+  fontSize: 12,
+  fontWeight: 600,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+};
+
+const primaryActionStyle: CSSProperties = {
+  ...actionStyle,
+  backgroundColor: "var(--accent)",
+  border: "1px solid var(--accent)",
+  color: "#FFFFFF",
+};
 
 const panelStyle: CSSProperties = {
   border: "1px solid var(--border)",

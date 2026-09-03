@@ -9,6 +9,7 @@ import {
   type ContentItemRecord,
   type Platform,
   type PostFormat,
+  type RevisionRoundRecord,
 } from "@/lib/supabase";
 import {
   CONTENT_ASSETS_BUCKET,
@@ -39,12 +40,21 @@ import { resolveBaseUrl } from "@/lib/baseUrl";
 import {
   buildContentReleaseEmailHtml,
   buildContentReleaseEmailSubject,
+  buildContentRereleaseEmailHtml,
+  buildContentRereleaseEmailSubject,
 } from "@/lib/contentEmails";
-import { evaluateReleaseGate } from "@/app/owner/content/_lib/releaseGate";
+import {
+  evaluateReleaseGate,
+  evaluateRereleaseGate,
+} from "@/app/owner/content/_lib/releaseGate";
 import {
   fetchLatestRevisionRequest,
   type RevisionRequestView,
 } from "@/app/owner/content/_lib/revisionRequests";
+import {
+  fetchReplacementState,
+  type ReplacementState,
+} from "@/app/owner/content/_lib/replacementState";
 import type { ActionResult } from "@/lib/actions";
 
 const CONTENT_PATH = "/owner/content";
@@ -483,21 +493,27 @@ export async function deleteContentCycleAction(
 }
 
 // ---------------------------------------------------------------------------
-// Release / unrelease
+// Release / unrelease / re-release
 //
 // The first client-visible write in the whole feature. `content_cycles.status`
 // is the switch: nothing under /client/review reads a cycle that is not
-// 'in_review', so this pair of actions is the entire visibility boundary.
+// 'in_review', so release and unrelease are the entire visibility boundary.
+// Re-release (spec §4.8) is the third action here and deliberately NOT part of
+// that boundary — it runs on a month that is already 'in_review' and never
+// writes the cycle row.
 // ---------------------------------------------------------------------------
 
 /**
  * Make a month visible to its client (spec §4.2). Per client, per cycle, one
  * action — there is no per-post send and no partial release.
  *
- * RE-RELEASE IS THIS SAME ACTION. Spec §4.4's recovery path is unrelease ->
- * add the post -> release again, so a second call after an unrelease is the
- * ordinary path, not a special case. What makes that safe is the item filter
- * below.
+ * A SECOND CALL AFTER AN UNRELEASE IS THIS SAME ACTION. Spec §4.4's recovery
+ * path for a forgotten post is unrelease -> add the post -> release again, so
+ * releasing a month that was released before is the ordinary path, not a
+ * special case. What makes that safe is the item filter below. This is NOT
+ * spec §4.8's re-release — sending accepted revisions back for the next round
+ * while the cycle stays 'in_review' — which is `rereleaseContentCycleAction`
+ * below and does not route through here or through unrelease.
  *
  * The gate is re-evaluated HERE, after the press, against its own queries.
  * Whatever the button looked like is a hint that may be seconds stale; this is
@@ -593,6 +609,97 @@ export async function releaseContentCycleAction(
   return { ok: true, data: { releasedItemCount: (promoted ?? []).length } };
 }
 
+/** Which cycle email a log line is about. */
+type CycleEmailKind = "release" | "re-release";
+
+/**
+ * What both cycle emails need from outside the cycle row: the recipient, the
+ * bare month name, and the deadline label. Null — with the reason logged —
+ * when there is nobody to send to or nothing honest to say about the
+ * deadline. A DB error throws; the callers' best-effort wrapper catches it.
+ */
+async function loadCycleEmailContext(
+  cycle: ContentCycleRecord,
+  kind: CycleEmailKind
+): Promise<{
+  to: string;
+  recipientName: string;
+  monthName: string;
+  deadlineLabel: string;
+} | null> {
+  const supabase = getSupabaseServiceClient();
+
+  const { data: clientRow, error: clientError } = await supabase
+    .from("clients")
+    .select("name, email")
+    .eq("id", cycle.client_id)
+    .maybeSingle();
+  if (clientError) throw new Error(clientError.message);
+
+  const client = clientRow as { name: string; email: string | null } | null;
+  if (!client?.email) {
+    // Email is nullable on `clients` (migration 004 — a client can be on
+    // file with only a phone). Nothing to send to, and nothing broken.
+    console.error(
+      `[content] ${kind} email skipped for cycle ${cycle.id}: client has no email on file`
+    );
+    return null;
+  }
+
+  // Non-null by the time either sender runs: both gates refuse a cycle with
+  // no deadline. Guarded anyway rather than asserted, because the senders are
+  // best-effort and a wrong date in a client's inbox is worse than no email.
+  if (!cycle.revision_deadline) {
+    console.error(
+      `[content] ${kind} email skipped for cycle ${cycle.id}: no revision deadline`
+    );
+    return null;
+  }
+
+  return {
+    to: client.email,
+    recipientName: client.name,
+    monthName: monthNameForMonthKey(cycle.month.slice(0, 7)),
+    deadlineLabel: weekdayDateLabelForDateKey(
+      dateKeyInTimezone(new Date(cycle.revision_deadline))
+    ),
+  };
+}
+
+/**
+ * The one Resend call both cycle emails make. Resend is constructed inline
+ * with the same `from` fallback as every other send site in the codebase.
+ * There is no shared wrapper anywhere, and introducing one here — mid-feature
+ * — would be a refactor smuggled into a feature phase; this helper is scoped
+ * to the two senders in this file.
+ */
+async function sendCycleEmail(input: {
+  resendKey: string;
+  kind: CycleEmailKind;
+  cycle: ContentCycleRecord;
+  to: string;
+  subject: string;
+  html: string;
+}): Promise<void> {
+  const resend = new Resend(input.resendKey);
+  const fromAddress =
+    process.env.RESEND_FROM_EMAIL ||
+    "Digital Bloom Socials <onboarding@resend.dev>";
+
+  const { error: sendError } = await resend.emails.send({
+    from: fromAddress,
+    to: input.to,
+    subject: input.subject,
+    html: input.html,
+  });
+  if (sendError) {
+    console.error(
+      `[content] ${input.kind} email failed for cycle ${input.cycle.id}:`,
+      sendError.message
+    );
+  }
+}
+
 /**
  * Tell the client their month is ready (spec §5.1, copy deck Screen 8).
  *
@@ -602,41 +709,21 @@ export async function releaseContentCycleAction(
  * contract the payment-confirmation send uses
  * (`app/owner/invoices/_actions.ts`, "Confirmation email is best-effort"),
  * down to the console.error-and-continue on failure.
- *
- * Resend is constructed inline with the same `from` fallback as every other
- * send site in the codebase. There is no shared wrapper anywhere, and
- * introducing one here — mid-feature, for the fifth caller — would be a
- * refactor smuggled into a feature phase.
  */
 async function sendReleaseEmail(cycle: ContentCycleRecord): Promise<void> {
   const resendKey = process.env.RESEND_API_KEY;
   if (!resendKey) return;
 
   try {
-    const supabase = getSupabaseServiceClient();
-
-    const { data: clientRow, error: clientError } = await supabase
-      .from("clients")
-      .select("name, email")
-      .eq("id", cycle.client_id)
-      .maybeSingle();
-    if (clientError) throw new Error(clientError.message);
-
-    const client = clientRow as { name: string; email: string | null } | null;
-    if (!client?.email) {
-      // Email is nullable on `clients` (migration 004 — a client can be on
-      // file with only a phone). Nothing to send to, and nothing broken.
-      console.error(
-        `[content] release email skipped for cycle ${cycle.id}: client has no email on file`
-      );
-      return;
-    }
+    const context = await loadCycleEmailContext(cycle, "release");
+    if (!context) return;
 
     // The count the client will actually face, not the number of rows this
-    // release promoted. On a re-release after adding one post those differ:
+    // release promoted. On a release after an unrelease-and-add those differ:
     // one row was promoted, but the queue still holds everything the client
     // had not got to, and "Kelsey has 1 post ready for your review" would be
     // wrong in front of eleven others.
+    const supabase = getSupabaseServiceClient();
     const { data: awaiting, error: awaitingError } = await supabase
       .from("content_items")
       .select("id")
@@ -644,45 +731,66 @@ async function sendReleaseEmail(cycle: ContentCycleRecord): Promise<void> {
       .eq("status", "in_review");
     if (awaitingError) throw new Error(awaitingError.message);
 
-    // Non-null by the time this runs: the release gate refuses a cycle with no
-    // deadline. Guarded anyway rather than asserted, because this function is
-    // best-effort and a wrong date in a client's inbox is worse than no email.
-    if (!cycle.revision_deadline) {
-      console.error(
-        `[content] release email skipped for cycle ${cycle.id}: no revision deadline`
-      );
-      return;
-    }
-    const deadlineLabel = weekdayDateLabelForDateKey(
-      dateKeyInTimezone(new Date(cycle.revision_deadline))
-    );
-    const monthName = monthNameForMonthKey(cycle.month.slice(0, 7));
-
-    const resend = new Resend(resendKey);
-    const fromAddress =
-      process.env.RESEND_FROM_EMAIL ||
-      "Digital Bloom Socials <onboarding@resend.dev>";
-
-    const { error: sendError } = await resend.emails.send({
-      from: fromAddress,
-      to: client.email,
-      subject: buildContentReleaseEmailSubject(monthName),
+    await sendCycleEmail({
+      resendKey,
+      kind: "release",
+      cycle,
+      to: context.to,
+      subject: buildContentReleaseEmailSubject(context.monthName),
       html: buildContentReleaseEmailHtml({
-        recipientName: client.name,
-        monthName,
+        recipientName: context.recipientName,
+        monthName: context.monthName,
         postCount: (awaiting ?? []).length,
-        deadlineLabel,
+        deadlineLabel: context.deadlineLabel,
         reviewUrl: `${resolveBaseUrl()}/client/review`,
       }),
     });
-    if (sendError) {
-      console.error(
-        `[content] release email failed for cycle ${cycle.id}:`,
-        sendError.message
-      );
-    }
   } catch (err) {
     console.error(`[content] release email threw for cycle ${cycle.id}:`, err);
+  }
+}
+
+/**
+ * Tell the client their updated posts are back (spec §4.8, copy deck Screen
+ * 10). Same best-effort contract as `sendReleaseEmail`.
+ *
+ * `updatedCount` is the number of posts THIS re-release sent back — the deck's
+ * "Kelsey made the changes you asked for on 3 posts" — not everything awaiting
+ * review, which may still include posts the client never reached.
+ */
+async function sendRereleaseEmail(
+  cycle: ContentCycleRecord,
+  updatedCount: number
+): Promise<void> {
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!resendKey) return;
+
+  try {
+    const context = await loadCycleEmailContext(cycle, "re-release");
+    if (!context) return;
+
+    await sendCycleEmail({
+      resendKey,
+      kind: "re-release",
+      cycle,
+      to: context.to,
+      subject: buildContentRereleaseEmailSubject(
+        context.monthName,
+        updatedCount
+      ),
+      html: buildContentRereleaseEmailHtml({
+        recipientName: context.recipientName,
+        monthName: context.monthName,
+        updatedCount,
+        deadlineLabel: context.deadlineLabel,
+        reviewUrl: `${resolveBaseUrl()}/client/review`,
+      }),
+    });
+  } catch (err) {
+    console.error(
+      `[content] re-release email threw for cycle ${cycle.id}:`,
+      err
+    );
   }
 }
 
@@ -732,6 +840,105 @@ export async function unreleaseContentCycleAction(
 
   revalidatePath(CONTENT_PATH);
   return { ok: true };
+}
+
+/** Owner-facing. The gate's idle state and the lost-race case say the same thing. */
+const NOTHING_TO_SEND_BACK = "There are no accepted requests to send back.";
+
+/**
+ * Send accepted revisions back to the client for another look (spec §4.8).
+ *
+ * A SEPARATE ACTION FROM RELEASE, by decision (Step 1 audit, approved
+ * 2026-08-31). Release is the visibility switch and is guarded on 'drafting';
+ * this runs on a month that is ALREADY 'in_review' and never writes
+ * `content_cycles` at all. The cycle stays released throughout — the client's
+ * queue, their approvals, their locked posts, and the deadline are all
+ * untouched; only the posts coming back change state. Unrelease is for adding
+ * a forgotten post (§4.4) and plays no part here.
+ *
+ * WHAT IT WRITES, and nothing else: each promoted post flips
+ * 'changes_requested' -> 'in_review' with `current_round` set to the accepted
+ * round's number + 1. That advance is what makes round 2 reachable from the
+ * client's submit action, what the queue's "Round 2" chip reads, and what
+ * Screen 5's Updated state keys on. Denied posts stay where they are (deny is
+ * final), approved posts stay approved, drafts stay draft.
+ *
+ * ALL OR NOTHING, per the batch gate in `evaluateRereleaseGate`, re-run here
+ * after the press — the page's button state is a hint. One conditional UPDATE
+ * per distinct round number (posts in one month can sit on different rounds
+ * after a partial denial and a second re-release), each matched on
+ * `status = 'changes_requested'`, so a concurrent press finds nothing left to
+ * promote and is reported as such WITHOUT sending a second email. There is no
+ * transaction: a crash mid-loop leaves some posts promoted, and the next
+ * press promotes the rest — the gate still sees them as addressed.
+ *
+ * The email is best-effort and last, like release's.
+ */
+export async function rereleaseContentCycleAction(
+  cycleId: string
+): Promise<ActionResult<{ updatedCount: number }>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const cycleCheck = await loadCycle(cycleId);
+  if (!cycleCheck.ok) return { ok: false, error: cycleCheck.error };
+  const { cycle } = cycleCheck;
+
+  if (cycle.status === "locked") {
+    return {
+      ok: false,
+      error: "This month is locked. Reviews are closed for it.",
+    };
+  }
+  if (cycle.status !== "in_review") {
+    return { ok: false, error: "This month has not been released." };
+  }
+
+  let gate;
+  try {
+    gate = await evaluateRereleaseGate(cycle);
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err instanceof Error
+          ? err.message
+          : "Could not check whether this month is ready to re-release",
+    };
+  }
+  if (!gate.ok) return { ok: false, error: gate.reason ?? NOTHING_TO_SEND_BACK };
+
+  const supabase = getSupabaseServiceClient();
+
+  const idsByRound = new Map<number, string[]>();
+  for (const promotion of gate.promotions) {
+    const ids = idsByRound.get(promotion.roundNumber) ?? [];
+    ids.push(promotion.itemId);
+    idsByRound.set(promotion.roundNumber, ids);
+  }
+
+  let updatedCount = 0;
+  for (const [roundNumber, ids] of idsByRound) {
+    const { data: promoted, error: promoteError } = await supabase
+      .from("content_items")
+      .update({ status: "in_review", current_round: roundNumber + 1 })
+      .in("id", ids)
+      .eq("cycle_id", cycle.id)
+      .eq("status", "changes_requested")
+      .select("id");
+    if (promoteError) return { ok: false, error: promoteError.message };
+    updatedCount += (promoted ?? []).length;
+  }
+
+  if (updatedCount === 0) {
+    // A concurrent press promoted everything between the gate and the write.
+    return { ok: false, error: NOTHING_TO_SEND_BACK };
+  }
+
+  await sendRereleaseEmail(cycle, updatedCount);
+
+  revalidatePath(CONTENT_PATH);
+  return { ok: true, data: { updatedCount } };
 }
 
 // ---------------------------------------------------------------------------
@@ -1351,6 +1558,25 @@ export async function deleteContentAssetAction(
   const asset = data as ContentAssetRecord | null;
   if (!asset) return { ok: false, error: "Asset not found" };
 
+  // The app-layer half of migration 017's SET NULL decision: deleting an
+  // asset that a staged replacement points at would null the replacement's
+  // marker, turning a discoverable staged row into one nothing lists — its
+  // video still billing Stream storage with no surface left to remove it
+  // from. Refused here; the replacement is removable on its own, first.
+  const { data: stagedRows, error: stagedErr } = await supabase
+    .from("content_assets")
+    .select("id")
+    .eq("replaces_asset_id", assetId)
+    .limit(1);
+  if (stagedErr) return { ok: false, error: stagedErr.message };
+  if ((stagedRows ?? []).length > 0) {
+    return {
+      ok: false,
+      error:
+        "This video has a replacement in progress. Remove the replacement first.",
+    };
+  }
+
   // Provider decides the ORDER, not just the cleanup call.
   //
   //   supabase → row first, object swept after, failures logged. An orphaned
@@ -1415,6 +1641,591 @@ export async function fetchRevisionRequestAction(
       ok: false,
       error:
         err instanceof Error ? err.message : "Could not load the request",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Replacement upload — the accept path's new version (Phase 6, slice 6.1)
+//
+// A replacement is the Phase 2 video mint with one structural difference: the
+// row is born STAGED — same position as the video it supersedes, replaced_at
+// set at birth, replaces_asset_id pointing at its target (migration 017).
+//
+// The two invariants that force that shape:
+//   - the row is written at mint, before a byte moves, so Postgres records
+//     every Stream UID this app ever creates (the Phase 2 leak rule);
+//   - the partial unique index allows one LIVE row per position, and the
+//     replacement targets the position its predecessor still holds.
+// Born-superseded satisfies both, and gets client invisibility free: every
+// live-asset read already filters `replaced_at is null`, so the client never
+// sees a half-arrived candidate while the month sits in review.
+//
+// The upload itself, the finalize call, and the status poll are all the
+// existing Phase 2 machinery — a staged row is an ordinary content_assets row
+// to every one of them. The swap that makes it live is slice 6.2's commit,
+// not this mint.
+// ---------------------------------------------------------------------------
+
+export interface CreateReplacementVideoUploadInput {
+  /** The LIVE video this new version will supersede on accept. */
+  targetAssetId: string;
+  /** Exact byte length — tus fixes Upload-Length at creation. */
+  sizeBytes: number;
+}
+
+export async function createReplacementVideoUploadAction(
+  input: CreateReplacementVideoUploadInput
+): Promise<ActionResult<ContentVideoUploadTicket>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const { sizeBytes } = input;
+  if (!Number.isInteger(sizeBytes) || sizeBytes <= 0) {
+    return { ok: false, error: "That file appears to be empty" };
+  }
+  if (sizeBytes > MAX_VIDEO_BYTES) {
+    return { ok: false, error: "Video is larger than 500 MB." };
+  }
+
+  const supabase = getSupabaseServiceClient();
+
+  const { data: targetData, error: targetErr } = await supabase
+    .from("content_assets")
+    .select("*")
+    .eq("id", input.targetAssetId)
+    .maybeSingle();
+  if (targetErr) return { ok: false, error: targetErr.message };
+  const target = targetData as ContentAssetRecord | null;
+  if (!target) return { ok: false, error: "Asset not found" };
+  if (target.provider !== "stream" || target.kind !== "video") {
+    return { ok: false, error: "Only videos can be replaced" };
+  }
+  if (target.replaced_at !== null) {
+    return { ok: false, error: "That video has already been replaced" };
+  }
+
+  // A replacement exists to ACCEPT a request, so one must be open. Without
+  // this the staging machinery becomes a general swap-any-video path, which
+  // is not a thing this feature offers — outside a revision, Kelsey removes
+  // and re-adds.
+  const { data: roundData, error: roundErr } = await supabase
+    .from("revision_rounds")
+    .select("id, status")
+    .eq("content_item_id", target.content_item_id)
+    .not("submitted_at", "is", null)
+    .order("round_number", { ascending: false })
+    .limit(1);
+  if (roundErr) return { ok: false, error: roundErr.message };
+  const round = ((roundData ?? []) as Array<{ id: string; status: string }>)[0];
+  if (!round || round.status !== "open") {
+    return {
+      ok: false,
+      error: "There is no open change request on this post",
+    };
+  }
+
+  // One staged replacement per target. App-layer only — the partial index
+  // cannot see staged rows — so a double-press race can slip a second one
+  // through; that is benign (both stay listed and removable in the panel,
+  // and the commit activates exactly the one it is given), but the ordinary
+  // path should not mint a second video for one target.
+  const { data: existingStaged, error: stagedErr } = await supabase
+    .from("content_assets")
+    .select("id")
+    .eq("replaces_asset_id", target.id)
+    .limit(1);
+  if (stagedErr) return { ok: false, error: stagedErr.message };
+  if ((existingStaged ?? []).length > 0) {
+    return {
+      ok: false,
+      error:
+        "A replacement for this video already exists. Remove it first to start over.",
+    };
+  }
+
+  let upload: { uploadUrl: string; uid: string };
+  try {
+    upload = await createResumableUploadUrl(sizeBytes);
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Could not start upload",
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("content_assets")
+    .insert({
+      content_item_id: target.content_item_id,
+      // The target's own slot: staged rows are outside the partial index (a
+      // non-null replaced_at exempts them), so sharing the position is legal
+      // now and becomes THE position when the accept swap activates the row.
+      position: target.position,
+      kind: "video",
+      provider: "stream",
+      external_id: upload.uid,
+      status: "processing",
+      bytes: sizeBytes,
+      // Born staged. Cleared together by the accept commit, never separately
+      // (the content_assets_staged_not_live_check constraint).
+      replaced_at: new Date().toISOString(),
+      replaces_asset_id: target.id,
+    })
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    // Same one-place-only cleanup as the ordinary mint: nothing has been
+    // uploaded, no row records the UID, so taking the video out now removes
+    // the only case where a minted UID goes unrecorded.
+    try {
+      await deleteVideo(upload.uid);
+    } catch (cleanupErr) {
+      console.error(
+        "stream replacement mint cleanup failed; video left pending",
+        upload.uid,
+        cleanupErr
+      );
+    }
+    return { ok: false, error: error?.message ?? "Failed to start video" };
+  }
+
+  revalidatePath(CONTENT_PATH);
+  return {
+    ok: true,
+    data: {
+      uploadUrl: upload.uploadUrl,
+      uid: upload.uid,
+      assetId: (data as ContentAssetRecord).id,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Accept — the commit that resolves a request (Phase 6, slice 6.2)
+//
+// THE ORDERING IS THE DESIGN. Four steps, and the first one is the Stream
+// delete — the inversion of the house DB-row-first contract, deliberately
+// (Step 1 review, approved 2026-08-31):
+//
+//   1. delete the superseded video from Cloudflare   — abort on failure
+//   2. stamp the old row (replaced_at = now)         — it becomes history
+//   3. activate the staged row (clear replaced_at
+//      and replaces_asset_id in one UPDATE)          — it becomes live
+//   4. resolve the round (status = 'addressed',
+//      resolved_at, resolution_note)                 — the commit bit
+//
+// Why delete FIRST: the alternative — swap first, delete best-effort after —
+// makes a failed Stream delete a dismissible error over an orphan that bills
+// storage minutes forever with nothing left to retry it. Delete-first makes
+// the orphan STRUCTURALLY impossible: a failure aborts the whole accept with
+// nothing changed, the error lands in Kelsey's panel, and the retry is the
+// same button. It is never swallowed and never best-effort.
+//
+// The steps run without a transaction (the house has none), so every one is
+// conditional and a retry from any crash point completes:
+//
+//   after 1 — old row live, video gone: the client could briefly meet a dead
+//             player on a locked post; retry heals (an already-deleted video
+//             counts as success, see deleteStreamVideos).
+//   after 2 — no live asset at the position: invisible to the client queue's
+//             slide list, and the re-release gate refuses the item ("post has
+//             no media") until the retry completes. Step 2's update is
+//             guarded on `replaced_at is null`, so the replay no-ops it.
+//   after 3 — swap done, round still open: the panel still shows the request;
+//             re-accepting detects the already-activated row and skips to 4.
+//   after 4 — done; a replay returns ok from the early addressed check.
+//
+// The partial unique index is the swap's own guard: step 3's activation
+// re-checks (content_item_id, position) uniqueness at write time, so it
+// physically cannot land before step 2's stamp.
+//
+// Accepting is legal WITHOUT a replacement: a caption or schedule request
+// needs no new asset — Kelsey edits the item through the ordinary form and
+// the accept just resolves the round. `content_items` is untouched either
+// way; the item stays 'changes_requested' until re-release (Step 5) returns
+// it to the client.
+// ---------------------------------------------------------------------------
+
+/** Mirrors the client form's per-note ceiling; a note is one note. */
+const MAX_RESOLUTION_NOTE_CHARS = 2000;
+
+export interface AcceptRevisionInput {
+  roundId: string;
+  /** The staged replacement to swap in; null = accept with no new version. */
+  stagedAssetId: string | null;
+  /** Optional note to the client — Screen 5's "A note from Kelsey". */
+  note: string;
+}
+
+export async function acceptRevisionAction(
+  input: AcceptRevisionInput
+): Promise<ActionResult> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  if (!input.roundId) return { ok: false, error: "Missing round id" };
+  const note = (input.note ?? "").trim();
+  if (note.length > MAX_RESOLUTION_NOTE_CHARS) {
+    return { ok: false, error: "The note is too long" };
+  }
+
+  const supabase = getSupabaseServiceClient();
+
+  const { data: roundData, error: roundErr } = await supabase
+    .from("revision_rounds")
+    .select("*")
+    .eq("id", input.roundId)
+    .maybeSingle();
+  if (roundErr) return { ok: false, error: roundErr.message };
+  const round = roundData as RevisionRoundRecord | null;
+  if (!round || !round.submitted_at) {
+    return { ok: false, error: "Request not found" };
+  }
+  if (round.status === "addressed") {
+    // A replay of a completed accept — the double-press, the retry after a
+    // crash past step 4. The work is done; say so.
+    revalidatePath(CONTENT_PATH);
+    return { ok: true };
+  }
+  if (round.status === "denied") {
+    return { ok: false, error: "This request was already denied" };
+  }
+
+  // --- Steps 1–3: the swap, when a replacement is in play -------------------
+
+  if (input.stagedAssetId) {
+    const { data: stagedData, error: stagedErr } = await supabase
+      .from("content_assets")
+      .select("*")
+      .eq("id", input.stagedAssetId)
+      .maybeSingle();
+    if (stagedErr) return { ok: false, error: stagedErr.message };
+    const staged = stagedData as ContentAssetRecord | null;
+    if (!staged || staged.content_item_id !== round.content_item_id) {
+      return { ok: false, error: "Replacement not found" };
+    }
+
+    if (staged.replaces_asset_id !== null) {
+      // Still staged: the full swap.
+      if (staged.status !== "ready") {
+        return {
+          ok: false,
+          error:
+            staged.status === "failed"
+              ? "The new version failed to encode — remove it and upload another."
+              : "The new version is still processing.",
+        };
+      }
+
+      // The FK guarantees the target row exists while the marker is set.
+      const { data: targetData, error: targetErr } = await supabase
+        .from("content_assets")
+        .select("*")
+        .eq("id", staged.replaces_asset_id)
+        .maybeSingle();
+      if (targetErr) return { ok: false, error: targetErr.message };
+      const target = targetData as ContentAssetRecord | null;
+      if (!target) return { ok: false, error: "The current video is missing" };
+
+      // Step 1 — the superseded video leaves Cloudflare first. Run even when
+      // the target row is already stamped (a crash-after-2 replay): an
+      // already-deleted video answers 404, which deleteStreamVideos counts
+      // as success. A real failure aborts here with nothing written.
+      if (target.provider === "stream") {
+        const sweep = await deleteStreamVideos([target.external_id]);
+        if (!sweep.ok) return { ok: false, error: sweep.error };
+      }
+
+      // Step 2 — stamp the old row. Guarded, so a replay matches nothing.
+      const { error: stampErr } = await supabase
+        .from("content_assets")
+        .update({ replaced_at: new Date().toISOString() })
+        .eq("id", target.id)
+        .is("replaced_at", null);
+      if (stampErr) return { ok: false, error: stampErr.message };
+
+      // Step 3 — activate the staged row. Both columns clear in ONE update
+      // (the staged-not-live constraint requires it), and the partial unique
+      // index re-checks the position here — this cannot land before step 2.
+      const { error: activateErr } = await supabase
+        .from("content_assets")
+        .update({ replaced_at: null, replaces_asset_id: null })
+        .eq("id", staged.id)
+        .not("replaces_asset_id", "is", null);
+      if (activateErr) {
+        if (activateErr.code === PG_UNIQUE_VIOLATION) {
+          // The double-staged race: another replacement already took the
+          // slot live. This one stays staged, listed, and removable.
+          return {
+            ok: false,
+            error:
+              "Another version already took this slot. Remove this replacement.",
+          };
+        }
+        return { ok: false, error: activateErr.message };
+      }
+    } else {
+      // No marker: either the crash-after-3 replay (our activation landed,
+      // the resolve did not) or a live asset id — both mean no swap is
+      // needed, and resolving is the correct remaining work. A stamped
+      // history row is neither.
+      if (staged.replaced_at !== null) {
+        return { ok: false, error: "That replacement is no longer current" };
+      }
+    }
+  }
+
+  // --- Step 4: resolve the round --------------------------------------------
+
+  // Note and status land in one statement — migration 017's scope constraint
+  // ties resolution_note to a resolved round, so they cannot be split.
+  const { data: resolved, error: resolveErr } = await supabase
+    .from("revision_rounds")
+    .update({
+      status: "addressed",
+      resolved_at: new Date().toISOString(),
+      resolution_note: note.length > 0 ? note : null,
+    })
+    .eq("id", round.id)
+    .eq("status", "open")
+    .select("id")
+    .maybeSingle();
+  if (resolveErr) return { ok: false, error: resolveErr.message };
+  if (!resolved) {
+    // Matched nothing: a concurrent accept (or deny) got there first. Read
+    // which, and report honestly rather than guessing.
+    const { data: current, error: reReadErr } = await supabase
+      .from("revision_rounds")
+      .select("status")
+      .eq("id", round.id)
+      .maybeSingle();
+    if (reReadErr) return { ok: false, error: reReadErr.message };
+    const status = (current as Pick<RevisionRoundRecord, "status"> | null)
+      ?.status;
+    if (status === "addressed") {
+      revalidatePath(CONTENT_PATH);
+      return { ok: true };
+    }
+    return { ok: false, error: "This request was already denied" };
+  }
+
+  revalidatePath(CONTENT_PATH);
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Deny — the refusal (Phase 6, slice 6.3)
+//
+// One conditional write. Deny touches NOTHING but the round: no asset moves,
+// and `content_items` is deliberately untouched — the item stays
+// 'changes_requested', and the client's "Kept as planned" state derives from
+// the latest submitted round being 'denied' (Step 1 review, approved
+// 2026-08-31; the Phase 7 hand-off note in the build plan's Known issues is
+// the other half of that decision).
+//
+// The reason is REQUIRED — spec §4.7, and the deck marks the client-facing
+// label ("A note from Kelsey") required, not optional. Migration 017's
+// `revision_rounds_denied_reason_check` makes the requirement structural;
+// the validation here exists to say it in words before Postgres says it in
+// error codes.
+//
+// Deny is FINAL. There is no un-deny and no reopen — the client's declined
+// state says "staying as planned" and offers Messages, not a retry.
+//
+// NO EMAIL IS SENT, by decision (feature doc decisions log, 2026-08-31): the
+// client discovers the deny on the post; the re-release email covers mixed
+// cycles, and Kelsey messages directly for a full denial.
+// ---------------------------------------------------------------------------
+
+export interface DenyRevisionInput {
+  roundId: string;
+  /** Required. The client sees this verbatim as "A note from Kelsey". */
+  reason: string;
+}
+
+export async function denyRevisionAction(
+  input: DenyRevisionInput
+): Promise<ActionResult> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  if (!input.roundId) return { ok: false, error: "Missing round id" };
+  const reason = (input.reason ?? "").trim();
+  if (reason.length === 0) {
+    return { ok: false, error: "A deny needs a written reason — the client sees it." };
+  }
+  if (reason.length > MAX_RESOLUTION_NOTE_CHARS) {
+    return { ok: false, error: "The note is too long" };
+  }
+
+  const supabase = getSupabaseServiceClient();
+
+  const { data: roundData, error: roundErr } = await supabase
+    .from("revision_rounds")
+    .select("*")
+    .eq("id", input.roundId)
+    .maybeSingle();
+  if (roundErr) return { ok: false, error: roundErr.message };
+  const round = roundData as RevisionRoundRecord | null;
+  if (!round || !round.submitted_at) {
+    return { ok: false, error: "Request not found" };
+  }
+  if (round.status === "denied") {
+    // A replay — the double-press, the retry after a timeout. Done is done.
+    revalidatePath(CONTENT_PATH);
+    return { ok: true };
+  }
+  if (round.status === "addressed") {
+    return { ok: false, error: "This request was already accepted" };
+  }
+
+  // A staged replacement contradicts a deny: "keeping it as planned" while a
+  // new version sits uploaded is one decision too many for one button. The
+  // UI gates this too; here it is enforced against the data.
+  const { data: stagedRows, error: stagedErr } = await supabase
+    .from("content_assets")
+    .select("id")
+    .eq("content_item_id", round.content_item_id)
+    .not("replaces_asset_id", "is", null)
+    .limit(1);
+  if (stagedErr) return { ok: false, error: stagedErr.message };
+  if ((stagedRows ?? []).length > 0) {
+    return {
+      ok: false,
+      error:
+        "A new version is uploaded for this post. Remove it first — a denied request keeps the current video.",
+    };
+  }
+
+  // Reason and status land in one statement — 017's constraints demand both
+  // directions (denied requires a note; a note requires a resolution).
+  const { data: denied, error: denyErr } = await supabase
+    .from("revision_rounds")
+    .update({
+      status: "denied",
+      resolved_at: new Date().toISOString(),
+      resolution_note: reason,
+    })
+    .eq("id", round.id)
+    .eq("status", "open")
+    .select("id")
+    .maybeSingle();
+  if (denyErr) return { ok: false, error: denyErr.message };
+  if (!denied) {
+    // Lost a race. Read what won and report it honestly.
+    const { data: current, error: reReadErr } = await supabase
+      .from("revision_rounds")
+      .select("status")
+      .eq("id", round.id)
+      .maybeSingle();
+    if (reReadErr) return { ok: false, error: reReadErr.message };
+    const status = (current as Pick<RevisionRoundRecord, "status"> | null)
+      ?.status;
+    if (status === "denied") {
+      revalidatePath(CONTENT_PATH);
+      return { ok: true };
+    }
+    return { ok: false, error: "This request was already accepted" };
+  }
+
+  revalidatePath(CONTENT_PATH);
+  return { ok: true };
+}
+
+/**
+ * The replacement panel's read: the item's replaceable videos and any staged
+ * rows. Fetched on panel open and after every mutation, the
+ * `fetchContentAssetPreviewsAction` arrangement.
+ */
+export async function fetchReplacementStateAction(
+  itemId: string
+): Promise<ActionResult<ReplacementState>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  if (!itemId) return { ok: false, error: "Missing item id" };
+
+  try {
+    return { ok: true, data: await fetchReplacementState(itemId) };
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err instanceof Error ? err.message : "Could not load the replacement",
+    };
+  }
+}
+
+/**
+ * Mint the side-by-side pair (spec §4.7: "she can play the current and new
+ * versions side by side before committing").
+ *
+ * Both URLs are minted in one action at press time — one round trip, both
+ * tokens seconds old — and both with `autoplay: false`: the two players mount
+ * in the same commit, and two clips autostarting together is two audio
+ * tracks at once. Each waits at its poster for its own press.
+ *
+ * Owner-guarded only, like every mint on this surface: the caller is the
+ * single owner, for whom every asset is in scope by definition.
+ */
+export async function createReplacementCompareAction(
+  stagedAssetId: string
+): Promise<ActionResult<{ currentIframeUrl: string; newIframeUrl: string }>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  if (!stagedAssetId) return { ok: false, error: "Missing asset id" };
+
+  const supabase = getSupabaseServiceClient();
+  const { data: stagedData, error: stagedErr } = await supabase
+    .from("content_assets")
+    .select("*")
+    .eq("id", stagedAssetId)
+    .maybeSingle();
+  if (stagedErr) return { ok: false, error: stagedErr.message };
+  const staged = stagedData as ContentAssetRecord | null;
+  if (!staged || staged.replaces_asset_id === null) {
+    return { ok: false, error: "Replacement not found" };
+  }
+  if (staged.status !== "ready") {
+    return {
+      ok: false,
+      error:
+        staged.status === "failed"
+          ? (staged.error_reason ?? "That video failed to encode.")
+          : "The new version is still processing.",
+    };
+  }
+
+  const { data: targetData, error: targetErr } = await supabase
+    .from("content_assets")
+    .select("*")
+    .eq("id", staged.replaces_asset_id)
+    .maybeSingle();
+  if (targetErr) return { ok: false, error: targetErr.message };
+  const current = targetData as ContentAssetRecord | null;
+  if (!current || current.status !== "ready") {
+    return { ok: false, error: "The current video can't be played right now" };
+  }
+
+  try {
+    return {
+      ok: true,
+      data: {
+        currentIframeUrl: createPlaybackUrls(current.external_id, {
+          autoplay: false,
+        }).iframeUrl,
+        newIframeUrl: createPlaybackUrls(staged.external_id, {
+          autoplay: false,
+        }).iframeUrl,
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Could not start playback",
     };
   }
 }

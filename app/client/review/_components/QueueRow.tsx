@@ -19,11 +19,18 @@ interface QueueRowProps {
   /** 1-based place in the queue, for the "Post 5" caption fallback. */
   positionInQueue: number;
   thumbUrl: string | null;
+  /** Latest submitted round denied — the pill reads "Kept as planned". */
+  requestDenied: boolean;
 }
 
 /** Desktop table row. The dark header above it comes from `app/globals.css`. */
-export function QueueRow({ item, positionInQueue, thumbUrl }: QueueRowProps) {
-  const pill = statusPillFor(item.status);
+export function QueueRow({
+  item,
+  positionInQueue,
+  thumbUrl,
+  requestDenied,
+}: QueueRowProps) {
+  const pill = statusPillFor(item.status, requestDenied);
   const needsReview = needsClientReview(item.status);
   const href = `/client/review/${item.id}`;
 

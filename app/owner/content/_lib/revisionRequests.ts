@@ -42,7 +42,20 @@ export interface RevisionRequestNoteView {
 
 /** One submitted round, display-ready for the item panel. */
 export interface RevisionRequestView {
+  /** The round row itself — what Phase 6's accept and deny writes target. */
+  roundId: string;
   roundNumber: number;
+  /**
+   * 'open' = awaiting Kelsey; 'addressed' = accepted; 'denied' = refused.
+   * The replacement/accept controls render only while 'open'.
+   */
+  status: "open" | "addressed" | "denied";
+  /**
+   * Kelsey's own words on the resolution — the readback under the resolved
+   * marker, so what she told the client stays visible to her. Null while
+   * open, and on an accept she attached no note to.
+   */
+  resolutionNote: string | null;
   /** "Sunday, August 31 · 2:14pm" — when the client sent it, Central time. */
   sentLabel: string;
   /** Category notes in the form's fixed order, then moments chronologically. */
@@ -105,7 +118,10 @@ export async function fetchLatestRevisionRequest(
   )} · ${formatShortTimeInTimezone(sentAt)}`;
 
   return {
+    roundId: round.id,
     roundNumber: round.round_number,
+    status: round.status,
+    resolutionNote: round.resolution_note,
     sentLabel,
     notes: [
       ...categoryNotes.map((n) => ({

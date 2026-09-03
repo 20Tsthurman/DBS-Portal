@@ -14,6 +14,7 @@ import { NAV_LABEL, QUEUE_INSTRUCTION, queueTitle } from "./_lib/copy";
 import {
   countMyCycleItems,
   fetchMyActiveCycle,
+  fetchMyDeniedItemIds,
   fetchMyLastClosedCycle,
   fetchMyReviewItems,
 } from "./_lib/queries";
@@ -66,14 +67,24 @@ export default async function ClientReviewPage() {
   const monthName = monthNameForMonthKey(monthKey);
   const items = await fetchMyReviewItems(client.id, cycle.id);
   const thumbUrls = await buildReviewThumbUrls(items);
+  const deniedIds = await fetchMyDeniedItemIds(items.map((item) => item.id));
 
   const remaining = items.filter((item) =>
     needsClientReview(item.status)
   ).length;
+  // The 2026-08-31 counting rule (deck, Screen 1 notes): a denied request
+  // counts as neither changes-in-flight nor approved. `changedCount` feeds
+  // the Working state's body, so it holds only what Kelsey is actually
+  // working on — the Working state does not render when every request was
+  // denied, because nothing is coming.
   const changedCount = items.filter(
-    (item) => item.status === "changes_requested"
+    (item) =>
+      item.status === "changes_requested" && !deniedIds.has(item.id)
   ).length;
   const hasChangesRequested = changedCount > 0;
+  const hasDenied = items.some(
+    (item) => item.status === "changes_requested" && deniedIds.has(item.id)
+  );
 
   const deadlineLabel = cycle.revision_deadline
     ? weekdayDateLabelForDateKey(
@@ -95,18 +106,22 @@ export default async function ClientReviewPage() {
         total={items.length}
         remaining={remaining}
         hasChangesRequested={hasChangesRequested}
+        hasDenied={hasDenied}
         monthName={monthName}
       />
 
       {/* Screen 6's Working state supersedes the all-handled banner whenever
-          any post has changes sent (ruling 2026-08-31) — QueueSummary holds
-          its banner back in exactly this case. Cycle-level, so this is the
-          only home of the "Forgot something?" escape hatch (spec §5.6). */}
+          any post has changes IN FLIGHT (ruling 2026-08-31) — QueueSummary
+          holds its banner back in exactly this case. Denied requests don't
+          count (the counting rule): with only denials left, the banner's
+          all-denied variant renders instead of a Working state promising work
+          that isn't coming. Cycle-level, so this is the only home of the
+          "Forgot something?" escape hatch (spec §5.6). */}
       {remaining === 0 && hasChangesRequested && (
         <WorkingState changedCount={changedCount} />
       )}
 
-      <ReviewQueue items={items} thumbUrls={thumbUrls} />
+      <ReviewQueue items={items} thumbUrls={thumbUrls} deniedIds={deniedIds} />
     </section>
   );
 }

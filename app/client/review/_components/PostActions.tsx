@@ -19,6 +19,12 @@ interface PostActionsProps {
   contextLine: string;
   /** Whether the post has a video - gates the form's moments section. */
   hasVideo: boolean;
+  /**
+   * The post's `current_round` - 1 on a fresh month, 2+ after a re-release.
+   * Threaded through to the form, which renders its included-round lines on
+   * round 1 only (deck note, 2026-09-02).
+   */
+  round: number;
 }
 
 /**
@@ -43,6 +49,7 @@ export function PostActions({
   goesOutLabel,
   contextLine,
   hasVideo,
+  round,
 }: PostActionsProps) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
@@ -111,6 +118,7 @@ export function PostActions({
         itemId={itemId}
         contextLine={contextLine}
         hasVideo={hasVideo}
+        round={round}
       />
     </div>
   );

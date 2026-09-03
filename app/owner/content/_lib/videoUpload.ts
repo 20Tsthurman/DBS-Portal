@@ -2,6 +2,7 @@
 
 import {
   createContentVideoUploadAction,
+  createReplacementVideoUploadAction,
   finalizeContentVideoAssetAction,
 } from "../_actions";
 
@@ -77,6 +78,17 @@ interface ResumeRecord {
   filename: string;
   sizeBytes: number;
   lastModified: number;
+  /**
+   * Set when this upload is a REPLACEMENT (Phase 6): the live asset the
+   * staged row will supersede on accept. Absent on an ordinary upload.
+   *
+   * Added WITHOUT bumping RESUME_KEY, deliberately: the versioning rule above
+   * exists so a stale record cannot be MISREAD, and an old record missing
+   * this optional field reads correctly as "not a replacement" — replacement
+   * uploads did not exist when it was written. Bumping would orphan any
+   * upload paused across the deploy for no protection gained.
+   */
+  replacesAssetId?: string;
 }
 
 export type VideoUploadPhase =
@@ -90,6 +102,13 @@ export type VideoUploadPhase =
 export interface VideoUploadState {
   itemId: string;
   assetId: string;
+  /**
+   * Non-null when this upload is a replacement: the live asset the staged
+   * row supersedes on accept. The panel partitions its UI on this — the
+   * ordinary upload box ignores replacement uploads, and the replacement
+   * section ignores ordinary ones.
+   */
+  replacesAssetId: string | null;
   filename: string;
   sizeBytes: number;
   /** 0–1. */
@@ -154,6 +173,29 @@ function setActive(active: VideoUploadState | null) {
   emit({ active, completions: snapshot.completions });
 }
 
+/**
+ * The identity half of a VideoUploadState, from the record; callers supply
+ * only what varies. Exists because every published state must carry the same
+ * identity fields, and seven hand-built literals is seven places to forget
+ * one — adding `replacesAssetId` proved the point.
+ */
+function stateFor(
+  record: ResumeRecord,
+  rest: Pick<
+    VideoUploadState,
+    "progress" | "phase" | "error" | "needsFile" | "recoverable"
+  >
+): VideoUploadState {
+  return {
+    itemId: record.itemId,
+    assetId: record.assetId,
+    replacesAssetId: record.replacesAssetId ?? null,
+    filename: record.filename,
+    sizeBytes: record.sizeBytes,
+    ...rest,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Resume record persistence. Every access is wrapped: localStorage throws
 // outright in Safari private browsing, and a storage failure must degrade to
@@ -173,7 +215,9 @@ function readRecord(): ResumeRecord | null {
       typeof parsed.uploadUrl !== "string" ||
       typeof parsed.filename !== "string" ||
       typeof parsed.sizeBytes !== "number" ||
-      typeof parsed.lastModified !== "number"
+      typeof parsed.lastModified !== "number" ||
+      (parsed.replacesAssetId !== undefined &&
+        typeof parsed.replacesAssetId !== "string")
     ) {
       return null;
     }
@@ -237,11 +281,7 @@ export function subscribeVideoUpload(listener: () => void): () => void {
     if (record) {
       activeRecord = record;
       snapshot = {
-        active: {
-          itemId: record.itemId,
-          assetId: record.assetId,
-          filename: record.filename,
-          sizeBytes: record.sizeBytes,
+        active: stateFor(record, {
           // The real offset is only knowable from the tus HEAD that resuming
           // performs, so it is not guessed here.
           progress: 0,
@@ -249,7 +289,7 @@ export function subscribeVideoUpload(listener: () => void): () => void {
           error: "Upload paused when the page reloaded.",
           needsFile: true,
           recoverable: true,
-        },
+        }),
         completions: snapshot.completions,
       };
     }
@@ -325,35 +365,31 @@ async function runUpload(record: ResumeRecord, file: File): Promise<void> {
       // the phone's CPU on React instead of on the transfer.
       if (percent === lastPercent) return;
       lastPercent = percent;
-      setActive({
-        itemId: record.itemId,
-        assetId: record.assetId,
-        filename: record.filename,
-        sizeBytes: record.sizeBytes,
-        progress,
-        phase: "uploading",
-        error: null,
-        needsFile: false,
-        recoverable: true,
-      });
+      setActive(
+        stateFor(record, {
+          progress,
+          phase: "uploading",
+          error: null,
+          needsFile: false,
+          recoverable: true,
+        })
+      );
     },
     onError: (err) => {
       activeUpload = null;
       setUnloadGuard(false);
       const dead = isDeadUploadUrl(err);
-      setActive({
-        itemId: record.itemId,
-        assetId: record.assetId,
-        filename: record.filename,
-        sizeBytes: record.sizeBytes,
-        progress: snapshot.active?.progress ?? 0,
-        phase: "paused",
-        error: dead
-          ? `This upload link has expired, so it can't be continued. Remove the video below and add it again. (${describeUploadError(err)})`
-          : `Upload stopped. Nothing was lost — continuing picks up from where it stopped. (${describeUploadError(err)})`,
-        needsFile: activeFile === null,
-        recoverable: !dead,
-      });
+      setActive(
+        stateFor(record, {
+          progress: snapshot.active?.progress ?? 0,
+          phase: "paused",
+          error: dead
+            ? `This upload link has expired, so it can't be continued. Remove the video below and add it again. (${describeUploadError(err)})`
+            : `Upload stopped. Nothing was lost — continuing picks up from where it stopped. (${describeUploadError(err)})`,
+          needsFile: activeFile === null,
+          recoverable: !dead,
+        })
+      );
       if (dead) clearRecord();
     },
     onSuccess: () => {
@@ -368,33 +404,29 @@ async function runUpload(record: ResumeRecord, file: File): Promise<void> {
   activeRecord = record;
   setUnloadGuard(true);
 
-  setActive({
-    itemId: record.itemId,
-    assetId: record.assetId,
-    filename: record.filename,
-    sizeBytes: record.sizeBytes,
-    progress: 0,
-    phase: "uploading",
-    error: null,
-    needsFile: false,
-    recoverable: true,
-  });
+  setActive(
+    stateFor(record, {
+      progress: 0,
+      phase: "uploading",
+      error: null,
+      needsFile: false,
+      recoverable: true,
+    })
+  );
 
   upload.start();
 }
 
 async function finalize(record: ResumeRecord): Promise<void> {
-  setActive({
-    itemId: record.itemId,
-    assetId: record.assetId,
-    filename: record.filename,
-    sizeBytes: record.sizeBytes,
-    progress: 1,
-    phase: "finalizing",
-    error: null,
-    needsFile: false,
-    recoverable: true,
-  });
+  setActive(
+    stateFor(record, {
+      progress: 1,
+      phase: "finalizing",
+      error: null,
+      needsFile: false,
+      recoverable: true,
+    })
+  );
 
   const result = await finalizeContentVideoAssetAction(record.assetId);
 
@@ -406,17 +438,16 @@ async function finalize(record: ResumeRecord): Promise<void> {
     clearRecord();
     activeRecord = null;
     activeFile = null;
-    setActive({
-      itemId: record.itemId,
-      assetId: record.assetId,
-      filename: record.filename,
-      sizeBytes: record.sizeBytes,
-      progress: 1,
-      phase: "paused",
-      error: result.error ?? "The video uploaded but its details didn't save.",
-      needsFile: false,
-      recoverable: false,
-    });
+    setActive(
+      stateFor(record, {
+        progress: 1,
+        phase: "paused",
+        error:
+          result.error ?? "The video uploaded but its details didn't save.",
+        needsFile: false,
+        recoverable: false,
+      })
+    );
     return;
   }
 
@@ -433,6 +464,42 @@ async function finalize(record: ResumeRecord): Promise<void> {
 export interface StartResult {
   ok: boolean;
   error?: string;
+}
+
+/**
+ * Everything after a successful mint, shared by both start paths: persist the
+ * resume record, then hand the bytes to tus.
+ *
+ * Failures past this point are reported through the store rather than the
+ * return value — the row was minted, so the caller still needs to refresh the
+ * strip and show its tile.
+ */
+async function beginTrackedUpload(
+  record: ResumeRecord,
+  file: File
+): Promise<StartResult> {
+  // Written BEFORE the first byte: a reload one second into the upload must
+  // still find the URL, otherwise the row exists with no way to reach it.
+  writeRecord(record);
+
+  try {
+    await runUpload(record, file);
+    return { ok: true };
+  } catch (err) {
+    setActive(
+      stateFor(record, {
+        progress: 0,
+        phase: "paused",
+        error: `Upload couldn't start. (${describeUploadError(err)})`,
+        // The row and the upload URL both exist, so this is continuable.
+        // Which control she gets depends on whether the File survived — it
+        // has not been captured yet if the failure was in loading tus itself.
+        needsFile: activeFile === null,
+        recoverable: true,
+      })
+    );
+    return { ok: true };
+  }
 }
 
 /**
@@ -462,41 +529,62 @@ export async function startVideoUpload(
     return { ok: false, error: ticket.error ?? "Could not start upload" };
   }
 
-  const record: ResumeRecord = {
-    itemId,
-    assetId: ticket.data.assetId,
-    uid: ticket.data.uid,
-    uploadUrl: ticket.data.uploadUrl,
-    filename: file.name,
-    sizeBytes: file.size,
-    lastModified: file.lastModified,
-  };
-  // Written BEFORE the first byte: a reload one second into the upload must
-  // still find the URL, otherwise the row exists with no way to reach it.
-  writeRecord(record);
-
-  try {
-    await runUpload(record, file);
-    return { ok: true };
-  } catch (err) {
-    setActive({
+  return beginTrackedUpload(
+    {
       itemId,
-      assetId: record.assetId,
-      filename: record.filename,
-      sizeBytes: record.sizeBytes,
-      progress: 0,
-      phase: "paused",
-      error: `Upload couldn't start. (${describeUploadError(err)})`,
-      // The row and the upload URL both exist, so this is continuable. Which
-      // control she gets depends on whether the File survived — it has not
-      // been captured yet if the failure was in loading tus itself.
-      needsFile: activeFile === null,
-      recoverable: true,
-    });
-    // Reported through the store rather than as a return value: the row was
-    // minted, so the caller still needs to refresh the strip and show its tile.
-    return { ok: true };
+      assetId: ticket.data.assetId,
+      uid: ticket.data.uid,
+      uploadUrl: ticket.data.uploadUrl,
+      filename: file.name,
+      sizeBytes: file.size,
+      lastModified: file.lastModified,
+    },
+    file
+  );
+}
+
+/**
+ * The replacement counterpart (Phase 6, slice 6.1): mint a STAGED row against
+ * the live video it will supersede, then start the same tracked upload.
+ *
+ * Identical machinery from here on — the resume record just carries
+ * `replacesAssetId`, so a reload resumes into the panel's replacement section
+ * instead of the ordinary upload box. One upload at a time still applies
+ * across both kinds; the module rule is about the connection, not the row.
+ */
+export async function startReplacementVideoUpload(
+  itemId: string,
+  targetAssetId: string,
+  file: File
+): Promise<StartResult> {
+  if (snapshot.active) {
+    return {
+      ok: false,
+      error: "Another video is still uploading — finish that one first.",
+    };
   }
+
+  const ticket = await createReplacementVideoUploadAction({
+    targetAssetId,
+    sizeBytes: file.size,
+  });
+  if (!ticket.ok || !ticket.data) {
+    return { ok: false, error: ticket.error ?? "Could not start upload" };
+  }
+
+  return beginTrackedUpload(
+    {
+      itemId,
+      assetId: ticket.data.assetId,
+      uid: ticket.data.uid,
+      uploadUrl: ticket.data.uploadUrl,
+      filename: file.name,
+      sizeBytes: file.size,
+      lastModified: file.lastModified,
+      replacesAssetId: targetAssetId,
+    },
+    file
+  );
 }
 
 /**

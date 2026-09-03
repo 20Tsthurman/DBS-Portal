@@ -79,12 +79,29 @@ export async function evaluateReleaseGate(
     return { ok: false, reason: "There are no posts in this month yet." };
   }
 
+  return evaluateAssetReadiness(itemIds);
+}
+
+/**
+ * Steps 3 and 4 of the release gate over an explicit set of posts: every one
+ * has media, and no live video is failed or still processing. Shared with the
+ * re-release gate, which runs it over only the posts being sent back rather
+ * than the whole month.
+ */
+async function evaluateAssetReadiness(
+  itemIds: string[]
+): Promise<ReleaseGateResult> {
+  if (itemIds.length === 0) return { ok: true };
+  const supabase = getSupabaseServiceClient();
+
   // Every LIVE asset, not just the un-ready ones: the "post has no media at
   // all" check below needs the full set, and one query answers both.
   //
   // `replaced_at is null` is mandatory. From Phase 6 on, every accepted
   // revision leaves a superseded row behind, and without this filter those
-  // rows would block Release on the cycle forever.
+  // rows would block Release on the cycle forever. It also hides a STAGED
+  // replacement (born with `replaced_at` set) — correctly, since the client
+  // never sees one.
   const { data: assetRows, error: assetError } = await supabase
     .from("content_assets")
     .select("content_item_id, status")
@@ -132,4 +149,153 @@ export async function evaluateReleaseGate(
   }
 
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Re-release (spec §4.8)
+// ---------------------------------------------------------------------------
+
+/** One post the re-release will send back, and the accepted round it closes. */
+export interface RereleasePromotion {
+  itemId: string;
+  /** The accepted round's number; the post's `current_round` becomes this + 1. */
+  roundNumber: number;
+}
+
+/**
+ * `reason: null` on a blocked gate means IDLE — nothing is waiting on Kelsey
+ * and nothing is ready to send back. That is the normal state of a released
+ * month and not worth a sentence on the cycle bar; the button simply stays
+ * disabled. A string is an actionable blocker.
+ */
+export type RereleaseGateResult =
+  | { ok: true; promotions: RereleasePromotion[] }
+  | { ok: false; reason: string | null };
+
+/**
+ * Evaluate every re-release condition for one cycle (spec §4.8: "when she is
+ * done, she re-releases the cycle. This opens the next round").
+ *
+ * THE BATCH GATE (approved 2026-08-31): a re-release sends back EVERY post
+ * whose latest submitted request was accepted, or nothing. No partial
+ * re-release — three separate "Kelsey updated your posts" emails for one round
+ * is exactly the trickle the round structure exists to prevent. So: at least
+ * one accepted request to send back, and no submitted request still open.
+ * Denied requests are final and stay where they are (deny writes nothing to
+ * `content_items`); approved posts and drafts are never touched.
+ *
+ * "Latest submitted round per post" is the derivation the client surface
+ * already uses (`fetchMyDeniedItemIds`), under the same standing rule: rounds
+ * are read with `submitted_at IS NOT NULL`, always — an unsubmitted row is
+ * debris from a failed client submit, never data.
+ *
+ * THE DEADLINE CHECK IS ACTIONABLE, NOT A DEAD END (ruling 2026-09-02). On a
+ * first release a past deadline means nobody saw anything. On a re-release the
+ * client already reviewed, and the deadline may have passed while Kelsey
+ * worked — refusing to send back accepted work because her own turnaround ran
+ * long would be backwards. But a re-release INTO a past deadline opens a round
+ * the Phase 7 sweep locks on its next run, so it is still refused; the message
+ * names the fix (edit the cycle, extend, re-release) instead of just saying
+ * no, because she cannot extend from where the button is.
+ *
+ * ASSET READINESS IS CHECKED ON THE POSTS GOING BACK, ONLY. Owner-side asset
+ * add and delete are not status-gated, so a returning post can have no media
+ * or a processing video — the same dead-player failure the release gate
+ * exists for. A draft Kelsey parked for a later unrelease-add-release is not
+ * going back and must not block this.
+ *
+ * Like `evaluateReleaseGate`, this runs its own queries and is re-run inside
+ * the action after the press; whatever the button looked like is a hint.
+ */
+export async function evaluateRereleaseGate(
+  cycle: ContentCycleRecord
+): Promise<RereleaseGateResult> {
+  const supabase = getSupabaseServiceClient();
+
+  const { data: itemRows, error: itemError } = await supabase
+    .from("content_items")
+    .select("id, status")
+    .eq("cycle_id", cycle.id);
+  if (itemError) throw new Error(itemError.message);
+  const items = (itemRows ?? []) as Array<{ id: string; status: string }>;
+  if (items.length === 0) return { ok: false, reason: null };
+
+  const { data: roundRows, error: roundError } = await supabase
+    .from("revision_rounds")
+    .select("content_item_id, round_number, status")
+    .in(
+      "content_item_id",
+      items.map((item) => item.id)
+    )
+    .not("submitted_at", "is", null);
+  if (roundError) throw new Error(roundError.message);
+
+  const latest = new Map<string, { roundNumber: number; status: string }>();
+  for (const raw of (roundRows ?? []) as Array<{
+    content_item_id: string;
+    round_number: number;
+    status: string;
+  }>) {
+    const current = latest.get(raw.content_item_id);
+    if (!current || raw.round_number > current.roundNumber) {
+      latest.set(raw.content_item_id, {
+        roundNumber: raw.round_number,
+        status: raw.status,
+      });
+    }
+  }
+
+  let open = 0;
+  const promotions: RereleasePromotion[] = [];
+  for (const item of items) {
+    // Only a post the client sent back, and is still waiting on, can go back.
+    // An 'in_review' post at round 2 also has an addressed latest round — it
+    // was sent back already — and an approved one is settled either way.
+    if (item.status !== "changes_requested") continue;
+    const round = latest.get(item.id);
+    if (!round) continue;
+    if (round.status === "open") {
+      open += 1;
+    } else if (round.status === "addressed") {
+      promotions.push({ itemId: item.id, roundNumber: round.roundNumber });
+    }
+    // 'denied' is final: it neither blocks nor promotes.
+  }
+
+  // 1. Idle — nothing to send back and nothing waiting. Silent.
+  if (promotions.length === 0 && open === 0) {
+    return { ok: false, reason: null };
+  }
+
+  // 2. The deadline. A thing she sets, so it is the first blocker reported.
+  //    Nullable here: the cycle form allows clearing it on a released month.
+  if (!cycle.revision_deadline) {
+    return {
+      ok: false,
+      reason: "Set a review deadline before sending the updates back.",
+    };
+  }
+  if (new Date(cycle.revision_deadline).getTime() <= Date.now()) {
+    return {
+      ok: false,
+      reason:
+        "The review deadline has passed. Extend it under Edit cycle before sending the updates back.",
+    };
+  }
+
+  // 3. Requests still waiting on her. All or nothing.
+  if (open > 0) {
+    return {
+      ok: false,
+      reason: `${count(open, "request is", "requests are")} still waiting on you. Accept or deny each one before re-releasing.`,
+    };
+  }
+
+  // 4. The posts going back must be playable.
+  const readiness = await evaluateAssetReadiness(
+    promotions.map((promotion) => promotion.itemId)
+  );
+  if (!readiness.ok) return readiness;
+
+  return { ok: true, promotions };
 }

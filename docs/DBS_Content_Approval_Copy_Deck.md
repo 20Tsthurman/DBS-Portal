@@ -1,6 +1,6 @@
 # Content Approval — Client Copy Deck
 
-*Final strings for the client-facing Review & Approve screens (screens 1–9), rescued from the design canvas on 2026-08-30.*
+*Final strings for the client-facing Review & Approve screens (screens 1–9), rescued from the design canvas on 2026-08-30. Screen 10 (the re-release email) was added 2026-09-02 and is not on the canvas.*
 
 - **Canvas:** https://claude.ai/code/artifact/5126b6c5-a061-4afc-917e-98e0c849477d
 - **`$75` is a stand-in for `extra_round_price`, which is not yet set.** Every `$75` below renders from that config value.
@@ -36,9 +36,16 @@
 | All-handled banner body (changes requested, one post) | You've reviewed your post. Kelsey is working on the changes you asked for — you'll get an email when the update is ready to look at. | Added 2026-08-30, not on the canvas. Only when at least one post has changes sent |
 | All-handled banner body (all approved, no changes) | You approved all 12 posts. Your October content is set — Kelsey will take it from here. | When every post was approved and no changes were requested |
 | All-handled banner body (all approved, one post) | You approved your post. Your October content is set — Kelsey will take it from here. | Added 2026-08-30, not on the canvas. When every post was approved and no changes were requested |
+| All-handled banner body (all denied) | You've reviewed everything, and Kelsey is keeping these posts as planned. Your October content is set. | Added 2026-08-31, not on the canvas. Shown when nothing is in flight and at least one request was denied — also covers a mix of approvals and denials, where the all-approved wording ("You approved all 12 posts") would be wrong |
 | Table headers (desktop) | Post · Scheduled · Platform · Status | |
 | Row action — needs review | Review | |
 | Row action — otherwise | View | |
+
+*Counting rule (added 2026-08-31): a denied request counts as neither
+changes-in-flight nor approved. The changes-requested banner and Screen 6's
+Working state count only items whose latest submitted round is still open or
+addressed — the Working state does not render when every request was denied,
+because nothing is coming.*
 
 ## Status pills
 
@@ -103,7 +110,7 @@
 | Moments — add button | Add a note at 0:12 | Timecode is live |
 | Moments — no timecode yet | Play the video, then pause where you want to point. | Added 2026-08-31, not on the canvas. Helper text in place of the button. The button appears once the video has a position. Do not render a disabled "Add a note at 0:00". |
 | Moments — placeholder | What about this moment? | |
-| Footer helper (round 1) | One round of changes is included with your month. | |
+| Footer helper (round 1) | One round of changes is included with your month. | Round 1 only. On round 2+ before Phase 8, NOTHING renders in its place (decided 2026-09-02): the sentence is about the included round, and no pre-consent round-2 string exists. Screen 9's round-2+ footer takes the slot in Phase 8 |
 | Send button | Send to Kelsey | |
 | Disabled-send helper | Pick at least one thing above to get started. | |
 
@@ -116,7 +123,7 @@
 | Summary chips, one moment note | 1 note on moments | Added 2026-08-31, not on the canvas. Replaces only the moments chip; category chips are unchanged |
 | Body, line 1 | Kelsey will get these notes and start on the changes. | |
 | Body, line 2 | Once you send, nothing more can be added to this post — so take a moment to make sure it covers everything. | "Once you send, nothing more can be added to this post" is emphasized |
-| Body, line 3 | This is part of your included round of changes. | |
+| Body, line 3 | This is part of your included round of changes. | Round 1 only. Not rendered on round 2+ before Phase 8 (decided 2026-09-02) — the dialog ends at the finality line. Screen 9's amount row replaces it in Phase 8 |
 | Cancel | Go back | |
 | Confirm | Send to Kelsey | Mauve |
 
@@ -129,14 +136,16 @@
 | Approved — actions | Next post · All posts | |
 | With Kelsey — title | Your notes are with Kelsey | |
 | With Kelsey — body | Sent Saturday, September 19. Kelsey is on it — the updated post will show up here, and you'll get an email when it's ready. | No message link here — see Screen 6, Working footer |
+| With Kelsey — actions | Next post · All posts | Added 2026-09-02, not on the canvas. The same pair the approved and declined states have: a sent post is closed, and the client's next move is the rest of the queue. Still no message link |
 | Sent-notes heading | What you asked for | |
-| Updated — title | Kelsey updated this post | With Round 2 chip |
-| Updated — body | Have a look at the new version, then approve it or ask for more changes. | |
-| Kelsey note label | A note from Kelsey | |
-| Updated — small print | Your included round has been used. Another round of changes has a charge — you'll always see the amount before anything is sent. | |
+| Updated — title | Kelsey updated this post | With Round 2 chip (the round number is live — "Round 3" after a second re-release). Shown when a post comes back to the client after re-release: the post is open for review again, and its previous request was accepted. No "What you asked for" readback on this state (decided 2026-09-02) — the new version is what the client is here to look at |
+| Updated — body | Have a look at the new version, then approve it or ask for more changes. | Followed by the same Approve / Request changes pair as Screen 2 |
+| Kelsey note label | A note from Kelsey | Optional on an accept — renders only when Kelsey wrote one |
+| Updated — small print | Your included round has been used. Another round of changes has a charge — you'll always see the amount before anything is sent. | **HELD until Phase 8 (2026-09-02) — not rendered in Phase 6.** Before the consent dialog exists, a round-2+ request carries no charge, so the sentence would be untrue in front of the client. Phase 8 renders it alongside Screen 9 |
 | Declined — title | This one's staying as planned | |
 | Declined — reason label | A note from Kelsey | **Required, not optional** — a deny always carries Kelsey's written reason (spec §4.7) and the client always sees it (§5.6). Body is Kelsey's own words; representative example: "I hear you on wanting more close-up shots. We didn't get usable close-up footage at this shoot, so I can't swap them in this month — but I've added extra close-ups to the plan for your October shoot." |
 | Declined — body | The post goes out October 17 as planned. Want to talk it through? Send Kelsey a message | "Send Kelsey a message" is a link to Messages |
+| Declined — actions | Next post · All posts | Added 2026-08-31, not on the canvas. Same pair as the approved state, alongside the body's "Send Kelsey a message" link — a declined post is settled, and the client's next move is the rest of the queue |
 | Auto — title | Approved automatically | |
 | Auto — body | Reviews for October ended on Friday, September 25, and this post hadn't been reviewed — so it was approved automatically, the way your content plan works. It goes out October 27 as planned. | |
 | Auto — footer | Questions? Send Kelsey a message | "Send Kelsey a message" is a link to Messages |
@@ -195,6 +204,33 @@
 | Cancel | Go back | |
 | Confirm | Send · $75 | Mauve; price repeats on the button so consent is unmissable |
 | Form footer, round 2+ | This is round 2 — $75, added to your next invoice. | Replaces the included-round helper by the send button |
+
+## Screen 10 — Re-release email
+
+*Added 2026-09-02, not on the canvas.* Sent when Kelsey re-releases a month
+(spec §4.8): the posts whose requests she accepted go back to the client for
+another look, and this is the email that says so. Same shell and shape as
+Screen 8. **No charge language anywhere in it** — held with Screen 5's Updated
+small print until Phase 8. No denied-request line either: by decision
+(2026-08-31) the client discovers a deny on the post itself, and a month where
+every request was denied never re-releases, so this email never has to cover
+that case.
+
+| Element | String | Notes |
+|---|---|---|
+| Subject | Your October updates are ready to review | Mirrors Screen 8's subject shape |
+| Subject, one post | Your October update is ready to review | |
+| Preview text | 3 updated posts · reviews open through Friday, September 25 | Hidden preheader — the inbox snippet line |
+| Preview text, one post | 1 updated post · reviews open through Friday, September 25 | |
+| Header eyebrow | Client Portal | Existing shell |
+| Heading | Kelsey updated your October posts | Echoes Screen 5's "Kelsey updated this post" |
+| Heading, one post | Kelsey updated one of your October posts | |
+| Greeting | Hi Renee, | Existing shell |
+| Body, line 1 | Kelsey made the changes you asked for on 3 posts — have a look at the new versions when you have a few minutes, and approve each one or ask for more changes. | The count is the posts sent back in THIS re-release, not everything awaiting review — the queue may still hold posts the client never reached |
+| Body, line 1, one post | Kelsey made the changes you asked for on 1 post — have a look at the new version when you have a minute, and approve it or ask for more changes. | |
+| Body, line 2 | Reviews are open through Friday, September 25. Anything you haven't reviewed by then is approved automatically, so your month stays on schedule. | Verbatim Screen 8's line 2; the second sentence is the queue's deadline-card line 2, rendered from the same exported constant |
+| Button (CTA) | Review the updates | |
+| Footer | Digital Bloom Socials · Franklin, TN · digitalbloomsocials@gmail.com | Existing shell |
 
 ## Errors — client-facing failure text
 

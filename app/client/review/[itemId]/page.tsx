@@ -7,8 +7,10 @@ import {
 import { dateKeyInTimezone } from "@/lib/date";
 import { requireCurrentClient } from "@/lib/currentClient";
 import { ApprovedState } from "../_components/ApprovedState";
+import { DeclinedState } from "../_components/DeclinedState";
 import { PostActions } from "../_components/PostActions";
 import { PostMedia } from "../_components/PostMedia";
+import { UpdatedState } from "../_components/UpdatedState";
 import { WithKelseyState } from "../_components/WithKelseyState";
 import {
   BACK_LINK,
@@ -69,13 +71,29 @@ export default async function ClientReviewItemPage({ params }: PageProps) {
   const item = items[index];
   const slides = await buildReviewSlides(item.assets);
 
-  // The sent round, for the locked state's readback. Fetched only when the
-  // status says one exists; a null result on a changes_requested item is a
+  // A post that came back after a re-release: open for review again at round
+  // 2 or later. Its latest submitted round is the one Kelsey accepted, and
+  // Screen 5's Updated state reads that round's note.
+  const cameBackUpdated =
+    needsClientReview(item.status) && item.current_round >= 2;
+
+  // The latest submitted round, fetched only when the status says one
+  // exists. On a sent post it is the receipt (With Kelsey) or the answer
+  // (Declined); on a post that came back it is the accepted request behind
+  // the Updated state. A null result on a changes_requested item is a
   // half-written state the standing read rule makes invisible — the page
   // renders no state block rather than an empty receipt.
-  const submitted =
-    item.status === "changes_requested"
+  const latestRound =
+    item.status === "changes_requested" || cameBackUpdated
       ? await fetchMySubmittedRound(client.id, item.id)
+      : null;
+  const submitted = item.status === "changes_requested" ? latestRound : null;
+  // Guarded on 'addressed' rather than assumed: re-release only sends back
+  // accepted posts, so anything else here is hand-edited data, and the
+  // honest render for it is the plain Screen 2 actions with no claim made.
+  const updated =
+    cameBackUpdated && latestRound?.round.status === "addressed"
+      ? latestRound
       : null;
 
   const scheduledKey = dateKeyInTimezone(new Date(item.scheduled_for));
@@ -118,6 +136,17 @@ export default async function ClientReviewItemPage({ params }: PageProps) {
             <p style={captionStyle}>{item.caption?.trim() || "—"}</p>
           </div>
 
+          {/* Screen 5's Updated state, above the actions it leads into: the
+              post is back after a re-release with the Round chip and Kelsey's
+              optional note. The small print about a charge is HELD until
+              Phase 8 — see UpdatedState. */}
+          {updated && (
+            <UpdatedState
+              round={item.current_round}
+              note={updated.round.resolution_note}
+            />
+          )}
+
           {needsClientReview(item.status) && (
             <PostActions
               itemId={item.id}
@@ -127,21 +156,41 @@ export default async function ClientReviewItemPage({ params }: PageProps) {
                 platformLabel(item.platform, item.format)
               )}
               hasVideo={item.assets.some((asset) => asset.kind === "video")}
+              round={item.current_round}
             />
           )}
 
           {/* The locked state (Screen 5, "With Kelsey"): the item was sent
               and cannot be reopened — the state block IS the lock's face, a
-              receipt of what they asked for rather than a wall. No actions,
-              no message link (spec §5.4/§5.6). */}
-          {submitted?.round.submitted_at && (
-            <WithKelseyState
-              sentLabel={weekdayDateLabelForDateKey(
-                dateKeyInTimezone(new Date(submitted.round.submitted_at))
-              )}
-              notes={submitted.notes}
-            />
-          )}
+              receipt of what they asked for rather than a wall. No editing,
+              no message link (spec §5.4/§5.6); the way onward is the same
+              Next post · All posts pair the other settled states have (deck
+              row added 2026-09-02). An ADDRESSED round still renders this —
+              Kelsey has accepted but not re-released, so from the client's
+              side the notes are simply still with her. */}
+          {submitted?.round.submitted_at &&
+            submitted.round.status !== "denied" && (
+              <WithKelseyState
+                sentLabel={weekdayDateLabelForDateKey(
+                  dateKeyInTimezone(new Date(submitted.round.submitted_at))
+                )}
+                notes={submitted.notes}
+                nextHref={nextHref}
+              />
+            )}
+
+          {/* A denied round replaces the receipt with the answer (Screen 5,
+              "Declined"): Kelsey's reason, the plan, the Messages link, and
+              the same navigation the approved state has (deck row added
+              2026-08-31). */}
+          {submitted?.round.submitted_at &&
+            submitted.round.status === "denied" && (
+              <DeclinedState
+                reason={submitted.round.resolution_note}
+                goesOutLabel={goesOutBare}
+                nextHref={nextHref}
+              />
+            )}
 
           {(item.status === "approved" || item.status === "published") &&
             item.approved_at && (

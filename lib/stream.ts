@@ -779,10 +779,20 @@ export interface StreamPlaybackUrls {
  * Both URLs expire together, one hour out. `expiresAt` is returned so a
  * caller can refresh before a still goes stale rather than after it 403s.
  *
+ * `options.autoplay` defaults to TRUE — every single-player surface mints at
+ * press time, so play intent has already been expressed (see the param notes
+ * below). Pass `false` for the one surface where it has not: the accept
+ * flow's side-by-side compare mounts TWO players in one commit, and two
+ * clips autoplaying together is two audio tracks at once. There, each player
+ * waits at its poster for its own press.
+ *
  * Throws on missing env (including the customer subdomain) or a bad signing
  * key — see `createPlaybackToken`.
  */
-export function createPlaybackUrls(uid: string): StreamPlaybackUrls {
+export function createPlaybackUrls(
+  uid: string,
+  options?: { autoplay?: boolean }
+): StreamPlaybackUrls {
   // Tolerate a value pasted with a scheme or a trailing slash. Cloudflare
   // shows this as a bare host and that is what the env var holds, but the two
   // mistakes that produce `https://https://…` are silent everywhere except in
@@ -812,19 +822,21 @@ export function createPlaybackUrls(uid: string): StreamPlaybackUrls {
   //   DBS rather than Cloudflare-default blue. Duplicated from --accent in
   //   app/globals.css because this module runs server-side, where CSS custom
   //   properties do not exist; keep the two in sync.
-  // - autoplay: this URL is minted at press time, so play intent has already
-  //   been expressed — landing on a paused player would demand a second press
-  //   inside the frame. Browsers honour unmuted autoplay only when the
-  //   embedding page delegates its click via allow="autoplay" (the playback
-  //   overlay's iframe does); where a browser still refuses, the player just
-  //   waits at the poster, which is the pre-autoplay behavior.
+  // - autoplay: on by default because these URLs are minted at press time, so
+  //   play intent has already been expressed — landing on a paused player
+  //   would demand a second press inside the frame. Browsers honour unmuted
+  //   autoplay only when the embedding page delegates its click via
+  //   allow="autoplay" (the playback overlay's iframe does); where a browser
+  //   still refuses, the player just waits at the poster, which is the
+  //   pre-autoplay behavior. The side-by-side compare passes `false` — see
+  //   the function docblock.
   // - letterboxColor: the playback overlay's backdrop (--sidebar-bg), so a
   //   clip whose ratio is not exactly 9:16 pads in the overlay's green
   //   instead of black bars that outline the iframe.
   const iframeParams = new URLSearchParams({
     poster: posterUrl,
     primaryColor: "#A8788A",
-    autoplay: "true",
+    autoplay: options?.autoplay === false ? "false" : "true",
     letterboxColor: "#1B3827",
   });
   const iframeUrl = `${base}/iframe?${iframeParams.toString()}`;

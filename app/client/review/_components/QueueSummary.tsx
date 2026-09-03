@@ -12,7 +12,10 @@ interface QueueSummaryProps {
   total: number;
   /** Posts still sitting at 'in_review'. */
   remaining: number;
+  /** Changes IN FLIGHT — open or addressed requests. Denied ones don't count
+   * (the 2026-08-31 counting rule); those arrive as `hasDenied`. */
   hasChangesRequested: boolean;
+  hasDenied: boolean;
   monthName: string;
 }
 
@@ -26,16 +29,18 @@ interface QueueSummaryProps {
  * now") releases. The meta only appears once there is progress to report —
  * "0 of 12 reviewed" beside an invitation is discouraging and says nothing.
  *
- * THE BANNER RENDERS ONLY IN THE ALL-APPROVED CASE. When any post has
- * changes sent, Screen 6's cycle-level Working state supersedes it (ruling
- * 2026-08-31) — the page renders `WorkingState` where the banner would have
- * been. `allHandledBody`'s changes-requested variant stays in copy.ts as the
- * deck row it is, unreachable from here.
+ * THE BANNER RENDERS ONLY WHEN NOTHING IS IN FLIGHT. When any post has
+ * changes with Kelsey, Screen 6's cycle-level Working state supersedes it
+ * (ruling 2026-08-31) — the page renders `WorkingState` where the banner
+ * would have been. With only settled posts left, `allHandledBody` picks
+ * between the all-approved and all-denied variants; the changes-requested
+ * variant stays in copy.ts as the deck row it is, unreachable from here.
  */
 export function QueueSummary({
   total,
   remaining,
   hasChangesRequested,
+  hasDenied,
   monthName,
 }: QueueSummaryProps) {
   const reviewed = total - remaining;
@@ -60,7 +65,7 @@ export function QueueSummary({
         <div style={bannerStyle}>
           <h2 style={bannerTitleStyle}>{ALL_HANDLED_TITLE}</h2>
           <p style={bannerBodyStyle}>
-            {allHandledBody({ total, hasChangesRequested, monthName })}
+            {allHandledBody({ total, hasChangesRequested, hasDenied, monthName })}
           </p>
         </div>
       )}

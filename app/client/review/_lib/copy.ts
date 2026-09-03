@@ -72,23 +72,35 @@ export function reviewedMeta(reviewed: number, total: number): string {
 export const ALL_HANDLED_TITLE = "That's everything for now";
 
 /**
- * Screen 1, "All-handled banner body". Four deck rows: changes-requested and
- * all-approved, each with a one-post form.
+ * Screen 1, "All-handled banner body". Five deck rows: changes-requested and
+ * all-approved (each with a one-post form), plus the all-denied variant
+ * (added 2026-08-31, not on the canvas).
  *
- * The changes-requested variant wins whenever ANY post has changes sent — the
- * deck's note says "Only when at least one post has changes sent", and the
- * all-approved wording ("Your October content is set") would be wrong while
- * Kelsey still owes them work.
+ * Selection order, per the deck's notes and the 2026-08-31 counting rule:
+ *
+ *   1. Changes IN FLIGHT (an open or addressed request) win — Kelsey still
+ *      owes them work, so "your content is set" would be wrong.
+ *   2. Otherwise, ANY denied request picks the all-denied variant — it also
+ *      covers a mix of approvals and denials, where "You approved all 12
+ *      posts" would be wrong.
+ *   3. Otherwise everything was approved.
+ *
+ * A denied request counts as neither changes-in-flight nor approved — the
+ * caller's counts are expected to follow that rule.
  */
 export function allHandledBody(input: {
   total: number;
   hasChangesRequested: boolean;
+  hasDenied: boolean;
   monthName: string;
 }): string {
   if (input.hasChangesRequested) {
     return input.total === 1
       ? "You've reviewed your post. Kelsey is working on the changes you asked for — you'll get an email when the update is ready to look at."
       : `You've reviewed all ${input.total} posts. Kelsey is working on the changes you asked for — you'll get an email when the updates are ready to look at.`;
+  }
+  if (input.hasDenied) {
+    return `You've reviewed everything, and Kelsey is keeping these posts as planned. Your ${input.monthName} content is set.`;
   }
   return input.total === 1
     ? `You approved your post. Your ${input.monthName} content is set — Kelsey will take it from here.`
@@ -264,7 +276,12 @@ export const MOMENTS_NO_TIMECODE =
 /** Screen 3, "Moments — placeholder". */
 export const MOMENTS_PLACEHOLDER = "What about this moment?";
 
-/** Screen 3, "Footer helper (round 1)". */
+/**
+ * Screen 3, "Footer helper (round 1)". ROUND 1 ONLY: on round 2+ before
+ * Phase 8 nothing renders in its place (deck note, 2026-09-02) — the sentence
+ * is about the included round, and no pre-consent round-2 string exists.
+ * Screen 9's round-2+ footer takes the slot in Phase 8.
+ */
 export const FOOTER_HELPER_ROUND_1 =
   "One round of changes is included with your month.";
 
@@ -292,7 +309,11 @@ export const SEND_DIALOG_FINALITY = {
   rest: " — so take a moment to make sure it covers everything.",
 } as const;
 
-/** Screen 4, "Body, line 3" — the round-1 framing. */
+/**
+ * Screen 4, "Body, line 3" — the round-1 framing. ROUND 1 ONLY: not rendered
+ * on round 2+ before Phase 8 (deck note, 2026-09-02); the dialog ends at the
+ * finality line. Screen 9's amount row replaces it in Phase 8.
+ */
 export const SEND_DIALOG_LINE_3 =
   "This is part of your included round of changes.";
 
@@ -342,9 +363,58 @@ export const WITH_KELSEY_TITLE = "Your notes are with Kelsey";
 export function withKelseyBody(sentLabel: string): string {
   return `Sent ${sentLabel}. Kelsey is on it — the updated post will show up here, and you'll get an email when it's ready.`;
 }
+// Screen 5, "With Kelsey — actions" (deck row added 2026-09-02) is the same
+// "Next post · All posts" pair as the approved state: ACTION_NEXT_POST and
+// BACK_LINK above. No new strings.
 
 /** Screen 5, "Sent-notes heading" — above the readback of what they sent. */
 export const SENT_NOTES_HEADING = "What you asked for";
+
+/** Screen 5, "Declined — title". */
+export const DECLINED_TITLE = "This one's staying as planned";
+
+/**
+ * Screen 5, "Declined — reason label". REQUIRED, not optional — a deny always
+ * carries Kelsey's written reason (spec §4.7) and the client always sees it.
+ * The body under it is Kelsey's own words, rendered verbatim.
+ */
+export const DECLINED_REASON_LABEL = "A note from Kelsey";
+
+/**
+ * Screen 5, "Declined — body", split at the link the way `MEDIA_ERROR` is —
+ * "Send Kelsey a message" is a link to Messages. `goesOutLabel` is bare
+ * ("October 17"): like the approved state's send date, it is a plan, not an
+ * appointment.
+ */
+export function declinedBodyBeforeLink(goesOutLabel: string): string {
+  return `The post goes out ${goesOutLabel} as planned. Want to talk it through? `;
+}
+export const DECLINED_LINK_TEXT = "Send Kelsey a message";
+
+/**
+ * Screen 5, "Updated — title": the post came back after a re-release, open for
+ * review again. Rendered with the Round chip (`RoundChip`), whose number is
+ * live — "Round 3" after a second re-release.
+ */
+export const UPDATED_TITLE = "Kelsey updated this post";
+
+/** Screen 5, "Updated — body". The Screen 2 actions follow it. */
+export const UPDATED_BODY =
+  "Have a look at the new version, then approve it or ask for more changes.";
+
+/**
+ * Screen 5, "Kelsey note label" — the OPTIONAL note on an accept, rendered
+ * only when she wrote one. Same words as DECLINED_REASON_LABEL; its own export
+ * so each deck row stays traceable.
+ */
+export const UPDATED_NOTE_LABEL = "A note from Kelsey";
+
+// Screen 5, "Updated — small print" ("Your included round has been used.
+// Another round of changes has a charge — you'll always see the amount before
+// anything is sent.") is HELD until Phase 8 (deck note, 2026-09-02) and
+// deliberately has NO export here: before the consent dialog exists a round-2+
+// request carries no charge, so the sentence would be untrue in front of the
+// client. Phase 8 adds it alongside Screen 9.
 
 // --- Screen 6: cycle states ---------------------------------------------------
 
@@ -377,6 +447,8 @@ export const WORKING_FOOTER = {
 export const PILL_NEEDS_REVIEW = "Needs your review";
 export const PILL_WITH_KELSEY = "With Kelsey";
 export const PILL_APPROVED = "Approved";
+/** "Kept as planned" — a denied request, neutral tone. */
+export const PILL_KEPT_AS_PLANNED = "Kept as planned";
 
 /** "Round 2" — the forest chip, shown from round 2 on. */
 export function roundChip(round: number): string {

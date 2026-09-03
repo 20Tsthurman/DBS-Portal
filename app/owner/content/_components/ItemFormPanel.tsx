@@ -343,9 +343,16 @@ export function ItemFormPanel({
     getVideoUploadServerSnapshot
   );
 
-  /** The upload only renders in the panel for the item it belongs to. */
+  /**
+   * The upload only renders in the panel for the item it belongs to — and
+   * only an ORDINARY upload. A replacement upload (Phase 6) carries
+   * `replacesAssetId` and is the ReplacementSection's readout; showing it
+   * here too would render one transfer as two competing progress bars.
+   */
   const videoUpload =
-    uploadSnapshot.active && uploadSnapshot.active.itemId === activeItemId
+    uploadSnapshot.active &&
+    uploadSnapshot.active.itemId === activeItemId &&
+    uploadSnapshot.active.replacesAssetId === null
       ? uploadSnapshot.active
       : null;
 
@@ -892,6 +899,12 @@ export function ItemFormPanel({
                 itemId={activeItemId}
                 open={open}
                 expectRequest={item?.status === "changes_requested"}
+                onResolved={() => {
+                  // An accept may have swapped the item's live media — the
+                  // preview strip's old poster is now a deleted video's.
+                  if (activeItemId) void loadPreviews(activeItemId);
+                  router.refresh();
+                }}
               />
             )}
             {/* Row and helper share one space-y child so the helper sits in
@@ -1243,13 +1256,18 @@ export function ItemFormPanel({
 
                   {/* Otherwise "Add video" is disabled with no reason on
                       screen — the upload she is waiting on is on a different
-                      post, so nothing above accounts for it. */}
-                  {!videoUpload && uploadSnapshot.active && (
-                    <p style={mutedNoteStyle}>
-                      A video is uploading on another post. Videos upload one at
-                      a time.
-                    </p>
-                  )}
+                      post, so nothing above accounts for it. A replacement
+                      upload on THIS post is excluded: its progress is already
+                      on screen in the change-request block above, and "another
+                      post" would be wrong. */}
+                  {!videoUpload &&
+                    uploadSnapshot.active &&
+                    uploadSnapshot.active.itemId !== activeItemId && (
+                      <p style={mutedNoteStyle}>
+                        A video is uploading on another post. Videos upload one
+                        at a time.
+                      </p>
+                    )}
 
                   <input
                     ref={fileInputRef}

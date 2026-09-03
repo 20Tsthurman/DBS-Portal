@@ -441,6 +441,7 @@ Kelsey is phone-first for most of her portal use. The exception is bulk month-bu
 | Retention / auto-delete job | Not built — storage never becomes a cost factor |
 | Release granularity | Per client, per cycle. No per-post send. |
 | Post added after release | Unrelease → add → re-release. Progress preserved. |
+| Re-release (§4.8) | **A separate action from release (2026-08-31)**, on a cycle already in review; the cycle row is never written and unrelease plays no part. Batch-gated: every accepted request goes back at once, none while any request is still open; denied requests stay put. A past deadline blocks it with an actionable message — extend, then re-release (2026-09-02) — so no round is opened that the deadline sweep would lock on its next run. |
 | Deadline owner | Kelsey, custom per cycle |
 | Deadline extension | Kelsey only. No client self-serve extension. |
 | Deadline expiry | Auto-lock, untouched items auto-approve |
@@ -452,6 +453,7 @@ Kelsey is phone-first for most of her portal use. The exception is bulk month-bu
 | Round 1 | Included |
 | Round 2+ | Billable, price shown before submission |
 | Deny | Requires written reason and confirmation. Client sees reason. |
+| Deny notification | **No email — by decision (2026-08-31), not accident.** The client discovers a deny on the post itself (Screen 5's declined state). The re-release email covers mixed accept/deny cycles; for a full denial Kelsey messages the client directly. |
 | Fully-denied round | Not billed |
 | Billing mechanism | Unbilled line item accrual, not invoice draft |
 | Billing granularity | Configurable per cycle: `content_cycles.billing_mode`, `per_round` default, `per_item` optional; `extra_round_price = 0` disables billing for the cycle |

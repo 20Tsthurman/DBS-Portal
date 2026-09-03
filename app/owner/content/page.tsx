@@ -11,7 +11,9 @@ import { buildCalendarThumbUrls } from "./_lib/calendarThumbs";
 import type { ContentView } from "./_lib/href";
 import {
   evaluateReleaseGate,
+  evaluateRereleaseGate,
   type ReleaseGateResult,
+  type RereleaseGateResult,
 } from "./_lib/releaseGate";
 import { fetchCycleRollup, type CycleRollup } from "./_lib/rollup";
 import {
@@ -73,9 +75,15 @@ export default async function OwnerContentPage({ searchParams }: PageProps) {
   // Client progress for a released month (spec 4.5). Server-rendered so the
   // strip has real numbers on first paint; `ContentRollup` polls the same
   // computation afterwards.
+  //
+  // Re-release readiness rides alongside it, for the same cycle state and
+  // with the same hint-not-decision caveat as `releaseGate` above:
+  // `rereleaseContentCycleAction` re-runs the gate after the press.
   let rollup: CycleRollup | null = null;
+  let rereleaseGate: RereleaseGateResult | null = null;
   if (activeCycle && activeCycle.status === "in_review") {
     rollup = await fetchCycleRollup(activeCycle.id);
+    rereleaseGate = await evaluateRereleaseGate(activeCycle);
   }
 
   // Thumbnail minting is calendar-only work — the list view renders no
@@ -120,6 +128,7 @@ export default async function OwnerContentPage({ searchParams }: PageProps) {
         view={view}
         events={events}
         releaseGate={releaseGate}
+        rereleaseGate={rereleaseGate}
         rollup={rollup}
       />
     </section>

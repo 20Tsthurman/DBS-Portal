@@ -9,6 +9,7 @@ import type {
 } from "@/lib/supabase";
 import {
   PILL_APPROVED,
+  PILL_KEPT_AS_PLANNED,
   PILL_NEEDS_REVIEW,
   PILL_WITH_KELSEY,
 } from "./copy";
@@ -73,28 +74,38 @@ export interface StatusPillSpec {
 }
 
 /**
- * Copy deck, "Status pills". Three states are representable today:
+ * Copy deck, "Status pills". Four states are representable since Phase 6:
  *
- *   in_review          -> "Needs your review", mauve accent
- *   changes_requested  -> "With Kelsey", neutral      (written in Phase 5)
- *   approved/published -> "Approved", green success
+ *   in_review                    -> "Needs your review", mauve accent
+ *   changes_requested            -> "With Kelsey", neutral
+ *   changes_requested + denied   -> "Kept as planned", neutral
+ *   approved/published           -> "Approved", green success
  *
- * Two deck rows have no representation yet and are deliberately absent:
- * "Kept as planned" (a denied request — Phase 6 has no column for it) and the
+ * `requestDenied` is a second dimension, not a status: deny writes nothing to
+ * `content_items` (migration 017's design), so a denied item still reads
+ * 'changes_requested' and the pill derives from the item's LATEST submitted
+ * round being 'denied'. Callers get that from `fetchMyDeniedItemIds`.
+ *
+ * One deck row still has no representation and is deliberately absent: the
  * auto-approved row meta (`approved_by = 'auto'`, written by the Phase 7
- * sweep). Neither is reachable, and the auto row's "Sept 25" also needs a
- * fourth date format that belongs with the phase producing the data.
+ * sweep). It is unreachable, and its "Sept 25" needs a fourth date format
+ * that belongs with the phase producing the data.
  *
  * 'draft' never reaches this function — the client query filters it out — but
  * it falls through to the neutral pill rather than throwing, because a status
  * pill is not worth a 500.
  */
-export function statusPillFor(status: ContentItemStatus): StatusPillSpec {
+export function statusPillFor(
+  status: ContentItemStatus,
+  requestDenied = false
+): StatusPillSpec {
   switch (status) {
     case "in_review":
       return { label: PILL_NEEDS_REVIEW, tone: "accent" };
     case "changes_requested":
-      return { label: PILL_WITH_KELSEY, tone: "neutral" };
+      return requestDenied
+        ? { label: PILL_KEPT_AS_PLANNED, tone: "neutral" }
+        : { label: PILL_WITH_KELSEY, tone: "neutral" };
     case "approved":
     case "published":
       return { label: PILL_APPROVED, tone: "success" };

@@ -23,6 +23,8 @@ interface QueueCardProps {
   item: ReviewItem;
   positionInQueue: number;
   thumbUrl: string | null;
+  /** Latest submitted round denied — the pill reads "Kept as planned". */
+  requestDenied: boolean;
 }
 
 /**
@@ -33,8 +35,13 @@ interface QueueCardProps {
  * leads with a thumbnail beside the title, which that primitive has no slot
  * for. Everything below it is the shared primitives unchanged.
  */
-export function QueueCard({ item, positionInQueue, thumbUrl }: QueueCardProps) {
-  const pill = statusPillFor(item.status);
+export function QueueCard({
+  item,
+  positionInQueue,
+  thumbUrl,
+  requestDenied,
+}: QueueCardProps) {
+  const pill = statusPillFor(item.status, requestDenied);
   const needsReview = needsClientReview(item.status);
   const scheduled = weekdayDateLabelForDateKey(
     dateKeyInTimezone(new Date(item.scheduled_for))

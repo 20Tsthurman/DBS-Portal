@@ -7,6 +7,8 @@ import type { ReviewItem } from "../_lib/queries";
 interface ReviewQueueProps {
   items: ReviewItem[];
   thumbUrls: Map<string, string | null>;
+  /** Items whose latest submitted round was denied — "Kept as planned". */
+  deniedIds: Set<string>;
 }
 
 /**
@@ -22,7 +24,7 @@ interface ReviewQueueProps {
  * ships no client JavaScript, which on a phone on a weak connection is the
  * difference between a list that is there and a list that arrives.
  */
-export function ReviewQueue({ items, thumbUrls }: ReviewQueueProps) {
+export function ReviewQueue({ items, thumbUrls, deniedIds }: ReviewQueueProps) {
   return (
     <>
       <div
@@ -49,6 +51,7 @@ export function ReviewQueue({ items, thumbUrls }: ReviewQueueProps) {
                 item={item}
                 positionInQueue={index + 1}
                 thumbUrl={thumbUrls.get(item.id) ?? null}
+                requestDenied={deniedIds.has(item.id)}
               />
             ))}
           </tbody>
@@ -62,6 +65,7 @@ export function ReviewQueue({ items, thumbUrls }: ReviewQueueProps) {
             item={item}
             positionInQueue={index + 1}
             thumbUrl={thumbUrls.get(item.id) ?? null}
+            requestDenied={deniedIds.has(item.id)}
           />
         ))}
       </MobileCardList>
