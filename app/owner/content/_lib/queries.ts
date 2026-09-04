@@ -66,7 +66,7 @@ export async function fetchCyclesForMonth(
   let query = supabase
     .from("content_cycles")
     .select(
-      "id, client_id, month, revision_deadline, included_rounds, extra_round_price, status, locked_at, locked_by, created_at, clients!inner(name)"
+      "id, client_id, month, revision_deadline, included_rounds, extra_round_price, billing_mode, status, locked_at, locked_by, created_at, clients!inner(name)"
     )
     .eq("month", monthKeyToCycleMonth(monthKey));
   if (clientId) query = query.eq("client_id", clientId);
@@ -86,6 +86,7 @@ export async function fetchCyclesForMonth(
       included_rounds: row.included_rounds,
       extra_round_price:
         row.extra_round_price === null ? null : Number(row.extra_round_price),
+      billing_mode: row.billing_mode,
       status: row.status,
       locked_at: row.locked_at,
       locked_by: row.locked_by,

@@ -4,6 +4,7 @@
 
 - **Canvas:** https://claude.ai/code/artifact/5126b6c5-a061-4afc-917e-98e0c849477d
 - **`$75` is a stand-in for `extra_round_price`, which is not yet set.** Every `$75` below renders from that config value.
+- **Amounts render as `$75`, with cents only when present** (`$62.50`, never `$75.00`). Confirmed as a deck rule 2026-09-04.
 - Dates, counts, names, and times are representative values — everything else is the final string.
 - Voice: warm, plain, specific. Short sentences. No jargon, no exclamation marks, never "simply" or "just," never scolding.
 
@@ -110,7 +111,9 @@ because nothing is coming.*
 | Moments — add button | Add a note at 0:12 | Timecode is live |
 | Moments — no timecode yet | Play the video, then pause where you want to point. | Added 2026-08-31, not on the canvas. Helper text in place of the button. The button appears once the video has a position. Do not render a disabled "Add a note at 0:00". |
 | Moments — placeholder | What about this moment? | |
-| Footer helper (round 1) | One round of changes is included with your month. | Round 1 only. On round 2+ before Phase 8, NOTHING renders in its place (decided 2026-09-02): the sentence is about the included round, and no pre-consent round-2 string exists. Screen 9's round-2+ footer takes the slot in Phase 8 |
+| Footer helper (round 1) | One round of changes is included with your month. | Round 1 only. On round 2+ before Phase 8, NOTHING rendered in its place (decided 2026-09-02): the sentence is about the included round, and no pre-consent round-2 string existed. From Phase 8 the slot is filled by exactly one of: Screen 9's round-2+ footer (a charge), the covered row below, or the included row below |
+| Footer helper (round 2+, included) | This round of changes is included. | Added 2026-09-04, not on the canvas. A round beyond round 1 that carries no charge: `extra_round_price` is 0 or unset, or the round number is within `included_rounds`. No consent dialog is shown for it |
+| Footer helper (round 2+, per-round covered) | Already covered by round 2 — no additional charge for this post. | Added 2026-09-04, not on the canvas. Round number is live. `per_round` billing only: another post already opened this round's charge, so this post sends free. Replaces Screen 9's footer in that state |
 | Send button | Send to Kelsey | |
 | Disabled-send helper | Pick at least one thing above to get started. | |
 
@@ -123,7 +126,8 @@ because nothing is coming.*
 | Summary chips, one moment note | 1 note on moments | Added 2026-08-31, not on the canvas. Replaces only the moments chip; category chips are unchanged |
 | Body, line 1 | Kelsey will get these notes and start on the changes. | |
 | Body, line 2 | Once you send, nothing more can be added to this post — so take a moment to make sure it covers everything. | "Once you send, nothing more can be added to this post" is emphasized |
-| Body, line 3 | This is part of your included round of changes. | Round 1 only. Not rendered on round 2+ before Phase 8 (decided 2026-09-02) — the dialog ends at the finality line. Screen 9's amount row replaces it in Phase 8 |
+| Body, line 3 | This is part of your included round of changes. | Round 1 only. Not rendered on round 2+ before Phase 8 (decided 2026-09-02) — the dialog ended at the finality line. From Phase 8 a round-2+ dialog is Screen 9 (a charge or the covered state), or this dialog with the included line below |
+| Body, line 3 (round 2+, included) | This round is included — there's no charge for it. | Added 2026-09-04, not on the canvas. The same state as Screen 3's included footer: a round beyond round 1 with no charge. Title, chips, lines 1 and 2, and both buttons are unchanged |
 | Cancel | Go back | |
 | Confirm | Send to Kelsey | Mauve |
 
@@ -141,7 +145,8 @@ because nothing is coming.*
 | Updated — title | Kelsey updated this post | With Round 2 chip (the round number is live — "Round 3" after a second re-release). Shown when a post comes back to the client after re-release: the post is open for review again, and its previous request was accepted. No "What you asked for" readback on this state (decided 2026-09-02) — the new version is what the client is here to look at |
 | Updated — body | Have a look at the new version, then approve it or ask for more changes. | Followed by the same Approve / Request changes pair as Screen 2 |
 | Kelsey note label | A note from Kelsey | Optional on an accept — renders only when Kelsey wrote one |
-| Updated — small print | Your included round has been used. Another round of changes has a charge — you'll always see the amount before anything is sent. | **HELD until Phase 8 (2026-09-02) — not rendered in Phase 6.** Before the consent dialog exists, a round-2+ request carries no charge, so the sentence would be untrue in front of the client. Phase 8 renders it alongside Screen 9 |
+| Updated — small print | Your included round has been used. Another round of changes has a charge — you'll always see the amount before anything is sent. | Held from 2026-09-02 through Phase 7; **turned on in Phase 8 (2026-09-04), as written.** Renders only when the round the client would open from this post carries a charge (the state that shows Screen 9). When `extra_round_price` is 0 or unset, or the round is within `included_rounds`, NOTHING renders here, as in Phase 6 |
+| Updated — small print, per-round covered | Your included round has been used. This round of changes is already on your next invoice. | Added 2026-09-04, not on the canvas. `per_round` billing only: another post already opened this round's charge, so this post would send free and the held row's promise of an amount would be false. Same placement as the held row |
 | Declined — title | This one's staying as planned | |
 | Declined — reason label | A note from Kelsey | **Required, not optional** — a deny always carries Kelsey's written reason (spec §4.7) and the client always sees it (§5.6). Body is Kelsey's own words; representative example: "I hear you on wanting more close-up shots. We didn't get usable close-up footage at this shoot, so I can't swap them in this month — but I've added extra close-ups to the plan for your October shoot." |
 | Declined — body | The post goes out October 17 as planned. Want to talk it through? Send Kelsey a message | "Send Kelsey a message" is a link to Messages |
@@ -214,11 +219,26 @@ actually closed, which for a deadline close is the deadline day.*
 | Summary chips | Caption · Music · 2 notes on moments | Built from the form |
 | Body, line 1 | Kelsey will get these notes and start on the changes. | |
 | Amount row | Round 2 of changes — $75 | `$75` = `extra_round_price` |
-| Amount sub-line | Added to your next invoice — nothing is charged today. Your first round was included with your month. | |
+| Amount sub-line | Added to your next invoice — nothing is charged today. Your first round was included with your month. | When `included_rounds` is 1 |
+| Amount sub-line, `included_rounds` > 1 | Added to your next invoice — nothing is charged today. Your first 2 rounds were included with your month. | Added 2026-09-04, not on the canvas. Number is live |
 | Finality line | Once you send, nothing more can be added to this post — so take a moment to make sure it covers everything. | Identical to round 1's finality line |
 | Cancel | Go back | |
 | Confirm | Send · $75 | Mauve; price repeats on the button so consent is unmissable |
 | Form footer, round 2+ | This is round 2 — $75, added to your next invoice. | Replaces the included-round helper by the send button |
+
+*Per-round covered state (added 2026-09-04, not on the canvas). In `per_round`
+billing, the second and later posts the client sends within one round of a
+cycle carry no charge — the round's charge was opened by the first post. The
+dialog for those posts is Screen 9 with the money removed: the title keeps the
+round number, the chips and line 1 are unchanged, there is NO amount row, the
+sub-line is replaced by the row below, the finality line is unchanged, and the
+confirm button is Screen 4's "Send to Kelsey" with no price on it.*
+
+| Element | String | Notes |
+|---|---|---|
+| Title (per-round covered) | Send round 2 to Kelsey? | Same as the charge title; round number is live |
+| Sub-line (per-round covered) | Round 2 is already on your next invoice — there's no additional charge for this post. | Added 2026-09-04, not on the canvas. Round number is live. Takes the amount row's and sub-line's place |
+| Confirm (per-round covered) | Send to Kelsey | Mauve; Screen 4's label — no price, because there is none |
 
 ## Screen 10 — Re-release email
 
@@ -226,7 +246,10 @@ actually closed, which for a deadline close is the deadline day.*
 (spec §4.8): the posts whose requests she accepted go back to the client for
 another look, and this is the email that says so. Same shell and shape as
 Screen 8. **No charge language anywhere in it** — held with Screen 5's Updated
-small print until Phase 8. No denied-request line either: by decision
+small print until Phase 8, and **confirmed charge-free in Phase 8 (2026-09-04)**:
+consent is captured in the Screen 9 dialog, and the email is not the place
+for it. `lib/contentEmails.test.ts` asserts the absence and stays. No
+denied-request line either: by decision
 (2026-08-31) the client discovers a deny on the post itself, and a month where
 every request was denied never re-releases, so this email never has to cover
 that case.
@@ -247,6 +270,19 @@ that case.
 | Button (CTA) | Review the updates | |
 | Footer | Digital Bloom Socials · Franklin, TN · digitalbloomsocials@gmail.com | Existing shell |
 
+## Invoice line items — client-facing on the PDF
+
+*Added 2026-09-04, not on the canvas.* When Kelsey adds an accrued revision
+charge to an invoice, its line-item description lands on the invoice PDF, the
+receipt PDF, and the client's invoice list — so it is client-facing text and
+belongs here. The amount is the round's snapshotted price and follows the
+amount rule at the top of this deck.
+
+| Element | String | Notes |
+|---|---|---|
+| Description, per round | Content revisions · Round 2 · October 2026 | `per_round` billing: one line per round per cycle. Round number and month are live |
+| Description, per post | Content revisions · Round 2 · Instagram Reel, Oct 10 | `per_item` billing: one line per post revised. Round number, platform label (Screen 2's), and the post's scheduled date are live |
+
 ## Errors — client-facing failure text
 
 *Added 2026-08-30, not on the canvas.* Every string here is written to be actionable without jargon: it says
@@ -256,6 +292,7 @@ what happened, what to do next, and that nothing was silently committed.
 |---|---|---|
 | Approve failed | That didn't go through. Give it another try in a moment — nothing was approved. | Added 2026-08-30, not on the canvas |
 | Send failed | That didn't go through. Give it another try in a moment — nothing was sent to Kelsey. | Added 2026-08-31, not on the canvas |
+| Send failed, terms changed | Kelsey updated this month's revision terms while you were writing. Refresh the page and you'll see the current terms before you send. | Added 2026-09-04, not on the canvas. The consent dialog's outcome travels with the send, and the server writes a charge only when it matches what was shown exactly; when Kelsey edited the price, the included rounds, or the billing mode in between, the send is refused with nothing written. The plain send-failed line would be wrong here — a retry under the same stale page fails the same way — so this one says why and what to do |
 | Video won't play | This video isn't loading right now. Refresh the page to try again, or send Kelsey a message if it keeps happening. | Added 2026-08-30, not on the canvas. "send Kelsey a message" is a link to Messages, matching Screen 5's declined and auto-approved states |
 | Photo won't load | This photo isn't loading right now. Refresh the page to try again, or send Kelsey a message if it keeps happening. | Added 2026-08-30, not on the canvas. "send Kelsey a message" is a link to Messages, matching Screen 5's declined and auto-approved states |
 
@@ -265,5 +302,7 @@ Strings still to be written (tracked as open in `DBS_Content_Approval_Feature.md
 
 | Gap | What's needed |
 |---|---|
-| Per-round mode, repeat submission | In `per_round` billing, the second and later submissions within the same round of a cycle must **not** show a new charge. The consent dialog (or form footer) needs wording along the lines of "Already covered by round 2 — no additional charge." Not written or designed yet. |
-| `extra_round_price = 0` | When the price is zero, billing is off for the cycle: unlimited rounds, the consent dialog is skipped entirely, and the round reads as included. The round-2+ form footer and any replacement helper text for this state are not written yet. |
+| ~~Per-round mode, repeat submission~~ | **Resolved 2026-09-04.** Screen 3's "Footer helper (round 2+, per-round covered)", Screen 9's per-round covered table, and Screen 5's "Updated — small print, per-round covered". |
+| ~~`extra_round_price = 0`~~ | **Resolved 2026-09-04.** Screen 3's "Footer helper (round 2+, included)" and Screen 4's "Body, line 3 (round 2+, included)"; Screen 5's small print renders nothing in this state. |
+| `included_rounds = 0` | The cycle editor accepts 0 included rounds, which makes round 1 billable. Screen 9's sub-line then has no true second sentence ("Your first round was included" would be false). Until a row exists, the build renders only the first sentence ("Added to your next invoice — nothing is charged today.") in that state — an omission, not an improvisation. |
+| Screen 5 small print, `included_rounds` > 1 | "Your included round has been used." is singular. With two or more included rounds the held row renders as written (approved 2026-09-04); a plural variant does not exist. |

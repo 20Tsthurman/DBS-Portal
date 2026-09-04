@@ -22,8 +22,14 @@ import {
   buildInvoiceSentEmailHtml,
 } from "@/lib/invoiceEmails";
 import { resolveBaseUrl } from "@/lib/baseUrl";
+import { fetchRevisionCharges } from "@/app/owner/content/_lib/revisionCharges";
 import { generateNextInvoiceNumber } from "./_lib/numbering";
 import { fetchInvoiceById } from "./_lib/queries";
+import {
+  revisionChargeOption,
+  sameRoundIds,
+  type RevisionChargeOption,
+} from "./_lib/revisionChargeLines";
 
 const INCOME_TYPES: IncomeType[] = [
   "brand_retainer",
@@ -124,6 +130,262 @@ async function revalidateInvoiceSurfaces(
 ): Promise<void> {
   revalidatePath("/owner/invoices");
   if (clientId) revalidatePath(`/owner/clients/${clientId}`);
+  // The content cycle bar shows each charge's billed state.
+  revalidatePath("/owner/content");
+}
+
+// ---------------------------------------------------------------------------
+// Revision charges on an invoice (Content & Approval, Phase 8; spec §6.2)
+//
+// An accrued revision charge becomes ONE MORE {description, amount} LINE ITEM
+// and nothing else changes downstream: the Stripe webhook and mark-paid
+// derive income from the invoice total and never look inside line items, so
+// the payment pipeline is untouched. The only new write anywhere is stamping
+// `revision_rounds.invoice_id` here, at invoice-build time.
+//
+// The panel sends a tagged line item as `{ revisionRoundIds }`; the server
+// NEVER trusts its text or amount. It re-reads the client's charges through
+// the same function the content cycle bar uses, finds the charge by its round
+// ids, checks it is ready and unclaimed (or already on this invoice), and
+// rebuilds the description and amount from the charge — so the line the
+// client reads is the deck's string at the price they consented to.
+//
+// The stamp is SET-BASED on every save: rounds stamped to this invoice are
+// made equal to the submitted set — additions stamped, removals cleared
+// (approved 2026-09-04: refusing removal would strand a charge on an invoice
+// Kelsey wants to fix). A removed charge returns to the pool; the FK's ON
+// DELETE SET NULL does the same for a deleted draft with no code.
+//
+// The stamp predicate admits a round that is unstamped, stamped to THIS
+// invoice, or stamped to an invoice the charge read knew about (a retired
+// one — the inactive-invoice rule: a stamp to an inactive invoice does not
+// count as billed, so the charge is offered again and re-adding moves the
+// stamp). It never admits a stamp it did not know about, and it selects the
+// ids back: a short count means another invoice claimed a round in between,
+// and the caller says so.
+// ---------------------------------------------------------------------------
+
+export interface InvoiceLineItemInput {
+  description: string;
+  amount: number;
+  /**
+   * Present on a line the panel added from the revision charges picker: the
+   * charge's round ids. The server rebuilds `description` and `amount` for
+   * such a line and ignores what the panel sent for them.
+   */
+  revisionRoundIds?: string[];
+}
+
+interface ResolvedRevisionLines {
+  /** Every line item, with tagged ones rebuilt from their charge. */
+  items: Array<{ description: string; amount: number }>;
+  /** Every round id the tagged lines stand on — the stamp's target set. */
+  roundIds: string[];
+  /** Every invoice id those rounds were already stamped with, live or not. */
+  priorStampIds: string[];
+}
+
+async function resolveRevisionLineItems(input: {
+  clientId: string;
+  invoiceId: string | null;
+  lineItems: InvoiceLineItemInput[];
+}): Promise<
+  { ok: true; value: ResolvedRevisionLines } | { ok: false; error: string }
+> {
+  if (!Array.isArray(input.lineItems)) {
+    return { ok: false, error: "At least one line item is required" };
+  }
+  const tagged = input.lineItems.filter(
+    (li) => Array.isArray(li?.revisionRoundIds) && li.revisionRoundIds.length > 0
+  );
+  if (tagged.length === 0) {
+    return {
+      ok: true,
+      value: {
+        items: input.lineItems.map((li) => ({
+          description: li?.description,
+          amount: li?.amount,
+        })),
+        roundIds: [],
+        priorStampIds: [],
+      },
+    };
+  }
+
+  const charges = await fetchRevisionCharges(input.clientId);
+  const used = new Set<string>();
+  const roundIds: string[] = [];
+  const priorStampIds = new Set<string>();
+  const items: Array<{ description: string; amount: number }> = [];
+
+  for (const li of input.lineItems) {
+    const ids = li?.revisionRoundIds;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      items.push({ description: li?.description, amount: li?.amount });
+      continue;
+    }
+    const charge = charges.find((c) => sameRoundIds(c.roundIds, ids));
+    if (!charge) {
+      return {
+        ok: false,
+        error:
+          "A revision charge on this invoice no longer exists. Remove that line and try again.",
+      };
+    }
+    if (used.has(charge.key)) {
+      return {
+        ok: false,
+        error: "The same revision charge is on this invoice twice. Remove one.",
+      };
+    }
+    used.add(charge.key);
+    if (charge.invoice && charge.invoice.id !== input.invoiceId) {
+      return {
+        ok: false,
+        error: `That revision charge is already on ${
+          charge.invoice.number ?? "another invoice"
+        }.`,
+      };
+    }
+    // A charge already on this invoice stays whatever its state reads now;
+    // one being added must be ready — every request in its round answered,
+    // and not every one denied.
+    if (!charge.invoice && charge.state !== "ready") {
+      return {
+        ok: false,
+        error:
+          charge.state === "waived"
+            ? "That revision charge was waived — every request in the round was denied."
+            : "That revision charge is still pending — accept or deny every request in the round first.",
+      };
+    }
+    const option = revisionChargeOption(charge);
+    items.push({ description: option.description, amount: option.amount });
+    roundIds.push(...charge.roundIds);
+    for (const id of charge.stampedInvoiceIds) priorStampIds.add(id);
+  }
+
+  return {
+    ok: true,
+    value: { items, roundIds, priorStampIds: Array.from(priorStampIds) },
+  };
+}
+
+type StampSyncResult =
+  | { ok: true }
+  | { ok: false; kind: "error" | "claimed"; detail: string };
+
+/**
+ * Make the set of rounds stamped to `invoiceId` equal to `roundIds`. Two
+ * statements, clear then stamp, each atomic on its own; a failure between
+ * them leaves a subset stamped, which the next save repairs.
+ */
+async function syncRevisionChargeStamps(input: {
+  invoiceId: string;
+  roundIds: string[];
+  priorStampIds: string[];
+}): Promise<StampSyncResult> {
+  const supabase = getSupabaseServiceClient();
+
+  let clear = supabase
+    .from("revision_rounds")
+    .update({ invoice_id: null })
+    .eq("invoice_id", input.invoiceId);
+  if (input.roundIds.length > 0) {
+    clear = clear.not("id", "in", `(${input.roundIds.join(",")})`);
+  }
+  const { error: clearError } = await clear;
+  if (clearError) return { ok: false, kind: "error", detail: clearError.message };
+
+  if (input.roundIds.length === 0) return { ok: true };
+
+  const admitted = [input.invoiceId, ...input.priorStampIds];
+  const { data, error } = await supabase
+    .from("revision_rounds")
+    .update({ invoice_id: input.invoiceId })
+    .in("id", input.roundIds)
+    .eq("is_billable", true)
+    .or(`invoice_id.is.null,invoice_id.in.(${admitted.join(",")})`)
+    .select("id");
+  if (error) return { ok: false, kind: "error", detail: error.message };
+
+  const stamped = (data ?? []).length;
+  if (stamped < input.roundIds.length) {
+    return {
+      ok: false,
+      kind: "claimed",
+      detail: `${input.roundIds.length - stamped} of ${input.roundIds.length} rounds`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Owner-facing. The invoice write already landed when this is shown, so the
+ * message says what did happen and names the one next step. "claimed" is the
+ * double-billing direction — another invoice took a round in between — and
+ * the fix is to remove the line, not to retry.
+ */
+function stampFailureMessage(
+  verb: "created" | "saved",
+  invoiceNumber: string | null,
+  result: { kind: "error" | "claimed"; detail: string }
+): string {
+  const name = invoiceNumber ? `Invoice ${invoiceNumber}` : "The invoice";
+  return result.kind === "claimed"
+    ? `${name} was ${verb}, but at least one of its revision charges was just added to another invoice. Remove that line and save again.`
+    : `${name} was ${verb}, but its revision charges couldn't be marked as billed. Open it and save it again. (${result.detail})`;
+}
+
+// ---------------------------------------------------------------------------
+// fetchInvoiceRevisionChargesAction — the panel's read, on open and on client
+// change (decided 2026-09-04 over prop-drilling: the standalone page picks the
+// client inside the panel, edit mode needs invoice-scoped data, and every
+// content panel section already fetches on open).
+// ---------------------------------------------------------------------------
+
+export interface FetchInvoiceRevisionChargesInput {
+  clientId: string;
+  /** The invoice being edited, or null on create. */
+  invoiceId: string | null;
+}
+
+export interface InvoiceRevisionCharges {
+  /** Ready and unclaimed — offerable. */
+  available: RevisionChargeOption[];
+  /** Already stamped to this invoice — the panel tags their line items. */
+  attached: RevisionChargeOption[];
+}
+
+export async function fetchInvoiceRevisionChargesAction(
+  input: FetchInvoiceRevisionChargesInput
+): Promise<ActionResult<InvoiceRevisionCharges>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  if (!input.clientId) return { ok: false, error: "Missing client id" };
+
+  try {
+    const charges = await fetchRevisionCharges(input.clientId);
+    return {
+      ok: true,
+      data: {
+        available: charges
+          .filter((c) => c.state === "ready" && c.invoice === null)
+          .map(revisionChargeOption),
+        attached: input.invoiceId
+          ? charges
+              .filter((c) => c.invoice?.id === input.invoiceId)
+              .map(revisionChargeOption)
+          : [],
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err instanceof Error ? err.message : "Could not load revision charges",
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -132,21 +394,47 @@ async function revalidateInvoiceSurfaces(
 
 export interface CreateInvoiceInput {
   clientId: string;
-  lineItems: Array<{ description: string; amount: number }>;
+  lineItems: InvoiceLineItemInput[];
   dueDate: string | null;
   memo: string | null;
   incomeType: IncomeType;
 }
 
+/**
+ * On success the invoice exists. `revisionChargeWarning` is set when it was
+ * created but its revision charges could NOT be stamped — the one partial
+ * state this action can leave, reported rather than hidden so the panel can
+ * show it instead of closing as if all was well.
+ */
+export type CreateInvoiceResult = InvoiceRecord & {
+  revisionChargeWarning?: string;
+};
+
 export async function createInvoiceAction(
   input: CreateInvoiceInput
-): Promise<ActionResult<InvoiceRecord>> {
+): Promise<ActionResult<CreateInvoiceResult>> {
   const guard = await requireOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
 
   if (!input.clientId) return { ok: false, error: "Missing client id" };
 
-  const lineCheck = validateLineItems(input.lineItems);
+  let resolved: Awaited<ReturnType<typeof resolveRevisionLineItems>>;
+  try {
+    resolved = await resolveRevisionLineItems({
+      clientId: input.clientId,
+      invoiceId: null,
+      lineItems: input.lineItems,
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err instanceof Error ? err.message : "Could not check revision charges",
+    };
+  }
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+
+  const lineCheck = validateLineItems(resolved.value.items);
   if (!lineCheck.ok) return { ok: false, error: lineCheck.error };
 
   if (input.dueDate !== null) {
@@ -205,6 +493,32 @@ export async function createInvoiceAction(
         error: result.error?.message ?? "Failed to create invoice",
       };
     }
+
+    // The invoice exists from here on. Stamp its revision charges; if that
+    // fails, the invoice is still reported as created — a second Save would
+    // create a second invoice — with the warning riding on the result.
+    if (resolved.value.roundIds.length > 0) {
+      const sync = await syncRevisionChargeStamps({
+        invoiceId: result.data.id,
+        roundIds: resolved.value.roundIds,
+        priorStampIds: resolved.value.priorStampIds,
+      });
+      if (!sync.ok) {
+        await revalidateInvoiceSurfaces(input.clientId);
+        return {
+          ok: true,
+          data: {
+            ...result.data,
+            revisionChargeWarning: stampFailureMessage(
+              "created",
+              result.data.invoice_number,
+              sync
+            ),
+          },
+        };
+      }
+    }
+
     await revalidateInvoiceSurfaces(input.clientId);
     return { ok: true, data: result.data };
   } catch (err) {
@@ -221,7 +535,7 @@ export async function createInvoiceAction(
 
 export interface UpdateInvoiceInput {
   invoiceId: string;
-  lineItems: Array<{ description: string; amount: number }>;
+  lineItems: InvoiceLineItemInput[];
   dueDate: string | null;
   memo: string | null;
   incomeType: IncomeType;
@@ -234,9 +548,6 @@ export async function updateInvoiceAction(
   if (!guard.ok) return { ok: false, error: guard.error };
 
   if (!input.invoiceId) return { ok: false, error: "Missing invoice id" };
-
-  const lineCheck = validateLineItems(input.lineItems);
-  if (!lineCheck.ok) return { ok: false, error: lineCheck.error };
 
   if (input.dueDate !== null && !isValidDateKey(input.dueDate)) {
     return { ok: false, error: "Invalid due date" };
@@ -263,6 +574,17 @@ export async function updateInvoiceAction(
         error: "Invoice is not in an editable state",
       };
     }
+
+    // Tagged lines are rebuilt from the client's charges before validation,
+    // so the validator sees the deck's description and the consented amount.
+    const resolved = await resolveRevisionLineItems({
+      clientId: invoice.client_id,
+      invoiceId: invoice.id,
+      lineItems: input.lineItems,
+    });
+    if (!resolved.ok) return { ok: false, error: resolved.error };
+    const lineCheck = validateLineItems(resolved.value.items);
+    if (!lineCheck.ok) return { ok: false, error: lineCheck.error };
 
     const memo = input.memo?.trim() || null;
     const supabase = getSupabaseServiceClient();
@@ -342,6 +664,23 @@ export async function updateInvoiceAction(
           uploaded_by: guard.ownerLabel,
         });
       }
+    }
+
+    // Set-based: rounds stamped to this invoice become exactly the submitted
+    // set. Runs on every save, tagged lines or not, so removing the last
+    // charge clears its stamp. The update above is idempotent, so a failure
+    // here is retried by saving again.
+    const sync = await syncRevisionChargeStamps({
+      invoiceId: invoice.id,
+      roundIds: resolved.value.roundIds,
+      priorStampIds: resolved.value.priorStampIds,
+    });
+    if (!sync.ok) {
+      await revalidateInvoiceSurfaces(invoice.client_id);
+      return {
+        ok: false,
+        error: stampFailureMessage("saved", invoice.invoice_number, sync),
+      };
     }
 
     await revalidateInvoiceSurfaces(invoice.client_id);

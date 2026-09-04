@@ -46,13 +46,13 @@ Calendar work sits at Phase 3 so Kelsey's building surface is finished before Ph
 | 3 | Calendar extraction + content calendar | 3 | Medium | No | **Complete** |
 | — | UI polish pass (unplanned) | — | Low | No | **Complete** |
 | — | **DESIGN PASS** — client-facing screens | — | — | — | **Complete** — 30 boards, 9 screens, copy deck |
-| 4 | Release + client queue + Approve | 4 | Medium | **Yes** | |
-| 5 | Request-changes form + rounds | 3 | Medium | Yes |
-| 6 | Accept / deny / replace / re-release | 4 | Medium | Yes |
+| 4 | Release + client queue + Approve | 4 | Medium | **Yes** | **Complete** |
+| 5 | Request-changes form + rounds | 3 | Medium | Yes | **Complete** |
+| 6 | Accept / deny / replace / re-release | 4 | Medium | Yes | **Complete** |
 | 7 | Deadline cron + auto-approve + lock | 2 | Low | Yes | **Complete** |
-| 8 | Billing accrual + invoice injection | 3 | **High** | Yes |
+| 8 | Billing accrual + invoice injection | 3 | **High** | Yes | **Complete** |
 
-Phases 0–3 ship to production invisibly. Nothing reaches a client until Phase 4. Phases 0–3, the polish pass, and the design pass are done; Phase 4 is the next build step.
+Every phase is done — 0 through 8, plus the polish pass and the design pass. Phases 0–3 shipped to production invisibly; nothing reached a client until Phase 4. What remains is outside the software: the client agreement language for any client Kelsey wants to bill revisions to (see the closing line).
 
 ---
 
@@ -649,28 +649,186 @@ What shipped, and the shape it took:
 
 ## Phase 8 — Billing accrual + invoice injection
 
-Money. Last, and deliberately isolated.
+**Status: complete.** Built 2026-09-04 in three approved steps, the last of them the invoice injection. Migration 019 applied and verified against prod 2026-09-04. Awaiting commit and deploy. The decisions below were settled in the step reviews; "What shipped" under each slice records the result.
+
+Money. Last, and deliberately isolated: the only Phase 8 code the earlier phases run is the charge decision at the client's commit, and the only new write outside the content tables is the invoice stamp on `revision_rounds.invoice_id`.
 
 ### Slice 8.1 — Consent confirmation
-Round-2+ price shown before submission, naming the round number and the amount added to the next invoice. `ConfirmDialog` fits without changes. This is captured consent and is what prevents billing disputes.
+Round-2+ price shown before submission, naming the round number and the amount added to the next invoice. This is captured consent and is what prevents billing disputes.
 
-**Blocked on `extra_round_price` and on the wording** — spec §5.8 requires the framing not feel punitive, and that copy is undecided.
+**Unblocked.** `extra_round_price` no longer gates anything: billing is off by default on every cycle and opt-in per cycle (see Blocking decisions). The wording is copy deck Screen 9, with the per-round covered state and the round-2+ included rows added 2026-09-04.
+
+What shipped, and the shape it took:
+
+- **The charge is decided once, at the commit.** `computeRoundCharge` in
+  `lib/revisionBilling.ts` — pure, no database, the most heavily pinned
+  function in the feature — takes the cycle's `included_rounds`,
+  `extra_round_price` and `billing_mode` and, in per_round, whether another
+  post already opened this round. Three outcomes: included (no charge, no
+  dialog), covered (per_round, another post opened the round — Screen 9 with
+  the money removed), or a charge at the cycle's price as it stands. The
+  submit action calls it in step 3 and writes the answer as `is_billable` +
+  `price` in the same UPDATE that stamps `submitted_at`. That UPDATE is
+  guarded on `submitted_at IS NULL`, so a round already sent is never
+  re-priced: every round submitted before Phase 8 keeps Phase 5's false/null
+  forever, because no dialog was ever shown for it. A price Kelsey sets
+  today reaches only rounds the client has not sent yet.
+- **One resolver, two callers.** `resolveMyRoundBilling` in the client
+  `_lib/queries.ts` is the same read for the item page (which dialog to
+  show) and the submit action (what to write): the same cycle columns, the
+  same opener set through `fetchMyBillableRoundNumbers`, the same function.
+  The opener read runs only in per_round on a round that is priced at all,
+  so a round-1 page load costs no query about charges that cannot exist.
+- **The refuse rule** (`_lib/consent.ts`, approved 2026-09-04). What the two
+  callers cannot share is the instant: between the client's page load and
+  their press of Send, Kelsey can raise the price, lower the included rounds
+  or flip the mode, and the commit would compute a charge the client was
+  never shown. So the dialog's outcome travels with the send as `consent` —
+  none, or a charge of exactly this amount — and the commit writes a charge
+  only when its own computation matches it exactly. A free outcome is
+  accepted under any consent: free cannot be disputed, and a concurrent
+  opener or a price turned off in between only ever makes the send cheaper.
+  Anything else is refused with nothing written — the round stays
+  unsubmitted debris the retry reuses, so "nothing was sent" stays honest —
+  and the client sees the deck's "terms changed" line: refresh, read the
+  current terms, send again. The amount on the row is therefore always the
+  amount the dialog showed, or there is no amount at all — structurally,
+  not by timing. Each refusal is logged server-side (see Known issues).
+- **Client surface.** `RequestChangesPanel` renders one of three dialogs
+  from the resolved billing: Screen 4 with the round-2+ included line,
+  Screen 9 with the amount row, sub-line and "Send · $75" button, or Screen
+  9's covered state with no amount and Screen 4's button. The form footer
+  takes the matching row. Screen 5's held small print is on, rendered only
+  when the round the client would open carries a charge, with the covered
+  variant beside it. Amounts render through `formatChargeAmount` — "$75",
+  cents only when present — on both surfaces, so one amount never renders
+  two ways. The re-release email stays charge-free, and its test still
+  asserts so.
 
 ### Slice 8.2 — Accrual and Kelsey's view
 A billable round accrues as an unbilled charge flagged to the client. Kelsey sees it immediately, as pending — **not as income**. The fully-denied-round exemption (spec §6.1) applies here.
 
+What shipped, and the shape it took:
+
+- **Migration 019** (`supabase/migrations/019_revision_billing.sql`) —
+  additive: `content_cycles.billing_mode` (`'per_round' | 'per_item'`, NOT
+  NULL, default `'per_round'`, filled as a catalog-only default) and two
+  CHECKs. `content_cycles_billing_mode_check` admits the two words.
+  `revision_rounds_billable_price_check` ties the flag to the amount in both
+  directions — `is_billable` requires a price above zero, and a non-billable
+  row requires `price IS NULL` — so a code path that flags a round without
+  snapshotting the price fails loudly instead of accruing a "$0" charge, and
+  no free row can carry a second, contradictory place to read money from.
+  `price > 0`, not `>= 0`: 0 is reserved at the cycle level to mean "billing
+  off" and must not leak onto a round as "a charge of nothing". The file
+  opens with a read-only pre-flight (expect zero rows with `is_billable` or
+  a price — any hit was set by hand and would become a charge nobody agreed
+  to) and closes with verify queries that list both tables' constraints by
+  conrelid, eight rows each. No new index: every hop of the accrual read is
+  already served.
+- **Billing is off by default and opt-in per cycle.** A cycle with no price,
+  or a price of 0, shows no dialog and accrues nothing; a price above zero
+  turns on the consent step. The cycle editor's price field carries a
+  warning IN FRONT of the input (decided 2026-09-04): only set a price if
+  this client's agreement already includes a charge for extra revision
+  rounds, because setting it here adds that term to nothing they signed.
+  Owner voice, not a legal notice. The "Charge per" control (round or post)
+  renders only once a price is present, with the per-post arithmetic beside
+  it; `validateCycleBilling` is one validator behind create and update.
+  Billing settings stay editable on a released cycle — safe for the reason
+  the snapshot exists: a change reaches only rounds not yet sent.
+- **per_round grouping** — `groupRevisionCharges` in
+  `lib/revisionBilling.ts`, pure and pinned against a fixture. Every
+  submitted round is grouped by (cycle, round number); in per_round the
+  group is one charge if it has any flagged row, with amount and identity
+  from the earliest opener and every opener's id riding along so a
+  same-instant race that double-flagged bills once. State is judged over
+  the WHOLE group by `evaluateRoundGroup`: waived when every round was
+  denied (spec §6.1), pending while any is still open, ready otherwise.
+  **The opener's own status is irrelevant on its own** (decided 2026-09-04):
+  if Kelsey denies the opener and accepts the rest, the batch was revised
+  and the round bills. The predicate `is_billable AND status = 'addressed'`
+  on the charge row, which migration 017's comment anticipated, is wrong
+  for per_round and must not be reintroduced. In per_item every flagged row
+  is its own charge judged on its own status. A mode flipped after rounds
+  were sent can only merge charges (per_item to per_round), never
+  manufacture one: a row's flag was decided at its commit and is read as-is.
+- **The inactive-invoice rule** (decided 2026-09-04). A charge counts as
+  billed only when its stamp points at a LIVE invoice. A stamp to an
+  inactive one — superseded or mistaken — does not: the charge returns to
+  the pool, is offered again, and re-adding moves the stamp. Paid invoices
+  cannot go inactive, so a paid charge can never be re-offered. The grouper
+  carries every stamped invoice id, live or not, so the stamp write can move
+  a charge off a retired invoice without ever admitting a stamp it did not
+  know about.
+- **One read behind every owner surface** — `fetchRevisionCharges` in
+  `app/owner/content/_lib/revisionCharges.ts`: one client's charges in every
+  state, four round trips on indexed columns. The content cycle bar and the
+  invoice panel's picker both call it, so the two cannot disagree about what
+  is owed.
+- **Kelsey's view.** The cycle bar reads "Extra round $75 · per round" (or
+  "Revision charges off" at 0, "not set" when empty) and lists each charge
+  with a pill — Pending, Ready to bill, On INV-0012, Paid · INV-0012, or
+  Waived with "every request denied". Read-only: the place to act on a ready
+  charge is the invoice panel. "Pending", never "income" — nothing sums a
+  charge until the invoice is paid.
+
 ### Slice 8.3 — Invoice line-item injection
-**The only genuinely unprecedented plumbing in this feature.** There is no existing injection or suggestion mechanism inside the invoice form — nothing currently pre-populates line items from elsewhere.
+**The only genuinely unprecedented plumbing in this feature.** Nothing pre-populated line items from elsewhere before this. Existing shape: `LineItemDraft[]` state in `InvoiceFormPanel.tsx`, max 20 items, client-side validation, server re-validation in `validateLineItems` (`app/owner/invoices/_actions.ts`), stored as JSONB on `invoices.line_items`.
 
-Existing shape: `LineItemDraft[]` state (`InvoiceFormPanel.tsx:45–59`), row editor (377–451), max 20 items, client-side validation (173–222), server re-validation in `validateLineItems` (`app/owner/invoices/_actions.ts:61–96`), stored as JSONB on `invoices.line_items` (`001_initial_schema.sql:219`, typed at `lib/supabase.ts:145`).
+**Fetch via server action, not prop-drilling** (decided 2026-09-04): the standalone page picks the client inside the panel, edit mode needs invoice-scoped data, and every content panel section already fetches on open. Precedent for client components calling data-returning actions exists (`createInvoicePdfDownloadUrlAction`).
 
-The closest house pattern is the financials suggestions system (`app/owner/financials/_lib/suggestions.ts`) — server-computed suggestion arrays passed as props, accept/dismiss routed by `referenceId`.
+**What does not change: the payment pipeline.** Both the Stripe webhook (`app/api/webhooks/stripe/route.ts`) and `markInvoicePaidAction` derive income from the invoice total — Stripe's session total, or the line-item sum — and never inspect individual line items beyond summing. A revision charge added as one more `{description, amount}` entry rides through the webhook, the income insert, the receipt PDF (which iterates line items generically), and cash-basis timing with zero modification. Verified untouched in the Step 3 review.
 
-Two plumbing options, both unprecedented in this panel: prop-drill through `InvoicesBoard` (`_components/InvoicesBoard.tsx:81–88`), or fetch via server action when `values.clientId` changes. Precedent for client components calling data-returning actions exists (`createInvoicePdfDownloadUrlAction`).
+What shipped, and the shape it took:
 
-Then: `createInvoiceAction` / `updateInvoiceAction` (`_actions.ts:141–216, 230–355`) accept optional round IDs and stamp `revision_rounds.invoice_id` after the invoice write.
-
-**What does not change: the payment pipeline.** Both the Stripe webhook (`app/api/webhooks/stripe/route.ts:196–209`) and `markInvoicePaidAction` (`app/owner/invoices/_actions.ts:526–546`) derive income from the invoice total — Stripe's session total, or the line-item sum — and never inspect individual line items beyond summing. A revision charge added as one more `{description, amount}` entry rides through the webhook, the income insert, the receipt PDF (which iterates line items generically, webhook 243–266), and cash-basis timing with zero modification.
+- **The picker** — `fetchInvoiceRevisionChargesAction` returns the client's
+  charges split into available (ready and unclaimed) and attached (stamped
+  to this invoice), fetched on open and on client change. The panel lists
+  available charges above the line items with an Add button; adding one
+  appends a read-only line at the consented amount, and removing it returns
+  the charge to the picker. A change of client on create drops the previous
+  client's charge lines. Attached charges are re-tagged onto their lines on
+  open; in edit mode the form cannot save until they are known, because
+  saving over an unknown set would clear every stamp on the invoice. The
+  block is absent entirely when there is nothing to offer, so an ordinary
+  invoice never sees an empty section.
+- **The server trusts nothing the panel typed.** A tagged line travels as
+  `{ revisionRoundIds }`; `resolveRevisionLineItems` re-reads the charges
+  through the same function the cycle bar uses, finds the charge by set
+  equality on round ids, checks it is ready and unclaimed (or already on
+  this invoice), and rebuilds the description and amount from the charge
+  before `validateLineItems` ever sees them. The description is a copy-deck
+  string — "Content revisions · Round 2 · October 2026", or the per-post
+  form in the client's vocabulary — built in `_lib/revisionChargeLines.ts`,
+  which imports `platformLabel` from the client review surface: a one-way
+  layering crossing accepted 2026-09-04 because duplicating a deck string
+  would be worse, with the reason documented at the import. Pending, waived,
+  duplicate and already-on-another-invoice lines are refused by name.
+- **The set-based stamp** (approved 2026-09-04) — `syncRevisionChargeStamps`
+  makes the rounds stamped to this invoice equal to the submitted set on
+  every save: clear what is no longer on the invoice, then stamp what is.
+  Refusing removal would strand a charge on an invoice Kelsey wants to fix;
+  a removed charge returns to the pool, and the FK's ON DELETE SET NULL does
+  the same for a deleted draft with no code. The stamp predicate admits a
+  round that is unstamped, stamped to this invoice, or stamped to an invoice
+  the charge read knew about (the inactive-invoice rule) — never one it did
+  not — and selects the ids back: a short count means another invoice
+  claimed a round in between, and the save says so and names the fix
+  (remove the line, not retry). Two statements, each atomic on its own; a
+  failure between them leaves a subset stamped, which the next save repairs.
+- **The frozen panel on a create with a failed stamp.** The invoice write
+  and the stamp are two statements. On create, once the invoice row exists a
+  second Save would create a second invoice, so a stamp failure is reported
+  as success with `revisionChargeWarning` on the result, and the panel
+  replaces the form with the warning and a single Close — nothing on it is a
+  Save. Send-immediately is skipped in that state and the warning says so:
+  an invoice whose charges could be re-billed does not go out until she has
+  looked at it. On update the row write is idempotent, so a stamp failure is
+  an ordinary error and Save again repairs it.
+- **Income posts once, on payment**, through the flow that already existed.
+  Every save also revalidates `/owner/content`, so the cycle bar's billed
+  state follows the invoice.
 
 **Done when:** a billable round appears in the invoice builder, gets added, the invoice is paid, and income posts once at the correct amount.
 
@@ -684,12 +842,12 @@ Then: `createInvoiceAction` / `updateInvoiceAction` (`_actions.ts:141–216, 230
 | Owner nav label | Phase 1 (route path) | **Decided** — "Content", route `/owner/content` |
 | Client nav label | — | **Decided** — "Review & Approve", route `/client/review` |
 | Default deadline length | **The client contract, signed before the first real release (end of Phase 4)**; also the Phase 7 cycle-creation default | **Decided** — 3 days, editable per cycle |
-| `extra_round_price` | **The client contract, signed before the first real release (end of Phase 4)**; also Phase 8 | Not set |
+| `extra_round_price` | Nothing, any more | **No longer blocking (2026-09-04)** — billing is off by default on every cycle and opt-in per cycle; the price field warns that setting it adds no term to the client's agreement. Kelsey sets a price only on cycles whose signed agreement covers revision charges |
 | Round-2+ framing and wording | Phase 8 | **Decided** — `docs/DBS_Content_Approval_Copy_Deck.md` (Screen 9) |
-| Contract language | **Before any client sees Phase 4** | Not done |
+| Contract language | Any cycle Kelsey wants to bill revisions on | **Outside the software.** Kelsey sets a price only on cycles whose signed agreement covers revision charges; with no price, the client is never shown a charge |
 | Client-facing screen designs | Phase 4 | **Complete** — 30 boards, 9 screens, copy deck; see the DESIGN PASS step |
 
-**The contract item is not a software task and it is the one that can't be caught up later.** The revision cap, deadline, and extra-round price must be in the client agreement before the software starts enforcing them. Phase 4 is the deadline for it.
+**The contract item is not a software task.** Billing is off by default, so the software never enforces a charge the client did not agree to — the price field is the switch, and Kelsey flips it only on a cycle whose signed agreement covers revision charges. The revision cap and deadline terms should still be in the agreement before a client is asked to review under them.
 
 ---
 
@@ -808,6 +966,26 @@ closed reviews early, so the client has the context before they open the
 post. A Screen 5 early-close variant is the fix if it ever reads wrong in
 front of a real client; the deck has no such row today.
 
+### Charge refusals are logged, not alerted — and a pattern of them is an operational finding
+
+The refuse rule (Phase 8, `app/client/review/_lib/consent.ts`) turns down a
+send whose computed charge does not match the consent the dialog carried,
+writes nothing, and logs one line server-side from the client submit action —
+`[review] charge refused: cycle …, round …, consented …, computed …`. Nothing
+reads that line: there is no alert, no counter, and no owner surface for it.
+It lives in Vercel's function logs.
+
+A refusal should be rare. It means Kelsey edited the cycle's price, included
+rounds or billing mode between the client's page load and their press of
+Send. One is a race — the client refreshes and sends again, and the row never
+carries an amount they were not shown. **If refusals become common, prices
+are being edited mid-review** — terms should be set before release, not
+during it — and that is an operational problem to raise with Kelsey, not a
+bug in the rule. The rule is doing its job either way.
+
+**Accepted for now.** Surfacing the count would mean a place to put it, and
+there is no evidence yet that one is needed.
+
 ### Escape closes the ConfirmDialog and the SlidePanel together
 With a delete `ConfirmDialog` open on top of a `SlidePanel`, one Escape press
 closes both. Expected behavior is that Escape dismisses only the topmost layer.
@@ -834,7 +1012,7 @@ feature and not worth doing mid-build.
 | Stream vendor contract breaks silently → dead player in front of a client | 2 | Targeted tests on `lib/stream.ts`. The only module in this plan that warrants them. |
 | Regressing the live owner calendar during extraction | 3 | No tests exist. Manual regression check before proceeding. |
 | Stream orphans accumulating invisibly | 6 | Deliberate delete-on-replace ordering. The house best-effort pattern is insufficient here. |
-| Invoice injection breaking existing invoice creation | 8 | Isolated to its own phase. Payment pipeline provably untouched. |
+| Invoice injection breaking existing invoice creation | 8 | **Mitigated** — isolated to its own phase; a charge is one more `{description, amount}` line, the only new write is the stamp on `revision_rounds.invoice_id`, and the payment pipeline was verified untouched in the Step 3 review. |
 | Client-facing UX too complex for older clients | 4, 5 | **Mitigated** — design pass complete: 30 boards, 9 screens, every state drawn mobile-first, copy deck in `docs/DBS_Content_Approval_Copy_Deck.md`. |
 | Cron granularity insufficient on current Vercel plan | 7 | Verify plan before relying on sub-daily sweeps. |
 
@@ -852,4 +1030,4 @@ Deferred by decision, recorded so they aren't lost:
 
 ---
 
-*Phases 0–3, the polish pass, and the design pass are done. Phase 4 is the next build step — and the client contract (revision cap, deadline terms, `extra_round_price`) must be signed before its first real release.*
+*Phases 0–8 complete. The feature is built end to end — schema, Stream, the content calendar, release, the client queue, rounds, accept / deny / re-release, the deadline lock, and billing. What remains is outside the software: the client agreement language for any client Kelsey wants to bill revisions to. Billing is off by default on every cycle, so nothing charges anyone until she sets a price — and she sets one only on a cycle whose signed agreement covers revision charges.*

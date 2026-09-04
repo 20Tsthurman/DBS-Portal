@@ -468,18 +468,19 @@ Kelsey is phone-first for most of her portal use. The exception is bulk month-bu
 *Reviewed after Phase 3 shipped (August 2026). Updated again after the
 client-facing design pass (2026-08-30): nav label and round-2+ wording decided;
 `extra_round_price` and default deadline length re-scoped to the client
-contract.*
+contract. Updated after Phase 8 (2026-09-04): `extra_round_price` no longer
+blocks anything, and the repeat-submission and zero-price copy exists.*
 
 | Item | Status |
 |---|---|
-| `extra_round_price` value | **Still not set.** Re-scoped 2026-08-30: it now blocks the **client contract**, which must be signed before the first real release at the end of Phase 4 — not just Phase 8's consent screen. |
-| Default deadline length | Not set — 3 days and 48 business hours both discussed. Same re-scope: a contract term, needed before the first real release at the end of Phase 4. |
+| `extra_round_price` value | **No longer blocking (2026-09-04).** Billing is off by default on every cycle and opt-in: a cycle with no price, or a price of 0, shows no consent dialog and accrues nothing. The price field in the cycle editor carries a warning that setting it adds no term to anything the client signed. Kelsey sets a price only on cycles whose signed agreement covers revision charges. |
+| Default deadline length | **Decided (Phase 7, 2026-09-02)** — 3 days from cycle creation, pre-filled in the cycle editor and freely editable per cycle. A default, never a constraint. |
 | Nav label, owner side | **Decided** — "Content", route `/owner/content` |
 | Nav label, client side | **Decided (2026-08-30)** — "Review & Approve", route `/client/review`. Renamed from the working label "Content Review" so no two nav items share a word with "Files & Content". |
 | Round 2+ framing and wording | **Decided (2026-08-30)** — see `docs/DBS_Content_Approval_Copy_Deck.md` (Screen 9). |
-| Round 2+ repeat-submission and zero-price copy | **Open.** In `per_round` mode, the second and later submissions within one cycle's round must **not** show a new charge — that copy does not exist yet (something along the lines of "Already covered by round 2 — no additional charge"). Also missing: the `extra_round_price = 0` state, where the consent dialog is skipped entirely. Tracked as a known gap in the copy deck. |
+| Round 2+ repeat-submission and zero-price copy | **Resolved (2026-09-04)** — the per-round covered state (Screen 3 footer, Screen 9's covered table, Screen 5's covered small print) and the round-2+ included rows (Screen 3 footer, Screen 4 line 3) are in the copy deck and rendered. Two smaller gaps remain there: `included_rounds = 0` and the plural of Screen 5's small print. |
 | Cloudflare account creation | Deferred until code is in development. Payment method to be the Amex under the LLC, not personal. |
-| Contract language | Revision cap, deadline, and extra-round price must be in the client agreement **before any client sees this feature**. The software will enforce terms the client must have already agreed to. |
+| Contract language | **Kelsey sets a price only on cycles whose signed agreement covers revision charges.** Not a software task. Billing is off by default, so the software never enforces a charge the client did not agree to; the revision cap and deadline terms should still be in the agreement before a client is asked to review under them. |
 | Style guide | Previously flagged as a prerequisite. Reduces revision rounds and helps a contractor hit spec on the first attempt. |
 
 ---

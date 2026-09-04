@@ -67,6 +67,13 @@ export type ContentCycleStatus = "drafting" | "in_review" | "locked";
  */
 export type ContentCycleLockedBy = "auto" | "owner";
 /**
+ * How a billable revision round is charged for one cycle. Mirrors
+ * `content_cycles_billing_mode_check`. 'per_round' (the default) is one charge
+ * per round per cycle however many posts the client sends back; 'per_item' is
+ * one charge per post revised. Added in migration 019.
+ */
+export type ContentBillingMode = "per_round" | "per_item";
+/**
  * The literal the lock writes as `content_items.approved_by` and
  * `content_cycles.locked_by` — one word for one actor across both tables.
  * Compare against this, never against a retyped 'auto'.
@@ -439,8 +446,20 @@ export interface ContentCycleRecord {
   /** NULL until Release; a cycle in 'drafting' has no deadline yet. */
   revision_deadline: string | null;
   included_rounds: number;
-  /** Snapshot of the round-2+ price at cycle creation. NULL = not set. */
+  /**
+   * The price of a round beyond `included_rounds`, read at the instant the
+   * client sends one and snapshotted onto that round row. NULL or 0 = billing
+   * off for this cycle: no consent dialog, no accrual, no charge.
+   */
   extra_round_price: number | null;
+  /**
+   * How a billable round is charged: one charge per round per cycle
+   * ('per_round', the default) or one per post revised ('per_item'). Read at
+   * the client's commit, where it decides whether a round row is flagged, and
+   * at Kelsey's read, where it decides how flagged rows group into charges.
+   * Added in migration 019.
+   */
+  billing_mode: ContentBillingMode;
   status: ContentCycleStatus;
   /**
    * The instant reviews closed to the client. NULL until the cycle locks, and

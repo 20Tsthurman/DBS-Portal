@@ -6,6 +6,11 @@ import {
   type RevisionNoteRecord,
   type RevisionRoundRecord,
 } from "@/lib/supabase";
+import {
+  computeRoundCharge,
+  isRoundPriced,
+  type RoundBilling,
+} from "@/lib/revisionBilling";
 
 /**
  * The client's own reads for /client/review.
@@ -337,6 +342,115 @@ export async function fetchMyDeniedItemIds(
     if (round.status === "denied") denied.add(itemId);
   }
   return denied;
+}
+
+/**
+ * The round numbers this cycle already carries a CHARGE for: every submitted
+ * round in the cycle with `is_billable` set, reduced to its number. This is
+ * the read behind the `per_round` "already covered" state (spec §6.2: "the
+ * first billable submission of the round opens it, and later submissions in
+ * the same round add nothing").
+ *
+ * Two callers ask the same question — the submit action at its commit ("is
+ * round N open? then this post sends free") and the item page before the
+ * dialog ("show the amount, or the covered copy?") — and they must answer it
+ * identically, so it lives here once.
+ *
+ * PATTERN A: the items are constrained to this client AND this cycle before
+ * any round is read, so a cycle id that is not theirs yields an empty set,
+ * indistinguishable from a cycle with no charges. STANDING RULE 1:
+ * `submitted_at IS NOT NULL`. A debris row can never carry a charge — the
+ * commit writes the flag and the timestamp in one statement — but the read
+ * says so anyway, because every read of rounds does.
+ *
+ * Round NUMBERS rather than rows, on purpose: nothing about the opener row
+ * itself matters to either caller. In per_round the opener's own status is
+ * irrelevant to whether later posts are covered; where its status IS weighed
+ * — the fully-denied exemption — is the owner-side accrual read, over the
+ * whole round group.
+ */
+export async function fetchMyBillableRoundNumbers(
+  clientId: string,
+  cycleId: string
+): Promise<Set<number>> {
+  const supabase = getSupabaseServiceClient();
+
+  const { data: itemData, error: itemError } = await supabase
+    .from("content_items")
+    .select("id")
+    .eq("client_id", clientId)
+    .eq("cycle_id", cycleId);
+  if (itemError) throw new Error(itemError.message);
+  const itemIds = ((itemData ?? []) as Array<{ id: string }>).map((r) => r.id);
+
+  const opened = new Set<number>();
+  if (itemIds.length === 0) return opened;
+
+  const { data, error } = await supabase
+    .from("revision_rounds")
+    .select("round_number")
+    .in("content_item_id", itemIds)
+    .eq("is_billable", true)
+    .not("submitted_at", "is", null);
+  if (error) throw new Error(error.message);
+
+  for (const raw of (data ?? []) as Array<
+    Pick<RevisionRoundRecord, "round_number">
+  >) {
+    opened.add(raw.round_number);
+  }
+  return opened;
+}
+
+/** The cycle columns the charge decision reads. */
+export type CycleBillingSettings = Pick<
+  ContentCycleRecord,
+  "included_rounds" | "extra_round_price" | "billing_mode"
+>;
+
+/**
+ * What sending round `roundNumber` of this cycle would cost the client, from
+ * the cycle row the caller has already read.
+ *
+ * ONE FUNCTION, TWO CALLERS, ON PURPOSE. The item page calls it to decide
+ * which dialog to show (Screen 4, Screen 9, or the covered state) and the
+ * submit action calls it at the commit to decide what to write. "The amount
+ * shown must be the amount the commit writes" holds because they are the same
+ * read: the same cycle columns, the same opener set through
+ * `fetchMyBillableRoundNumbers`, the same `computeRoundCharge`. What the two
+ * cannot share is the INSTANT — Kelsey can edit the cycle in between — and
+ * that gap is closed by the consent the dialog carries (`_lib/consent.ts`),
+ * not by this function.
+ *
+ * The opener read runs only when it can matter: per_round, and a round that
+ * is priced at all. A round-1 page load should not pay for a query about
+ * charges that cannot exist.
+ *
+ * `extra_round_price` is numeric and comes back from PostgREST as it comes;
+ * coerced here, once, so the money function always sees a number.
+ */
+export async function resolveMyRoundBilling(
+  clientId: string,
+  cycleId: string,
+  cycle: CycleBillingSettings,
+  roundNumber: number
+): Promise<RoundBilling> {
+  const pricing = {
+    roundNumber,
+    includedRounds: cycle.included_rounds,
+    extraRoundPrice:
+      cycle.extra_round_price === null ? null : Number(cycle.extra_round_price),
+  };
+  let roundAlreadyOpenInCycle = false;
+  if (cycle.billing_mode === "per_round" && isRoundPriced(pricing)) {
+    const opened = await fetchMyBillableRoundNumbers(clientId, cycleId);
+    roundAlreadyOpenInCycle = opened.has(roundNumber);
+  }
+  return computeRoundCharge({
+    ...pricing,
+    billingMode: cycle.billing_mode,
+    roundAlreadyOpenInCycle,
+  });
 }
 
 /**

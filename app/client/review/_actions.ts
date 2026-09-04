@@ -11,8 +11,16 @@ import {
   type RevisionRoundRecord,
 } from "@/lib/supabase";
 import { createPlaybackUrls } from "@/lib/stream";
+import { roundChargeColumns } from "@/lib/revisionBilling";
 import type { ActionResult } from "@/lib/actions";
 import { CATEGORY_ORDER } from "./_lib/copy";
+import {
+  consentMatches,
+  isValidConsent,
+  TERMS_CHANGED_ERROR,
+  type ChangeRequestConsent,
+} from "./_lib/consent";
+import { resolveMyRoundBilling } from "./_lib/queries";
 
 const REVIEW_PATH = "/client/review";
 
@@ -209,7 +217,7 @@ export async function createReviewPlaybackAction(
 }
 
 // ---------------------------------------------------------------------------
-// Submit a change request — Phase 5, round 1
+// Submit a change request — Phase 5; the charge decision, Phase 8
 // ---------------------------------------------------------------------------
 
 /** One selected category and what the client wrote for it. */
@@ -228,6 +236,12 @@ export interface ChangeRequestInput {
   itemId: string;
   categories: ChangeRequestCategoryInput[];
   moments: ChangeRequestMomentInput[];
+  /**
+   * What the dialog showed: no charge, or a charge of exactly this amount.
+   * The commit writes a charge only when its own computation matches this
+   * (`consentMatches`) — the refuse rule, approved 2026-09-04.
+   */
+  consent: ChangeRequestConsent;
 }
 
 /**
@@ -252,11 +266,19 @@ const VALID_CATEGORIES: ReadonlySet<string> = new Set(CATEGORY_ORDER);
 function validateChangeRequest(
   input: ChangeRequestInput
 ):
-  | { ok: true; categories: ChangeRequestCategoryInput[]; moments: ChangeRequestMomentInput[] }
+  | {
+      ok: true;
+      categories: ChangeRequestCategoryInput[];
+      moments: ChangeRequestMomentInput[];
+      consent: ChangeRequestConsent;
+    }
   | { ok: false; error: string } {
   if (!input.itemId) return { ok: false, error: "Missing post id" };
   if (!Array.isArray(input.categories) || !Array.isArray(input.moments)) {
     return { ok: false, error: "Malformed request" };
+  }
+  if (!isValidConsent(input.consent)) {
+    return { ok: false, error: "Malformed consent" };
   }
   if (input.categories.length === 0) {
     return { ok: false, error: "Pick at least one category" };
@@ -308,7 +330,7 @@ function validateChangeRequest(
     moments.push({ seconds: entry.seconds, body });
   }
 
-  return { ok: true, categories, moments };
+  return { ok: true, categories, moments, consent: input.consent };
 }
 
 /**
@@ -317,16 +339,20 @@ function validateChangeRequest(
  * is LOCKED to the client (spec §5.4 — the mechanism the whole design rests
  * on; there is no reopen, ever).
  *
- * ANY ROUND, AND BILLING-INERT BY CONSTRUCTION. The round number is the
+ * ANY ROUND, AND THE CHARGE IS DECIDED AT THE COMMIT. The round number is the
  * item's `current_round`, which starts at 1 and is advanced only by Kelsey's
- * re-release (`rereleaseContentCycleAction`), so round 2 is reachable from
- * Phase 6 on. `is_billable: false` and `price: null` are written EXPLICITLY at
- * every round number as the deliberate Phase 6 value — see the comment on the
- * insert below for why a round 2 written here is permanently free. `price` is
- * null, never 0, which the feature reserves to mean "billing disabled for the
- * cycle". Phase 8 computes charges exclusively over billable rounds, so
- * nothing written here is ever read by it. Nothing is computed from
- * `included_rounds`; that comparison is Phase 8's.
+ * re-release (`rereleaseContentCycleAction`). What the round COSTS is decided
+ * once, in step 3, by `computeRoundCharge` (lib/revisionBilling.ts) from the
+ * cycle's settings as they stand — `included_rounds`, `extra_round_price`,
+ * `billing_mode` — and, in per_round, whether another post already opened
+ * this round. The answer is written onto the row as `is_billable` + `price`
+ * in the same UPDATE that stamps `submitted_at`. That UPDATE is guarded on
+ * `submitted_at IS NULL`, so it can never touch a round that was already
+ * sent: every round submitted before Phase 8 keeps the false/null Phase 5
+ * wrote, forever, because no consent dialog was ever shown for it (spec
+ * §5.8). `price` is null on a free round, never 0 — 0 is reserved at the
+ * cycle level to mean "billing off", and migration 019's CHECK enforces the
+ * pairing either way.
  *
  * THE WRITE SEQUENCE RUNS WITHOUT A TRANSACTION — supabase-js has none and
  * the house bans DB functions — so the ordering is the safety mechanism.
@@ -334,7 +360,7 @@ function validateChangeRequest(
  *
  *   1. find-or-create the round with `submitted_at` NULL   — invisible
  *   2. replace its notes                                    — invisible
- *   3. stamp `submitted_at` / `submitted_by`                — THE COMMIT
+ *   3. stamp `submitted_at` / `submitted_by` + the charge   — THE COMMIT
  *   4. flip the item to changes_requested                   — the lock
  *
  * Notes land before the commit bit, so Kelsey can never see a submitted
@@ -371,7 +397,7 @@ export async function submitChangeRequestAction(
 
   const parsed = validateChangeRequest(input);
   if (!parsed.ok) return { ok: false, error: parsed.error };
-  const { categories, moments } = parsed;
+  const { categories, moments, consent } = parsed;
   const itemId = input.itemId;
 
   const supabase = getSupabaseServiceClient();
@@ -393,15 +419,20 @@ export async function submitChangeRequestAction(
     return { ok: false, error: "Post not found" };
   }
 
-  // Release state, exactly as the approve action reads it.
+  // Release state, exactly as the approve action reads it — plus the three
+  // billing settings the commit decides the charge from. Read once, here, so
+  // the price snapshotted in step 3 is the one this submission saw.
   const { data: cycleData, error: cycleError } = await supabase
     .from("content_cycles")
-    .select("status")
+    .select("status, included_rounds, extra_round_price, billing_mode")
     .eq("id", item.cycle_id)
     .eq("client_id", client.id)
     .maybeSingle();
   if (cycleError) return { ok: false, error: cycleError.message };
-  const cycle = cycleData as Pick<ContentCycleRecord, "status"> | null;
+  const cycle = cycleData as Pick<
+    ContentCycleRecord,
+    "status" | "included_rounds" | "extra_round_price" | "billing_mode"
+  > | null;
   if (!cycle || cycle.status !== "in_review") {
     return { ok: false, error: "This month is not open for review" };
   }
@@ -455,14 +486,13 @@ export async function submitChangeRequestAction(
       .insert({
         content_item_id: itemId,
         round_number: item.current_round,
-        // DELIBERATE PHASE 6 VALUE, NOT A COLUMN DEFAULT — written explicitly
-        // at EVERY round number. Round 1 is included (spec §6.1). Any round
-        // >= 2 submitted before Phase 8 is permanently free, because no
-        // consent dialog was shown and no charge would be defensible (spec
-        // §5.8: the price must be shown before submission). Phase 8 replaces
-        // this write with the consent-gated computation; it must not
-        // retroactively re-price rows written here. `price: null`, never 0 —
-        // 0 is reserved for "billing disabled for the cycle".
+        // FREE AT BIRTH; the charge is decided at the commit (step 3). An
+        // unsubmitted row is never a charge — it may be debris a later retry
+        // reuses under different cycle settings — so the flag and the price
+        // are written together with `submitted_at`, not here. Explicit rather
+        // than the column default because false/null is also what every
+        // round sent before Phase 8 carries permanently (see the docblock),
+        // and the two should read as the same deliberate value.
         is_billable: false,
         price: null,
         status: "open",
@@ -533,13 +563,56 @@ export async function submitChangeRequestAction(
     .insert(noteRows);
   if (notesError) return { ok: false, error: notesError.message };
 
-  // --- Step 3: the commit bit ------------------------------------------------
+  // --- Step 3: the commit bit, carrying the charge decision -----------------
+
+  // THE CHARGE IS DECIDED HERE, ONCE, and written in the same statement as
+  // `submitted_at`, so a round is never sent with its price unsettled and a
+  // debris row never carries a charge. `resolveMyRoundBilling` is the SAME
+  // function the item page called to choose the dialog, over the same cycle
+  // columns and the same opener read — done NOW, as late as possible, so the
+  // window for a concurrent opener is the width of one UPDATE.
+  //
+  // What the two calls cannot share is the instant, and Kelsey can edit the
+  // cycle between them. So the dialog's outcome travelled here as `consent`,
+  // and the refuse rule (approved 2026-09-04) binds the write to it: a free
+  // outcome is accepted under any consent, a charge only at exactly the
+  // consented amount, and anything else is refused with nothing written —
+  // the round is still unsubmitted debris, which the retry reuses, so
+  // "nothing was sent" stays honest. The refusal is logged because it should
+  // be rare: if it becomes common, prices are being edited mid-review.
+  let billing;
+  try {
+    billing = await resolveMyRoundBilling(
+      client.id,
+      item.cycle_id,
+      cycle,
+      item.current_round
+    );
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Could not settle the charge",
+    };
+  }
+
+  if (!consentMatches(consent, billing)) {
+    const consented = consent.kind === "charge" ? consent.amount : "none";
+    const computed = billing.kind === "charge" ? billing.price : billing.kind;
+    console.error(
+      `[review] charge refused: cycle ${item.cycle_id}, round ${item.current_round}, consented ${consented}, computed ${computed}`
+    );
+    return { ok: false, error: TERMS_CHANGED_ERROR };
+  }
 
   const { error: commitError } = await supabase
     .from("revision_rounds")
     .update({
       submitted_at: new Date().toISOString(),
       submitted_by: client.id,
+      // Migration 019's CHECK: the flag and the amount land together, or
+      // neither does. Included and covered rows both write false/null — no
+      // marker of any kind (lib/revisionBilling.ts, rule 2).
+      ...roundChargeColumns(billing),
     })
     .eq("id", round.id)
     .is("submitted_at", null);

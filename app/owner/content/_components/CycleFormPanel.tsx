@@ -17,6 +17,7 @@ import {
   formatMonthLabel,
 } from "@/app/owner/calendar/_lib/timezone";
 import { dateKeyInTimezone } from "@/lib/date";
+import type { ContentBillingMode } from "@/lib/supabase";
 import {
   createContentCycleAction,
   updateContentCycleAction,
@@ -36,10 +37,13 @@ interface CycleFormPanelProps {
 interface FormValues {
   includedRounds: string;
   extraRoundPrice: string;
+  billingMode: ContentBillingMode;
   revisionDeadline: string;
 }
 
 const DEFAULT_INCLUDED_ROUNDS = "1";
+/** Migration 019's column default; the mode the spec's language is written in. */
+const DEFAULT_BILLING_MODE: ContentBillingMode = "per_round";
 
 /**
  * How far out a NEW cycle's review deadline is pre-filled: three days from
@@ -74,6 +78,7 @@ function valuesFor(cycle: CycleWithClient | null): FormValues {
     return {
       includedRounds: DEFAULT_INCLUDED_ROUNDS,
       extraRoundPrice: "",
+      billingMode: DEFAULT_BILLING_MODE,
       revisionDeadline: defaultDeadlineInputValue(),
     };
   }
@@ -81,6 +86,7 @@ function valuesFor(cycle: CycleWithClient | null): FormValues {
     includedRounds: String(cycle.included_rounds),
     extraRoundPrice:
       cycle.extra_round_price === null ? "" : String(cycle.extra_round_price),
+    billingMode: cycle.billing_mode,
     revisionDeadline: deadlineInputValue(cycle.revision_deadline),
   };
 }
@@ -118,6 +124,10 @@ export function CycleFormPanel({
     setError(null);
   }, [open, cycle]);
 
+  // A price above zero is what turns billing on (0 and empty both mean off),
+  // and the billing-mode control renders only then.
+  const pricePresent = Number(values.extraRoundPrice.trim()) > 0;
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (submitting) return;
@@ -142,6 +152,7 @@ export function CycleFormPanel({
           cycleId: cycle.id,
           includedRounds,
           extraRoundPrice,
+          billingMode: values.billingMode,
           revisionDeadline: trimmedDeadline === "" ? null : trimmedDeadline,
         })
       : await createContentCycleAction({
@@ -149,6 +160,7 @@ export function CycleFormPanel({
           monthKey,
           includedRounds,
           extraRoundPrice,
+          billingMode: values.billingMode,
           revisionDeadline: trimmedDeadline === "" ? null : trimmedDeadline,
         });
     setSubmitting(false);
@@ -222,7 +234,7 @@ export function CycleFormPanel({
               style={fieldStyle}
             />
             <p style={helperStyle}>
-              Rounds beyond this are billable.
+              Rounds beyond this are billable when a price is set.
             </p>
           </div>
 
@@ -230,6 +242,21 @@ export function CycleFormPanel({
             <label htmlFor="cycle-extra-round-price" style={labelStyle}>
               Extra round price
             </label>
+            {/* IN FRONT OF THE FIELD, on purpose (decided 2026-09-04). The
+                consent dialog is the client's proof they agreed to be billed,
+                and a price set on a cycle whose agreement says nothing about
+                revision charges bills someone who never signed for it. Kelsey
+                reads this before she types; setting the price is her
+                confirmation that the agreement covers it. Owner voice, not a
+                legal notice. */}
+            <div style={noticeStyle}>
+              Only set a price if {clientName || "this client"}&apos;s agreement
+              already includes a charge for extra revision rounds. Setting it
+              here doesn&apos;t add that term to anything they signed. It turns
+              on the consent step, and every round beyond the included ones
+              goes on their next invoice at this amount. Leave it empty and
+              revision rounds stay free for this month.
+            </div>
             <input
               id="cycle-extra-round-price"
               type="number"
@@ -245,10 +272,47 @@ export function CycleFormPanel({
               style={fieldStyle}
             />
             <p style={helperStyle}>
-              Optional. Snapshotted onto each billable round, so changing it
-              later never re-prices a month already released.
+              Optional. Snapshotted onto each round when the client sends it,
+              so changing it later never re-prices a round they already sent.
+              0 turns charges off for this month.
             </p>
           </div>
+
+          {/* The mode only means anything once there is a price, so it stays
+              out of the way until then. The stored value is preserved while
+              hidden — clearing the price and setting it again brings the same
+              mode back. */}
+          {pricePresent && (
+            <div>
+              <label htmlFor="cycle-billing-mode" style={labelStyle}>
+                Charge per
+              </label>
+              <select
+                id="cycle-billing-mode"
+                value={values.billingMode}
+                onChange={(e) =>
+                  setValues((v) => ({
+                    ...v,
+                    billingMode: e.target.value as ContentBillingMode,
+                  }))
+                }
+                onFocus={applyFocus}
+                onBlur={clearFocus}
+                style={fieldStyle}
+              >
+                <option value="per_round">
+                  Round — one charge per round, however many posts they send back
+                </option>
+                <option value="per_item">
+                  Post — one charge per post revised
+                </option>
+              </select>
+              <p style={helperStyle}>
+                Per post needs a much smaller price. $75 per post is $900 on a
+                twelve-post month.
+              </p>
+            </div>
+          )}
 
           {error && (
             <div role="alert" style={errorStyle}>
@@ -279,6 +343,19 @@ const readOnlyStyle: CSSProperties = {
   margin: 0,
   fontSize: 15,
   color: "var(--text-primary)",
+};
+
+// Warning-toned left rule, the register the cycle bar's gate notes use for
+// "this needs your attention before you act". Square corners, no shadow.
+const noticeStyle: CSSProperties = {
+  margin: "0 0 8px",
+  padding: "10px 12px",
+  border: "1px solid var(--border)",
+  borderLeft: "3px solid var(--status-warning)",
+  backgroundColor: "var(--surface-raised)",
+  fontSize: 13,
+  lineHeight: 1.5,
+  color: "var(--text-body)",
 };
 
 const footerStyle: CSSProperties = {

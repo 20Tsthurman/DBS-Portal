@@ -5,6 +5,7 @@ import { requireOwner } from "@/lib/auth";
 import {
   getSupabaseServiceClient,
   type ContentAssetRecord,
+  type ContentBillingMode,
   type ContentCycleRecord,
   type ContentItemRecord,
   type Platform,
@@ -86,6 +87,8 @@ const PLATFORMS: Platform[] = [
   "pinterest",
 ];
 const FORMATS: PostFormat[] = ["reel", "feed", "story", "carousel"];
+/** Mirrors content_cycles_billing_mode_check (migration 019). */
+const BILLING_MODES: ContentBillingMode[] = ["per_round", "per_item"];
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
@@ -345,8 +348,37 @@ export interface CreateContentCycleInput {
   monthKey: string;
   includedRounds: number;
   extraRoundPrice: number | null;
+  /**
+   * How a billable round is charged (migration 019). Stored whatever the
+   * price is; it only has an effect once the price is above zero.
+   */
+  billingMode: ContentBillingMode;
   /** YYYY-MM-DD, or null for "not set yet". Required before Release. */
   revisionDeadline: string | null;
+}
+
+/**
+ * The three billing settings share one validator across create and update, so
+ * the two actions cannot drift on what a legal price or mode is. The price
+ * accepts 0 — that is the documented "billing off" value — and the editor's
+ * warning is what stands between Kelsey and a price her client never agreed
+ * to; the server does not second-guess the agreement.
+ */
+function validateCycleBilling(input: {
+  includedRounds: number;
+  extraRoundPrice: number | null;
+  billingMode: ContentBillingMode;
+}): { ok: true } | { ok: false; error: string } {
+  if (!Number.isInteger(input.includedRounds) || input.includedRounds < 0) {
+    return { ok: false, error: "Included rounds must be a whole number" };
+  }
+  if (input.extraRoundPrice !== null && !(input.extraRoundPrice >= 0)) {
+    return { ok: false, error: "Extra round price must be zero or more" };
+  }
+  if (!BILLING_MODES.includes(input.billingMode)) {
+    return { ok: false, error: "Invalid billing mode" };
+  }
+  return { ok: true };
 }
 
 export async function createContentCycleAction(
@@ -359,12 +391,8 @@ export async function createContentCycleAction(
   if (!/^\d{4}-\d{2}$/.test(input.monthKey)) {
     return { ok: false, error: "Invalid month" };
   }
-  if (!Number.isInteger(input.includedRounds) || input.includedRounds < 0) {
-    return { ok: false, error: "Included rounds must be a whole number" };
-  }
-  if (input.extraRoundPrice !== null && !(input.extraRoundPrice >= 0)) {
-    return { ok: false, error: "Extra round price must be zero or more" };
-  }
+  const billing = validateCycleBilling(input);
+  if (!billing.ok) return { ok: false, error: billing.error };
   const deadline = resolveRevisionDeadline(input.revisionDeadline);
   if (!deadline.ok) return { ok: false, error: deadline.error };
 
@@ -377,6 +405,7 @@ export async function createContentCycleAction(
       revision_deadline: deadline.deadline,
       included_rounds: input.includedRounds,
       extra_round_price: input.extraRoundPrice,
+      billing_mode: input.billingMode,
       status: "drafting",
     })
     .select("*")
@@ -400,6 +429,7 @@ export interface UpdateContentCycleInput {
   cycleId: string;
   includedRounds: number;
   extraRoundPrice: number | null;
+  billingMode: ContentBillingMode;
   /** YYYY-MM-DD, or null to clear. Editable while `in_review` — see below. */
   revisionDeadline: string | null;
 }
@@ -413,12 +443,8 @@ export async function updateContentCycleAction(
   const cycleCheck = await loadCycle(input.cycleId);
   if (!cycleCheck.ok) return { ok: false, error: cycleCheck.error };
 
-  if (!Number.isInteger(input.includedRounds) || input.includedRounds < 0) {
-    return { ok: false, error: "Included rounds must be a whole number" };
-  }
-  if (input.extraRoundPrice !== null && !(input.extraRoundPrice >= 0)) {
-    return { ok: false, error: "Extra round price must be zero or more" };
-  }
+  const billing = validateCycleBilling(input);
+  if (!billing.ok) return { ok: false, error: billing.error };
   const deadline = resolveRevisionDeadline(input.revisionDeadline);
   if (!deadline.ok) return { ok: false, error: deadline.error };
 
@@ -427,6 +453,14 @@ export async function updateContentCycleAction(
   // that "does not require re-release, does not reset the cycle, and does not
   // affect any client progress". Nothing about this write touches item state,
   // so that property holds by construction.
+  //
+  // The billing settings are editable on a released cycle too, and that is
+  // safe for the same reason the price snapshot exists: a round's charge is
+  // decided once, at the client's commit, from the settings as they stand
+  // then (lib/revisionBilling.ts). A change here reaches only rounds the
+  // client has not sent yet — lowering the price or turning billing off
+  // mid-month is the more-generous direction spec §6.1 allows, and raising it
+  // never re-prices anything already sent.
   const supabase = getSupabaseServiceClient();
   const { data, error } = await supabase
     .from("content_cycles")
@@ -434,6 +468,7 @@ export async function updateContentCycleAction(
       revision_deadline: deadline.deadline,
       included_rounds: input.includedRounds,
       extra_round_price: input.extraRoundPrice,
+      billing_mode: input.billingMode,
     })
     .eq("id", input.cycleId)
     .select("*")

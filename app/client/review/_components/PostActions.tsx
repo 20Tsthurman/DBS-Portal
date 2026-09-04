@@ -2,6 +2,7 @@
 
 import { useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
+import type { RoundBilling } from "@/lib/revisionBilling";
 import { ApproveDialog } from "./ApproveDialog";
 import { RequestChangesPanel } from "./RequestChangesPanel";
 import {
@@ -21,10 +22,17 @@ interface PostActionsProps {
   hasVideo: boolean;
   /**
    * The post's `current_round` - 1 on a fresh month, 2+ after a re-release.
-   * Threaded through to the form, which renders its included-round lines on
-   * round 1 only (deck note, 2026-09-02).
+   * Named in the round-2+ copy.
    */
   round: number;
+  /**
+   * What sending this round costs, resolved server-side by the page. Threaded
+   * through to the form, which picks its footer and dialog from it and sends
+   * the matching consent (Phase 8).
+   */
+  billing: RoundBilling;
+  /** `content_cycles.included_rounds`, for the Screen 9 sub-line. */
+  includedRounds: number;
 }
 
 /**
@@ -50,6 +58,8 @@ export function PostActions({
   contextLine,
   hasVideo,
   round,
+  billing,
+  includedRounds,
 }: PostActionsProps) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
@@ -119,6 +129,8 @@ export function PostActions({
         contextLine={contextLine}
         hasVideo={hasVideo}
         round={round}
+        billing={billing}
+        includedRounds={includedRounds}
       />
     </div>
   );

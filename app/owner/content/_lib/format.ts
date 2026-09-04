@@ -1,4 +1,6 @@
 import { PORTAL_TIMEZONE, dateKeyInTimezone } from "@/lib/date";
+import { shortDateLabelForDateKey } from "@/app/owner/calendar/_lib/timezone";
+import type { RevisionCharge } from "@/lib/revisionBilling";
 import type {
   ContentCycleStatus,
   ContentItemStatus,
@@ -164,6 +166,55 @@ export function formatTimecode(seconds: number): string {
   const m = Math.floor(whole / 60);
   const s = whole % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * Kelsey's label for one accrued revision charge: "Round 2" for a per-round
+ * charge, "Round 2 · Instagram Reel, Oct 10" for a per-post one. Owner
+ * vocabulary — the client-facing line description on the invoice is a
+ * copy-deck string and lives with the invoice code, not here.
+ */
+export function revisionChargeLabel(
+  charge: Pick<RevisionCharge, "roundNumber" | "billingMode" | "item">
+): string {
+  const round = `Round ${charge.roundNumber}`;
+  if (charge.billingMode !== "per_item" || !charge.item) return round;
+  const dateKey = dateKeyInTimezone(new Date(charge.item.scheduledFor));
+  return `${round} · ${PLATFORM_LABELS[charge.item.platform]} ${
+    FORMAT_LABELS[charge.item.format]
+  }, ${shortDateLabelForDateKey(dateKey)}`;
+}
+
+/**
+ * The four states a charge shows Kelsey, as a pill. "Pending" is the word
+ * for an accrued charge that is not yet income and not yet billable — the
+ * spec's word, and never "income", "revenue" or "earned" anywhere on these
+ * surfaces (the business is cash-basis; income posts when the invoice is
+ * paid, through the existing flow).
+ *
+ *   pending       — accrued, waiting on her accept or deny
+ *   ready to bill — every request answered, offerable in the invoice panel
+ *   on / paid     — stamped to a live invoice, named; green only once paid
+ *   waived        — every request in the round denied; not billed
+ */
+export function revisionChargeStateFor(
+  charge: Pick<RevisionCharge, "state" | "invoice">
+): { label: string; tone: Tone } {
+  if (charge.invoice) {
+    const number = charge.invoice.number ?? "an invoice";
+    return charge.invoice.status === "paid"
+      ? { label: `Paid · ${number}`, tone: "success" }
+      : { label: `On ${number}`, tone: "neutral" };
+  }
+  switch (charge.state) {
+    case "ready":
+      return { label: "Ready to bill", tone: "accent" };
+    case "waived":
+      return { label: "Waived", tone: "neutral" };
+    case "pending":
+    default:
+      return { label: "Pending", tone: "neutral" };
+  }
 }
 
 /**

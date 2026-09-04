@@ -15,11 +15,13 @@ import {
   fieldStyle,
 } from "@/app/owner/clients/_components/formStyles";
 import type { RevisionCategory } from "@/lib/supabase";
+import { formatChargeAmount, type RoundBilling } from "@/lib/revisionBilling";
 import {
   CATEGORY_COPY,
   CATEGORY_FIELD_PLACEHOLDER,
   CATEGORY_ORDER,
   DISABLED_SEND_HELPER,
+  FOOTER_HELPER_INCLUDED,
   FOOTER_HELPER_ROUND_1,
   MOMENTS_HEADING,
   MOMENTS_HELPER,
@@ -32,11 +34,21 @@ import {
   SEND_DIALOG_FINALITY,
   SEND_DIALOG_LINE_1,
   SEND_DIALOG_LINE_3,
+  SEND_DIALOG_LINE_3_INCLUDED,
   SEND_DIALOG_TITLE,
   SEND_FAILED,
+  SEND_FAILED_TERMS_CHANGED,
+  consentAmountRow,
+  consentConfirmLabel,
+  consentDialogTitle,
+  consentSubLine,
+  coveredSubLine,
+  footerHelperCharge,
+  footerHelperCovered,
   momentsAddLabel,
   momentsChip,
 } from "../_lib/copy";
+import { consentFor, TERMS_CHANGED_ERROR } from "../_lib/consent";
 import { formatTimecode } from "../_lib/format";
 import {
   getPlayerPositionSnapshot,
@@ -62,8 +74,17 @@ interface RequestChangesPanelProps {
   contextLine: string;
   /** The moments section renders ONLY on posts with a video (deck rule). */
   hasVideo: boolean;
-  /** The post's `current_round` — governs the two included-round lines. */
+  /** The post's `current_round` — named in the round-2+ copy. */
   round: number;
+  /**
+   * What sending this round costs, resolved server-side by the item page
+   * through the SAME function the submit action uses at its commit
+   * (`resolveMyRoundBilling`). Chooses the footer line, the dialog, and the
+   * consent that travels with the send.
+   */
+  billing: RoundBilling;
+  /** `content_cycles.included_rounds` — the Screen 9 sub-line names it. */
+  includedRounds: number;
 }
 
 /**
@@ -103,15 +124,27 @@ interface RequestChangesPanelProps {
  * is lost. Deselecting a category keeps its typed comment in state (kinder
  * to a stray tap) — only selected categories are submitted.
  *
- * ROUND 2+ RENDERS NEITHER INCLUDED-ROUND LINE (decided 2026-09-02). The
- * footer helper ("One round of changes is included with your month") and the
- * dialog's third line ("This is part of your included round of changes") are
- * round-1 sentences: both are about the included round, and on round 2 both
- * would be false. The deck's round-2+ replacements (Screen 9) are Phase 8's
- * consent copy, and no pre-consent round-2 string exists — so the slots stay
- * empty rather than carrying either the wrong sentence or an improvised one.
- * A round-2 request in Phase 6 carries no charge (see the submit action), so
- * nothing untrue is said by saying nothing.
+ * THE BILLING STATE PICKS THE FOOTER AND THE DIALOG (Phase 8, from the deck
+ * rows added 2026-09-04):
+ *
+ *   included  — Screen 4, the send dialog: round 1 carries its two
+ *               included-round lines; round 2+ carries the included pair
+ *               (billing off for the cycle, or a round within the included
+ *               count). No amount anywhere.
+ *   charge    — Screen 9, the consent dialog: title names the round, the
+ *               amount row and sub-line sit before the finality line, and the
+ *               price repeats on the confirm button so consent is unmissable.
+ *   covered   — Screen 9 with the money removed: per_round, another post
+ *               already opened this round's charge. Same title, the covered
+ *               sub-line in the amount row's place, Screen 4's confirm label.
+ *
+ * THE CONSENT TRAVELS WITH THE SEND. `consentFor(billing)` goes to the action,
+ * and the commit writes a charge only when its own computation matches it
+ * exactly (`consentMatches`); a mismatch — Kelsey edited the cycle's terms
+ * between this page's load and the press — is refused with nothing written
+ * and rendered as the deck's terms-changed line, which tells the client to
+ * refresh. A retry from the same stale page would fail identically, which is
+ * why that failure does not share SEND_FAILED's "try again in a moment".
  */
 export function RequestChangesPanel({
   open,
@@ -120,8 +153,9 @@ export function RequestChangesPanel({
   contextLine,
   hasVideo,
   round,
+  billing,
+  includedRounds,
 }: RequestChangesPanelProps) {
-  const includedRound = round < 2;
   const router = useRouter();
   const [selected, setSelected] = useState<RevisionCategory[]>([]);
   const [comments, setComments] = useState<
@@ -131,7 +165,25 @@ export function RequestChangesPanel({
   const nextMomentId = useRef(1);
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [sendFailed, setSendFailed] = useState(false);
+  const [sendError, setSendError] = useState<"failed" | "terms" | null>(null);
+
+  // The deck's amount shape, computed once: "$75", cents only when present.
+  const amountLabel =
+    billing.kind === "charge" ? formatChargeAmount(billing.price) : null;
+  const footerLine =
+    billing.kind === "charge" && amountLabel !== null
+      ? footerHelperCharge(round, amountLabel)
+      : billing.kind === "covered"
+        ? footerHelperCovered(round)
+        : round < 2
+          ? FOOTER_HELPER_ROUND_1
+          : FOOTER_HELPER_INCLUDED;
+  const dialogTitle =
+    billing.kind === "included" ? SEND_DIALOG_TITLE : consentDialogTitle(round);
+  const confirmLabel =
+    billing.kind === "charge" && amountLabel !== null
+      ? consentConfirmLabel(amountLabel)
+      : SEND_BUTTON;
 
   const position = useSyncExternalStore(
     subscribePlayerPosition,
@@ -176,7 +228,7 @@ export function RequestChangesPanel({
 
   const handleConfirmSend = async () => {
     if (submitting) return;
-    setSendFailed(false);
+    setSendError(null);
     setSubmitting(true);
     const result = await submitChangeRequestAction({
       itemId,
@@ -188,13 +240,18 @@ export function RequestChangesPanel({
         seconds: m.seconds,
         body: m.body.trim(),
       })),
+      // Exactly what this dialog showed. The server refuses to write a charge
+      // that differs from it.
+      consent: consentFor(billing),
     });
     setSubmitting(false);
     setConfirming(false);
     if (!result.ok) {
-      // One line for every failure (deck's send-failed row) — and the draft
-      // stays exactly as typed, panel open behind the dismissed dialog.
-      setSendFailed(true);
+      // Two lines: the terms-changed refusal has its own (a retry from this
+      // page would fail the same way), every other failure shares the deck's
+      // send-failed row. The draft stays exactly as typed either way, panel
+      // open behind the dismissed dialog.
+      setSendError(result.error === TERMS_CHANGED_ERROR ? "terms" : "failed");
       return;
     }
     onClose();
@@ -312,14 +369,12 @@ export function RequestChangesPanel({
       )}
 
       <div style={footerStyle}>
-        {sendFailed && (
+        {sendError && (
           <p role="alert" style={sendErrorStyle}>
-            {SEND_FAILED}
+            {sendError === "terms" ? SEND_FAILED_TERMS_CHANGED : SEND_FAILED}
           </p>
         )}
-        {includedRound && (
-          <p style={footerHelperStyle}>{FOOTER_HELPER_ROUND_1}</p>
-        )}
+        <p style={footerHelperStyle}>{footerLine}</p>
         <button
           type="button"
           disabled={!canSend || submitting}
@@ -349,7 +404,7 @@ export function RequestChangesPanel({
           setConfirming(false);
         }}
         onConfirm={handleConfirmSend}
-        title={SEND_DIALOG_TITLE}
+        title={dialogTitle}
         body={
           <div>
             <div style={chipsRowStyle}>
@@ -360,18 +415,38 @@ export function RequestChangesPanel({
               ))}
             </div>
             <p style={dialogLineStyle}>{SEND_DIALOG_LINE_1}</p>
+
+            {/* Screen 9's money, BEFORE the finality line (the deck's row
+                order): the amount row and its sub-line on a charge, the
+                covered sub-line alone when another post already opened the
+                round. Screen 4 has nothing here. */}
+            {billing.kind === "charge" && amountLabel !== null && (
+              <>
+                <p style={amountRowStyle}>{consentAmountRow(round, amountLabel)}</p>
+                <p style={dialogLineStyle}>{consentSubLine(includedRounds)}</p>
+              </>
+            )}
+            {billing.kind === "covered" && (
+              <p style={dialogLineStyle}>{coveredSubLine(round)}</p>
+            )}
+
             <p style={dialogLineStyle}>
               <strong style={{ fontWeight: 600, color: "var(--text-primary)" }}>
                 {SEND_DIALOG_FINALITY.emphasized}
               </strong>
               {SEND_DIALOG_FINALITY.rest}
             </p>
-            {includedRound && (
-              <p style={dialogLineStyle}>{SEND_DIALOG_LINE_3}</p>
+
+            {/* Screen 4's third line, on an included round only: the round-1
+                sentence, or the round-2+ included row. */}
+            {billing.kind === "included" && (
+              <p style={dialogLineStyle}>
+                {round < 2 ? SEND_DIALOG_LINE_3 : SEND_DIALOG_LINE_3_INCLUDED}
+              </p>
             )}
           </div>
         }
-        confirmLabel={SEND_BUTTON}
+        confirmLabel={confirmLabel}
         cancelLabel={SEND_DIALOG_CANCEL}
         busy={submitting}
       />
@@ -605,4 +680,15 @@ const chipStyle: CSSProperties = {
 const dialogLineStyle: CSSProperties = {
   margin: "0 0 10px",
   lineHeight: 1.5,
+};
+
+// Screen 9's amount row — the one line in the dialog that names money. Set
+// apart in weight and colour, not size or box, so it reads as a fact the
+// client is agreeing to rather than as an alarm.
+const amountRowStyle: CSSProperties = {
+  margin: "0 0 4px",
+  fontSize: 15,
+  fontWeight: 600,
+  lineHeight: 1.5,
+  color: "var(--text-primary)",
 };

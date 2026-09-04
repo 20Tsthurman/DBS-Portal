@@ -10,6 +10,10 @@ import {
   fullDateLabelForDateKey,
 } from "@/app/owner/calendar/_lib/timezone";
 import { dateKeyInTimezone } from "@/lib/date";
+import {
+  formatChargeAmount,
+  type RevisionCharge,
+} from "@/lib/revisionBilling";
 import { ContentItemsList } from "./ContentItemsList";
 import { CycleFormPanel } from "./CycleFormPanel";
 import { ItemFormPanel } from "./ItemFormPanel";
@@ -21,7 +25,12 @@ import {
   rereleaseContentCycleAction,
   unreleaseContentCycleAction,
 } from "../_actions";
-import { cycleStatusLabelFor, cycleStatusToneFor } from "../_lib/format";
+import {
+  cycleStatusLabelFor,
+  cycleStatusToneFor,
+  revisionChargeLabel,
+  revisionChargeStateFor,
+} from "../_lib/format";
 import type { ContentCalendarEvent } from "../_lib/calendarEvents";
 import type { ContentView } from "../_lib/href";
 import type { ContentItemWithAssets, CycleWithClient } from "../_lib/queries";
@@ -72,6 +81,13 @@ interface ContentBoardProps {
    * board keys off it.
    */
   rollup: CycleRollup | null;
+  /**
+   * Accrued revision charges for the visible cycle, in every state (spec
+   * §4.9). Informational here — the place Kelsey acts on one is the invoice
+   * panel, which reads the same function. Empty when there are none, in the
+   * all-clients view, or on a month with no cycle.
+   */
+  charges: RevisionCharge[];
 }
 
 /**
@@ -96,6 +112,7 @@ export function ContentBoard({
   releaseGate,
   rereleaseGate,
   rollup,
+  charges,
 }: ContentBoardProps) {
   const router = useRouter();
   const [panel, setPanel] = useState<OpenPanel>(null);
@@ -250,9 +267,16 @@ export function ContentBoard({
                   {cycle.included_rounds === 1 ? "round" : "rounds"}
                 </span>
                 <span>
+                  {/* The three billing states the editor can produce, in the
+                      deck's amount format: unset, off (0), or a price with
+                      its mode. */}
                   {cycle.extra_round_price === null
                     ? "Extra round price not set"
-                    : `Extra round $${cycle.extra_round_price.toFixed(2)}`}
+                    : cycle.extra_round_price > 0
+                      ? `Extra round ${formatChargeAmount(cycle.extra_round_price)} · ${
+                          cycle.billing_mode === "per_item" ? "per post" : "per round"
+                        }`
+                      : "Revision charges off"}
                 </span>
                 <span>
                   {cycle.status === "locked" && lockedLabel
@@ -279,6 +303,33 @@ export function ContentBoard({
               <p style={gateNoteStyle}>
                 Not ready to re-release — {rereleaseBlockedReason}
               </p>
+            )}
+
+            {/* Accrued revision charges (spec §4.9), one line each, in the
+                four states `revisionChargeStateFor` names. Read-only: the
+                place to act on a ready charge is the invoice panel, which
+                lists the same charges from the same read. A charge here is
+                PENDING money, never income — nothing on this board or
+                anywhere else sums it until the invoice is paid. */}
+            {cycle && charges.length > 0 && (
+              <div style={chargesBlockStyle}>
+                <span style={chargesHeadingStyle}>Revision charges</span>
+                {charges.map((charge) => {
+                  const state = revisionChargeStateFor(charge);
+                  return (
+                    <div key={charge.key} style={chargeRowStyle}>
+                      <span style={chargeLabelStyle}>
+                        {revisionChargeLabel(charge)} ·{" "}
+                        {formatChargeAmount(charge.amount)}
+                      </span>
+                      <StatusPill tone={state.tone}>{state.label}</StatusPill>
+                      {charge.state === "waived" && !charge.invoice && (
+                        <span style={chargeNoteStyle}>every request denied</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
 
@@ -612,6 +663,41 @@ const cycleActionsStyle: CSSProperties = {
   flexWrap: "wrap",
   alignItems: "center",
   gap: 8,
+};
+
+const chargesBlockStyle: CSSProperties = {
+  marginTop: 10,
+  paddingTop: 8,
+  borderTop: "1px solid var(--border)",
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+};
+
+const chargesHeadingStyle: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+  color: "var(--text-muted)",
+};
+
+const chargeRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 10,
+  fontSize: 13,
+};
+
+const chargeLabelStyle: CSSProperties = {
+  color: "var(--text-primary)",
+  fontVariantNumeric: "tabular-nums",
+};
+
+const chargeNoteStyle: CSSProperties = {
+  fontSize: 12,
+  color: "var(--text-muted)",
 };
 
 const secondaryActionStyle: CSSProperties = {

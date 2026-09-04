@@ -32,6 +32,7 @@ import {
   fetchMyReviewItems,
   fetchMyReviewableCycleForItem,
   fetchMySubmittedRound,
+  resolveMyRoundBilling,
 } from "../_lib/queries";
 import { buildReviewSlides } from "../_lib/slides";
 
@@ -86,11 +87,23 @@ export default async function ClientReviewItemPage({ params }: PageProps) {
   const item = items[index];
   const slides = await buildReviewSlides(item.assets);
 
+  // The client can act on this post: the month is open and the post is
+  // awaiting them. Only then does the send have a cost worth resolving.
+  const canAct = openForReview && needsClientReview(item.status);
+
+  // What sending this round would cost — the SAME function the submit action
+  // calls at its commit, over the same cycle row and the same opener read, so
+  // the dialog's amount is the commit's amount (Phase 8). Resolved once here
+  // and shared by the actions (footer, dialog, consent) and the Updated
+  // state's small print.
+  const billing = canAct
+    ? await resolveMyRoundBilling(client.id, cycle.id, cycle, item.current_round)
+    : null;
+
   // A post that came back after a re-release: open for review again at round
   // 2 or later. Its latest submitted round is the one Kelsey accepted, and
   // Screen 5's Updated state reads that round's note.
-  const cameBackUpdated =
-    openForReview && needsClientReview(item.status) && item.current_round >= 2;
+  const cameBackUpdated = canAct && item.current_round >= 2;
 
   // The latest submitted round, fetched only when the status says one
   // exists. On a sent post it is the receipt (With Kelsey) or the answer
@@ -161,17 +174,25 @@ export default async function ClientReviewItemPage({ params }: PageProps) {
           </div>
 
           {/* Screen 5's Updated state, above the actions it leads into: the
-              post is back after a re-release with the Round chip and Kelsey's
-              optional note. The small print about a charge is HELD until
-              Phase 8 — see UpdatedState. */}
-          {updated && (
+              post is back after a re-release with the Round chip, Kelsey's
+              optional note, and — from Phase 8 — the small print that says
+              what the next round costs, chosen by the same billing state the
+              actions below use. */}
+          {updated && billing && (
             <UpdatedState
               round={item.current_round}
               note={updated.round.resolution_note}
+              smallPrint={
+                billing.kind === "charge"
+                  ? "charge"
+                  : billing.kind === "covered"
+                    ? "covered"
+                    : null
+              }
             />
           )}
 
-          {openForReview && needsClientReview(item.status) && (
+          {canAct && billing && (
             <PostActions
               itemId={item.id}
               goesOutLabel={goesOutWeekday}
@@ -181,6 +202,8 @@ export default async function ClientReviewItemPage({ params }: PageProps) {
               )}
               hasVideo={item.assets.some((asset) => asset.kind === "video")}
               round={item.current_round}
+              billing={billing}
+              includedRounds={cycle.included_rounds}
             />
           )}
 

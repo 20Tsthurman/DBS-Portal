@@ -203,6 +203,7 @@ describe("runDeadlineSweep", () => {
     revision_deadline: deadline,
     included_rounds: 1,
     extra_round_price: null,
+    billing_mode: "per_round",
     status: "in_review",
     locked_at: null,
     locked_by: null,

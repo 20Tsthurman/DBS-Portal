@@ -16,6 +16,8 @@ import {
   type RereleaseGateResult,
 } from "./_lib/releaseGate";
 import { fetchCycleRollup, type CycleRollup } from "./_lib/rollup";
+import { fetchRevisionCharges } from "./_lib/revisionCharges";
+import type { RevisionCharge } from "@/lib/revisionBilling";
 import {
   fetchContentClients,
   fetchCyclesForMonth,
@@ -86,6 +88,18 @@ export default async function OwnerContentPage({ searchParams }: PageProps) {
     rereleaseGate = await evaluateRereleaseGate(activeCycle);
   }
 
+  // Accrued revision charges for the visible cycle (spec §4.9, §6.2), in
+  // every state — pending, ready, billed, waived — for ANY cycle status:
+  // October's round 2 is still owed after October locks. The same read the
+  // invoice panel's picker uses, so the two cannot disagree about what is
+  // owed. Filtered to this cycle here; the read is per client.
+  let charges: RevisionCharge[] = [];
+  if (activeCycle) {
+    charges = (await fetchRevisionCharges(activeCycle.client_id)).filter(
+      (charge) => charge.cycleId === activeCycle.id
+    );
+  }
+
   // Thumbnail minting is calendar-only work — the list view renders no
   // media, so it skips the signed-URL round-trip entirely.
   let events: ContentCalendarEvent[] = [];
@@ -130,6 +144,7 @@ export default async function OwnerContentPage({ searchParams }: PageProps) {
         releaseGate={releaseGate}
         rereleaseGate={rereleaseGate}
         rollup={rollup}
+        charges={charges}
       />
     </section>
   );

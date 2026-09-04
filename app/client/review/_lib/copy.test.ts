@@ -3,8 +3,22 @@ import {
   autoApprovedMeta,
   autoBody,
   closedEarlyTitle,
+  consentAmountRow,
+  consentConfirmLabel,
+  consentDialogTitle,
+  consentSubLine,
+  coveredSubLine,
   deadlineBody,
   deadlineTitle,
+  FOOTER_HELPER_INCLUDED,
+  FOOTER_HELPER_ROUND_1,
+  footerHelperCharge,
+  footerHelperCovered,
+  SEND_DIALOG_LINE_3,
+  SEND_DIALOG_LINE_3_INCLUDED,
+  SEND_FAILED_TERMS_CHANGED,
+  UPDATED_SMALL_PRINT_CHARGE,
+  UPDATED_SMALL_PRINT_COVERED,
 } from "./copy";
 
 /**
@@ -96,5 +110,110 @@ describe("the other closed-month rows", () => {
 
   it("row meta", () => {
     expect(autoApprovedMeta("Sept 25")).toBe("Approved automatically · Sept 25");
+  });
+});
+
+/**
+ * Phase 8's rows — the consent copy and its three siblings, every one
+ * asserted verbatim. These are the strings a client reads before agreeing to
+ * be billed, so a rewording here is a consent problem, not a style one.
+ */
+describe("Screen 3 footer, by billing state", () => {
+  it("round 1", () => {
+    expect(FOOTER_HELPER_ROUND_1).toBe(
+      "One round of changes is included with your month."
+    );
+  });
+
+  it("round 2+, included (deck row 2026-09-04)", () => {
+    expect(FOOTER_HELPER_INCLUDED).toBe("This round of changes is included.");
+  });
+
+  it("round 2+, per-round covered (deck row 2026-09-04)", () => {
+    expect(footerHelperCovered(2)).toBe(
+      "Already covered by round 2 — no additional charge for this post."
+    );
+    expect(footerHelperCovered(3)).toContain("round 3");
+  });
+
+  it("round 2+, a charge (Screen 9's form footer)", () => {
+    expect(footerHelperCharge(2, "$75")).toBe(
+      "This is round 2 — $75, added to your next invoice."
+    );
+  });
+});
+
+describe("Screen 4 line 3, by billing state", () => {
+  it("round 1", () => {
+    expect(SEND_DIALOG_LINE_3).toBe(
+      "This is part of your included round of changes."
+    );
+  });
+
+  it("round 2+, included (deck row 2026-09-04)", () => {
+    expect(SEND_DIALOG_LINE_3_INCLUDED).toBe(
+      "This round is included — there's no charge for it."
+    );
+  });
+});
+
+describe("Screen 9 consent", () => {
+  it("title names the round", () => {
+    expect(consentDialogTitle(2)).toBe("Send round 2 to Kelsey?");
+  });
+
+  it("amount row", () => {
+    expect(consentAmountRow(2, "$75")).toBe("Round 2 of changes — $75");
+  });
+
+  it("sub-line at one included round — the canvas row", () => {
+    expect(consentSubLine(1)).toBe(
+      "Added to your next invoice — nothing is charged today. Your first round was included with your month."
+    );
+  });
+
+  it("sub-line at two or more included rounds (deck row 2026-09-04)", () => {
+    expect(consentSubLine(2)).toBe(
+      "Added to your next invoice — nothing is charged today. Your first 2 rounds were included with your month."
+    );
+    expect(consentSubLine(3)).toContain("Your first 3 rounds were");
+  });
+
+  it("sub-line at zero included rounds keeps only the first sentence (deck known gap)", () => {
+    expect(consentSubLine(0)).toBe(
+      "Added to your next invoice — nothing is charged today."
+    );
+  });
+
+  it("confirm repeats the price", () => {
+    expect(consentConfirmLabel("$75")).toBe("Send · $75");
+  });
+
+  it("per-round covered sub-line (deck row 2026-09-04)", () => {
+    expect(coveredSubLine(2)).toBe(
+      "Round 2 is already on your next invoice — there's no additional charge for this post."
+    );
+  });
+});
+
+describe("Screen 5 Updated small print", () => {
+  it("the held row, as written", () => {
+    expect(UPDATED_SMALL_PRINT_CHARGE).toBe(
+      "Your included round has been used. Another round of changes has a charge — you'll always see the amount before anything is sent."
+    );
+  });
+
+  it("per-round covered (deck row 2026-09-04)", () => {
+    expect(UPDATED_SMALL_PRINT_COVERED).toBe(
+      "Your included round has been used. This round of changes is already on your next invoice."
+    );
+  });
+});
+
+describe("Errors", () => {
+  it("send failed, terms changed (deck row 2026-09-04)", () => {
+    expect(SEND_FAILED_TERMS_CHANGED).toBe(
+      "Kelsey updated this month's revision terms while you were writing. Refresh the page and you'll see the current terms before you send."
+    );
   });
 });

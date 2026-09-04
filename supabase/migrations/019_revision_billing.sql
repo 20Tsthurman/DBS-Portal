@@ -1,0 +1,220 @@
+-- 019_revision_billing.sql
+-- Content & Approval feature, Phase 8: billing accrual and invoice injection.
+-- See docs/DBS_Content_Approval_Feature.md §6 and the Phase 8 section of
+-- docs/DBS_Content_Approval_Build_Plan.md.
+--
+-- PURELY ADDITIVE: one new column on content_cycles (with a default), one new
+-- CHECK on content_cycles, one new CHECK on revision_rounds. No table is
+-- created or dropped, no existing column is modified, no data is written.
+-- Safe to run top-to-bottom in the Supabase SQL Editor, and safe to re-run.
+--
+-- Conventions match 015/016/017/018: text + CHECK (no PG enums), no triggers
+-- and no functions, DROP CONSTRAINT IF EXISTS + ADD CONSTRAINT idempotency,
+-- ADD COLUMN IF NOT EXISTS. RLS is already enabled (no policies) on both
+-- tables by 015; no new tables here, so no RLS block. No new index: the
+-- accrual read walks client -> cycles -> items -> rounds, and every hop is
+-- already served (content_cycles_client_id_idx, content_items_cycle_id_idx,
+-- revision_rounds_content_item_id_idx, and the partial
+-- revision_rounds_unbilled_idx for `invoice_id is null`).
+--
+-- The new column's default is filled as a metadata-only change — Postgres
+-- 11+ stores a non-volatile default in the catalog instead of rewriting the
+-- table — so every existing cycle reads 'per_round' with no data statement.
+--
+-- BEFORE RUNNING — one read-only look (writes nothing):
+--
+--      select count(*)
+--      from revision_rounds
+--      where is_billable or price is not null;
+--
+-- EXPECT ZERO. The only writer of these two columns before this file is the
+-- client submit action (app/client/review/_actions.ts), which writes
+-- is_billable = false and price = null EXPLICITLY at every round number —
+-- Phase 5's deliberate value, kept through Phases 6 and 7. So any row this
+-- count finds was set by hand. Zero matters for two separate reasons:
+--
+--   1. The CHECK at the bottom of this file ADMITS a hand-set row that carries
+--      is_billable = true with a positive price. The constraint alone would
+--      not catch it, and Phase 8's accrual read treats every is_billable row
+--      as a charge the client consented to. No consent dialog existed before
+--      this file, so such a row becomes a charge nobody agreed to on Kelsey's
+--      next invoice. A phantom here is a money bug, not a schema bug.
+--   2. A hand-set row with is_billable = false and a non-null price FAILS the
+--      CHECK and leaves the file half-applied — the column and its CHECK in,
+--      the revision_rounds CHECK out. Nothing else in the file breaks, and
+--      re-running after the row is corrected or deleted completes it.
+--
+-- If the count is not zero, STOP and inspect the row before running anything
+-- below. Do not "fix" it by running the migration around it.
+
+-- ----------------------------------------------------------------------------
+-- content_cycles.billing_mode — how a billable round is charged for this
+-- month: 'per_round' (one charge per round per cycle, however many posts the
+-- client sends feedback on) or 'per_item' (one charge per post revised).
+--
+-- WHY A COLUMN ON THE CYCLE. Billing granularity was decided 2026-08-30 as
+-- configurable PER CYCLE (spec §6.1), the same scope as extra_round_price and
+-- included_rounds: the terms of one client's one month. It is not a global
+-- setting (two clients can have different agreements) and not a package
+-- attribute (the cycle already snapshots its own billing terms so a package
+-- change never re-prices a released month — 015's rationale for
+-- extra_round_price, and it holds here for the same reason).
+--
+-- WHY 'per_round' IS THE DEFAULT. It is the mode the spec's fully-denied
+-- exemption is written in ("a round in which every item was denied is not
+-- billed" is cycle-level language), and it is the mode that matches how a
+-- client experiences a revision cycle — they send a batch, Kelsey answers
+-- the batch. 'per_item' is available but needs a MUCH smaller price to be
+-- sane: $75 per post is ~$900 on a twelve-post month. The cycle editor says
+-- so beside the control; the schema just refuses anything but the two words.
+--
+-- NOT NULL, because null would be a third mode with no meaning. An unset
+-- price (extra_round_price null or 0) is what turns billing off for a cycle;
+-- the mode only says how charges are shaped when there are any.
+--
+-- WHERE IT IS READ, and why a mid-month change is safe. The mode is consulted
+-- twice. At the client's commit it decides whether a round row becomes a
+-- charge (in per_round only the FIRST billable submission of a round number
+-- in the cycle is flagged; later posts in the same round are written free,
+-- with no marker, and read as "already covered"). At Kelsey's read it decides
+-- how flagged rows are GROUPED into charges: per_round groups by cycle and
+-- round number, per_item lists each flagged row. Because a row's is_billable
+-- is decided once, at commit, and never recomputed, flipping the mode after
+-- rounds have been sent can only MERGE existing charges (per_item -> per_round
+-- collapses two flagged rows in one round into one charge); it can never turn
+-- a free row into a charge. Same direction as the price snapshot: settings
+-- changes only ever reach rounds the client has not sent yet.
+--
+-- Text + CHECK rather than an enum, per house convention — a third mode later
+-- is a one-line CHECK widen, the shape 017 used to add 'denied'.
+-- ----------------------------------------------------------------------------
+alter table content_cycles
+  add column if not exists billing_mode text not null default 'per_round';
+
+alter table content_cycles drop constraint if exists content_cycles_billing_mode_check;
+alter table content_cycles add constraint content_cycles_billing_mode_check
+  check (billing_mode in ('per_round', 'per_item'));
+
+-- ----------------------------------------------------------------------------
+-- revision_rounds — a charge has an amount, and ONLY a charge has one.
+--
+--   is_billable = true   requires  price is not null and price > 0
+--   is_billable = false  requires  price is null
+--
+-- Both directions in one CHECK, because each half guards a different mistake:
+--
+--   A charge with no amount. A code path that flags a round without
+--   snapshotting the cycle's price at that instant fails loudly here instead
+--   of accruing a charge that renders as "$0" or "—" on Kelsey's surface and
+--   is then either dropped or hand-typed onto an invoice — a different number
+--   from the one the client consented to.
+--
+--   An amount with no charge. In per_round mode the second and later posts
+--   the client sends in one round are written FREE — is_billable false, price
+--   null — with no marker of any kind (decided 2026-09-04): "already covered"
+--   is derived at read time from the existence of the round's opener, never
+--   from anything on the covered row. A non-null price on a non-billable row
+--   would be a second, contradictory place to read money from. The obvious
+--   marker, price = 0, is also ruled out because 0 is RESERVED at the cycle
+--   level to mean "billing off for this month"; the submit action maps a zero
+--   price to false/null rather than ever writing a zero onto a round.
+--
+-- WHY price > 0 AND NOT >= 0. A round priced at zero is a charge for nothing:
+-- it would accrue as pending, appear in the invoice picker, and land on a PDF
+-- as a $0 line. The cycle's 0 means "no charges"; it must not leak onto a
+-- round row as "a charge of nothing".
+--
+-- WHAT THIS MAKES PERMANENT. Every round submitted before this file carries
+-- false/null (the pre-flight above is the proof). Phase 8's only write to
+-- these two columns is inside the client's commit UPDATE, which is guarded on
+-- submitted_at IS NULL and so can never match a row that was already sent.
+-- This CHECK closes the other door: nothing can later set a price on a
+-- pre-Phase-8 row without also flagging it, and nothing flags it. A round the
+-- client sent before the consent dialog existed stays free forever, which is
+-- the only defensible outcome for a charge they were never shown.
+--
+-- Validates cleanly against existing rows: all false/null, per the pre-flight.
+-- ----------------------------------------------------------------------------
+alter table revision_rounds drop constraint if exists revision_rounds_billable_price_check;
+alter table revision_rounds add constraint revision_rounds_billable_price_check
+  check (
+    (is_billable and price is not null and price > 0)
+    or (not is_billable and price is null)
+  );
+
+-- ============================================================================
+-- VERIFY — run after the migration; nothing below writes anything.
+--
+-- 1. The new column exists, NOT NULL, with its default (EXPECT EXACTLY THIS
+--    1 ROW):
+--
+--      select column_name, data_type, is_nullable, column_default
+--      from information_schema.columns
+--      where table_schema = 'public'
+--        and table_name = 'content_cycles'
+--        and column_name = 'billing_mode';
+--
+--        billing_mode | text | NO | 'per_round'::text
+--
+-- 2. Every existing cycle reads the default (EXPECT ZERO):
+--
+--      select count(*) from content_cycles where billing_mode <> 'per_round';
+--
+-- 3. Every constraint on content_cycles, listed BY TABLE (conrelid), not by
+--    name — a name-only lookup cannot tell a constraint that was never added
+--    from one that lives on some other table, and a DROP IF EXISTS against a
+--    misspelled name no-ops without a word. EXPECT EXACTLY THESE 8 ROWS, in
+--    this order, every one with convalidated = true (018 listed 7; the first
+--    row is this file's):
+--
+--      select conname, contype, convalidated, pg_get_constraintdef(oid) as def
+--      from pg_constraint
+--      where conrelid = 'public.content_cycles'::regclass
+--        and contype in ('p', 'u', 'f', 'c')
+--      order by conname;
+--
+--        content_cycles_billing_mode_check     c  CHECK (billing_mode = ANY (ARRAY['per_round', 'per_item']))
+--        content_cycles_client_id_fkey         f  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+--        content_cycles_client_month_unique    u  UNIQUE (client_id, month)
+--        content_cycles_locked_by_check        c  CHECK (locked_by IS NULL OR locked_by = ANY (ARRAY['auto', 'owner']))
+--        content_cycles_locked_by_scope_check  c  CHECK (locked_by IS NULL OR locked_at IS NOT NULL)
+--        content_cycles_locked_record_check    c  CHECK (status <> 'locked' OR locked_at IS NOT NULL)
+--        content_cycles_pkey                   p  PRIMARY KEY (id)
+--        content_cycles_status_check           c  CHECK (status = ANY (ARRAY['drafting', 'in_review', 'locked']))
+--
+-- 4. Every constraint on revision_rounds, the same way. EXPECT EXACTLY THESE
+--    8 ROWS, in this order, every one with convalidated = true. Five are
+--    015's (two FKs, the item-round UNIQUE, the PK, and the status CHECK as
+--    widened by 017), two are 017's, and the first row is this file's:
+--
+--      select conname, contype, convalidated, pg_get_constraintdef(oid) as def
+--      from pg_constraint
+--      where conrelid = 'public.revision_rounds'::regclass
+--        and contype in ('p', 'u', 'f', 'c')
+--      order by conname;
+--
+--        revision_rounds_billable_price_check         c  CHECK ((is_billable AND price IS NOT NULL AND price > 0) OR (NOT is_billable AND price IS NULL))
+--        revision_rounds_content_item_id_fkey         f  FOREIGN KEY (content_item_id) REFERENCES content_items(id) ON DELETE CASCADE
+--        revision_rounds_denied_reason_check          c  CHECK (status <> 'denied' OR resolution_note IS NOT NULL)
+--        revision_rounds_invoice_id_fkey              f  FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL
+--        revision_rounds_item_round_unique            u  UNIQUE (content_item_id, round_number)
+--        revision_rounds_pkey                         p  PRIMARY KEY (id)
+--        revision_rounds_resolution_note_scope_check  c  CHECK (resolution_note IS NULL OR status = ANY (ARRAY['addressed', 'denied']))
+--        revision_rounds_status_check                 c  CHECK (status = ANY (ARRAY['open', 'addressed', 'denied']))
+--
+--    Postgres reprints the CHECK definitions with its own parentheses and
+--    ::text / ::numeric casts (`price > (0)::numeric`); the shape is what
+--    matters. The contype filter drops the not-null rows Postgres 18 adds to
+--    pg_constraint (contype 'n'); on 15/17 it changes nothing. The two
+--    indexes on this table (revision_rounds_content_item_id_idx and the
+--    partial revision_rounds_unbilled_idx) are not constraints and do not
+--    appear here. A 9th row, or a 7th, on either table is the finding — say
+--    which.
+--
+-- 5. Still no charge anywhere — nothing in this file writes one (EXPECT ZERO,
+--    the same query as the pre-flight):
+--
+--      select count(*)
+--      from revision_rounds
+--      where is_billable or price is not null;
+-- ============================================================================

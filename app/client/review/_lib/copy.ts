@@ -277,13 +277,36 @@ export const MOMENTS_NO_TIMECODE =
 export const MOMENTS_PLACEHOLDER = "What about this moment?";
 
 /**
- * Screen 3, "Footer helper (round 1)". ROUND 1 ONLY: on round 2+ before
- * Phase 8 nothing renders in its place (deck note, 2026-09-02) — the sentence
- * is about the included round, and no pre-consent round-2 string exists.
- * Screen 9's round-2+ footer takes the slot in Phase 8.
+ * Screen 3, "Footer helper (round 1)". Round 1 only. The same slot on round
+ * 2+ is filled by exactly one of the three exports below, chosen by the
+ * post's billing state (`RoundBilling`, lib/revisionBilling.ts).
  */
 export const FOOTER_HELPER_ROUND_1 =
   "One round of changes is included with your month.";
+
+/**
+ * Screen 3, "Footer helper (round 2+, included)" (deck row added 2026-09-04):
+ * a round beyond round 1 that carries no charge — billing is off for the
+ * cycle, or the round is within the included count. No dialog amount either.
+ */
+export const FOOTER_HELPER_INCLUDED = "This round of changes is included.";
+
+/**
+ * Screen 3, "Footer helper (round 2+, per-round covered)" (deck row added
+ * 2026-09-04). per_round billing only: another post already opened this
+ * round's charge, so this post sends free. Round number is live.
+ */
+export function footerHelperCovered(round: number): string {
+  return `Already covered by round ${round} — no additional charge for this post.`;
+}
+
+/**
+ * Screen 9, "Form footer, round 2+" — the charge state. `amountLabel` is the
+ * deck's amount shape ("$75", cents only when present — `formatChargeAmount`).
+ */
+export function footerHelperCharge(round: number, amountLabel: string): string {
+  return `This is round ${round} — ${amountLabel}, added to your next invoice.`;
+}
 
 /** Screen 3, "Send button". Also Screen 4's confirm label. */
 export const SEND_BUTTON = "Send to Kelsey";
@@ -310,15 +333,69 @@ export const SEND_DIALOG_FINALITY = {
 } as const;
 
 /**
- * Screen 4, "Body, line 3" — the round-1 framing. ROUND 1 ONLY: not rendered
- * on round 2+ before Phase 8 (deck note, 2026-09-02); the dialog ends at the
- * finality line. Screen 9's amount row replaces it in Phase 8.
+ * Screen 4, "Body, line 3" — the round-1 framing. Round 1 only; the included
+ * round-2+ dialog uses the line below, and a charged or covered round is
+ * Screen 9 instead.
  */
 export const SEND_DIALOG_LINE_3 =
   "This is part of your included round of changes.";
 
+/**
+ * Screen 4, "Body, line 3 (round 2+, included)" (deck row added 2026-09-04).
+ * Everything else in the dialog is unchanged from round 1.
+ */
+export const SEND_DIALOG_LINE_3_INCLUDED =
+  "This round is included — there's no charge for it.";
+
 export const SEND_DIALOG_CANCEL = "Go back";
 // The confirm label is SEND_BUTTON — the deck uses "Send to Kelsey" for both.
+
+// --- Screen 9: round 2+ consent ----------------------------------------------
+//
+// The consent dialog is the client's proof they agreed to be billed (spec
+// §5.8). Its amount is the amount the commit writes — the server refuses the
+// send when the two would differ (`consentMatches`, _lib/consent.ts). Every
+// row below renders from `RoundBilling`; the included state is Screen 4.
+
+/** Screen 9, "Title" — both the charge and the per-round covered state. */
+export function consentDialogTitle(round: number): string {
+  return `Send round ${round} to Kelsey?`;
+}
+
+/** Screen 9, "Amount row". `amountLabel` is "$75" — the deck's amount shape. */
+export function consentAmountRow(round: number, amountLabel: string): string {
+  return `Round ${round} of changes — ${amountLabel}`;
+}
+
+/**
+ * Screen 9, "Amount sub-line", with the `included_rounds` > 1 row added
+ * 2026-09-04. At `included_rounds` 0 the second sentence has no true form
+ * (deck known gap), so only the first renders — an omission, not a rewording.
+ */
+export function consentSubLine(includedRounds: number): string {
+  const lead = "Added to your next invoice — nothing is charged today.";
+  if (includedRounds === 1) {
+    return `${lead} Your first round was included with your month.`;
+  }
+  if (includedRounds > 1) {
+    return `${lead} Your first ${includedRounds} rounds were included with your month.`;
+  }
+  return lead;
+}
+
+/** Screen 9, "Confirm" — the price repeats on the button so consent is unmissable. */
+export function consentConfirmLabel(amountLabel: string): string {
+  return `Send · ${amountLabel}`;
+}
+
+/**
+ * Screen 9, "Sub-line (per-round covered)" (deck row added 2026-09-04). Takes
+ * the amount row's and sub-line's place; the confirm is Screen 4's
+ * SEND_BUTTON, with no price because there is none.
+ */
+export function coveredSubLine(round: number): string {
+  return `Round ${round} is already on your next invoice — there's no additional charge for this post.`;
+}
 
 /**
  * Screen 4, the moments summary chip — "2 notes on moments", singular row
@@ -409,12 +486,22 @@ export const UPDATED_BODY =
  */
 export const UPDATED_NOTE_LABEL = "A note from Kelsey";
 
-// Screen 5, "Updated — small print" ("Your included round has been used.
-// Another round of changes has a charge — you'll always see the amount before
-// anything is sent.") is HELD until Phase 8 (deck note, 2026-09-02) and
-// deliberately has NO export here: before the consent dialog exists a round-2+
-// request carries no charge, so the sentence would be untrue in front of the
-// client. Phase 8 adds it alongside Screen 9.
+/**
+ * Screen 5, "Updated — small print". Held from 2026-09-02 through Phase 7,
+ * turned on in Phase 8 as written. Renders only when the round the client
+ * would open from this post carries a charge — the state that shows Screen
+ * 9. When the round is included, NOTHING renders here, as in Phase 6.
+ */
+export const UPDATED_SMALL_PRINT_CHARGE =
+  "Your included round has been used. Another round of changes has a charge — you'll always see the amount before anything is sent.";
+
+/**
+ * Screen 5, "Updated — small print, per-round covered" (deck row added
+ * 2026-09-04): another post already opened this round's charge, so the held
+ * row's promise of an amount would be false on this post.
+ */
+export const UPDATED_SMALL_PRINT_COVERED =
+  "Your included round has been used. This round of changes is already on your next invoice.";
 
 /** Screen 5, "Auto — title". */
 export const AUTO_TITLE = "Approved automatically";
@@ -617,6 +704,17 @@ export const APPROVE_FAILED =
  */
 export const SEND_FAILED =
   "That didn't go through. Give it another try in a moment — nothing was sent to Kelsey.";
+
+/**
+ * Errors, "Send failed, terms changed" (deck row added 2026-09-04). The one
+ * refusal that gets its own line: the server computed a charge that differs
+ * from what the dialog showed, because Kelsey edited the cycle's price,
+ * included rounds, or billing mode in between. Nothing was written. The
+ * plain send-failed line would be wrong here — a retry from the same stale
+ * page fails identically — so this one says why and what to do.
+ */
+export const SEND_FAILED_TERMS_CHANGED =
+  "Kelsey updated this month's revision terms while you were writing. Refresh the page and you'll see the current terms before you send.";
 
 /**
  * Errors, "Video won't play" and "Photo won't load", split at the link.
