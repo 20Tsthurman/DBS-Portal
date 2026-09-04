@@ -61,6 +61,17 @@ export type ExternalEventStatus = "confirmed" | "cancelled";
  * two in sync by hand, there is no codegen.
  */
 export type ContentCycleStatus = "drafting" | "in_review" | "locked";
+/**
+ * Who closed a month: the deadline sweep or Kelsey's Lock now. Mirrors
+ * `content_cycles_locked_by_check`. Added in migration 018.
+ */
+export type ContentCycleLockedBy = "auto" | "owner";
+/**
+ * The literal the lock writes as `content_items.approved_by` and
+ * `content_cycles.locked_by` — one word for one actor across both tables.
+ * Compare against this, never against a retyped 'auto'.
+ */
+export const CONTENT_AUTO_ACTOR = "auto";
 export type ContentItemStatus =
   | "draft"
   | "in_review"
@@ -431,6 +442,22 @@ export interface ContentCycleRecord {
   /** Snapshot of the round-2+ price at cycle creation. NULL = not set. */
   extra_round_price: number | null;
   status: ContentCycleStatus;
+  /**
+   * The instant reviews closed to the client. NULL until the cycle locks, and
+   * never cleared — there is no unlock. For the deadline sweep this is the
+   * `revision_deadline` instant, not the run time (the client copy dates the
+   * close to the deadline day); for Lock now it is the moment Kelsey
+   * confirmed. Written in the same UPDATE that flips `status` to 'locked';
+   * `content_cycles_locked_record_check` refuses a locked row without it.
+   * Added in migration 018.
+   */
+  locked_at: string | null;
+  /**
+   * How the cycle locked — chooses the client's Screen 6 banner (Deadline vs
+   * Closed early). NULL until the cycle locks. 'auto' is the same literal the
+   * sweep writes to `content_items.approved_by`. Added in migration 018.
+   */
+  locked_by: ContentCycleLockedBy | null;
   created_at: string;
 }
 

@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  currentMonthKey,
   monthDayLabelForDateKey,
+  monthNameForMonthKey,
   weekdayDateLabelForDateKey,
 } from "@/app/owner/calendar/_lib/timezone";
 import { dateKeyInTimezone } from "@/lib/date";
 import { requireCurrentClient } from "@/lib/currentClient";
 import { ApprovedState } from "../_components/ApprovedState";
+import { AutoApprovedState } from "../_components/AutoApprovedState";
 import { DeclinedState } from "../_components/DeclinedState";
 import { PostActions } from "../_components/PostActions";
 import { PostMedia } from "../_components/PostMedia";
@@ -23,6 +26,7 @@ import {
   needsClientReview,
   platformLabel,
   shortWeekdayDateLabelForDateKey,
+  wasAutoApproved,
 } from "../_lib/format";
 import {
   fetchMyReviewItems,
@@ -55,9 +59,20 @@ export default async function ClientReviewItemPage({ params }: PageProps) {
 
   // Ownership AND release state in one call. A client owns their unreleased
   // posts too, so this returning null covers a bookmarked URL from a month
-  // Kelsey has since pulled back.
-  const cycle = await fetchMyReviewableCycleForItem(client.id, itemId);
+  // Kelsey has since pulled back — and one from a locked month that has
+  // already dropped to the recap card.
+  const cycle = await fetchMyReviewableCycleForItem(
+    client.id,
+    itemId,
+    currentMonthKey()
+  );
   if (!cycle) notFound();
+
+  // A locked month is read-only: no Approve, no Request changes, whatever
+  // the item's own status says. The actions refuse on their own (they check
+  // the cycle), so this is the page agreeing with them rather than offering
+  // a button that fails.
+  const openForReview = cycle.status === "in_review";
 
   // The whole queue, because the page needs the post's place in it: "Post 5 of
   // 12" and the "Next post" link are both positional. Twenty-odd rows, already
@@ -75,7 +90,7 @@ export default async function ClientReviewItemPage({ params }: PageProps) {
   // 2 or later. Its latest submitted round is the one Kelsey accepted, and
   // Screen 5's Updated state reads that round's note.
   const cameBackUpdated =
-    needsClientReview(item.status) && item.current_round >= 2;
+    openForReview && needsClientReview(item.status) && item.current_round >= 2;
 
   // The latest submitted round, fetched only when the status says one
   // exists. On a sent post it is the receipt (With Kelsey) or the answer
@@ -99,6 +114,15 @@ export default async function ClientReviewItemPage({ params }: PageProps) {
   const scheduledKey = dateKeyInTimezone(new Date(item.scheduled_for));
   const goesOutWeekday = weekdayDateLabelForDateKey(scheduledKey);
   const goesOutBare = monthDayLabelForDateKey(scheduledKey);
+
+  // Screen 5's auto state dates the close to the cycle's `locked_at`; the
+  // item's own `approved_at` is the same instant for anything the lock
+  // wrote, and stands in only against a row the lock record predates.
+  const autoApproved = wasAutoApproved(item);
+  const endedAt = cycle.locked_at ?? item.approved_at;
+  const endedLabel = endedAt
+    ? weekdayDateLabelForDateKey(dateKeyInTimezone(new Date(endedAt)))
+    : null;
 
   const next = items[index + 1];
   const nextHref = next ? `/client/review/${next.id}` : null;
@@ -147,7 +171,7 @@ export default async function ClientReviewItemPage({ params }: PageProps) {
             />
           )}
 
-          {needsClientReview(item.status) && (
+          {openForReview && needsClientReview(item.status) && (
             <PostActions
               itemId={item.id}
               goesOutLabel={goesOutWeekday}
@@ -192,7 +216,19 @@ export default async function ClientReviewItemPage({ params }: PageProps) {
               />
             )}
 
-          {(item.status === "approved" || item.status === "published") &&
+          {/* Two approved receipts (Screen 5): the client's own, dated to
+              their press, and the lock's ("Auto"), dated to the close and
+              explaining the rule. `approved_by` tells them apart. */}
+          {autoApproved && endedLabel && (
+            <AutoApprovedState
+              monthName={monthNameForMonthKey(cycle.month.slice(0, 7))}
+              endedLabel={endedLabel}
+              goesOutLabel={goesOutBare}
+            />
+          )}
+
+          {!autoApproved &&
+            (item.status === "approved" || item.status === "published") &&
             item.approved_at && (
               <ApprovedState
                 approvedLabel={weekdayDateLabelForDateKey(

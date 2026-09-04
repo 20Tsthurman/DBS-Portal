@@ -5,12 +5,18 @@ import { dateKeyInTimezone } from "@/lib/date";
 import { weekdayDateLabelForDateKey } from "@/app/owner/calendar/_lib/timezone";
 import { PostThumb } from "./PostThumb";
 import { RoundChip } from "./RoundChip";
-import { ROW_ACTION_REVIEW, ROW_ACTION_VIEW } from "../_lib/copy";
+import {
+  ROW_ACTION_REVIEW,
+  ROW_ACTION_VIEW,
+  autoApprovedMeta,
+} from "../_lib/copy";
 import {
   needsClientReview,
   platformLabel,
   postLabel,
+  shortMonthDayLabelForDateKey,
   statusPillFor,
+  wasAutoApproved,
 } from "../_lib/format";
 import type { ReviewItem } from "../_lib/queries";
 
@@ -33,6 +39,16 @@ export function QueueRow({
   const pill = statusPillFor(item.status, requestDenied);
   const needsReview = needsClientReview(item.status);
   const href = `/client/review/${item.id}`;
+  // "Approved automatically · Sept 25" under the pill (deck, "Status pills")
+  // on a post the lock approved, dated to when it did.
+  const autoMeta =
+    wasAutoApproved(item) && item.approved_at
+      ? autoApprovedMeta(
+          shortMonthDayLabelForDateKey(
+            dateKeyInTimezone(new Date(item.approved_at))
+          )
+        )
+      : null;
 
   return (
     <tr>
@@ -57,6 +73,7 @@ export function QueueRow({
           <StatusPill tone={pill.tone}>{pill.label}</StatusPill>
           <RoundChip round={item.current_round} />
         </div>
+        {autoMeta && <p style={autoMetaStyle}>{autoMeta}</p>}
       </td>
       <td style={{ textAlign: "right" }}>
         <Link href={href} style={needsReview ? primaryLinkStyle : linkStyle}>
@@ -66,6 +83,13 @@ export function QueueRow({
     </tr>
   );
 }
+
+const autoMetaStyle: CSSProperties = {
+  margin: "4px 0 0",
+  fontSize: 12,
+  color: "var(--text-muted)",
+  whiteSpace: "nowrap",
+};
 
 const postCellStyle: CSSProperties = {
   minWidth: 0,

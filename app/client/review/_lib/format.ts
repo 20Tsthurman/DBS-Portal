@@ -2,10 +2,12 @@ import {
   shortDateLabelForDateKey,
   weekdayForDateKey,
 } from "@/app/owner/calendar/_lib/timezone";
-import type {
-  ContentItemStatus,
-  Platform,
-  PostFormat,
+import {
+  CONTENT_AUTO_ACTOR,
+  type ContentItemRecord,
+  type ContentItemStatus,
+  type Platform,
+  type PostFormat,
 } from "@/lib/supabase";
 import {
   PILL_APPROVED,
@@ -86,10 +88,10 @@ export interface StatusPillSpec {
  * 'changes_requested' and the pill derives from the item's LATEST submitted
  * round being 'denied'. Callers get that from `fetchMyDeniedItemIds`.
  *
- * One deck row still has no representation and is deliberately absent: the
- * auto-approved row meta (`approved_by = 'auto'`, written by the Phase 7
- * sweep). It is unreachable, and its "Sept 25" needs a fourth date format
- * that belongs with the phase producing the data.
+ * The auto-approved row meta ("Approved automatically · Sept 25") is not a
+ * fifth pill: the pill stays "Approved" and the meta renders under it, from
+ * `wasAutoApproved` and `shortMonthDayLabelForDateKey` below — an approved
+ * post is approved, and who approved it is the smaller fact.
  *
  * 'draft' never reaches this function — the client query filters it out — but
  * it falls through to the neutral pill rather than throwing, because a status
@@ -155,6 +157,49 @@ const WEEKDAY_LONG = [
 export function shortWeekdayDateLabelForDateKey(dateKey: string): string {
   const weekday = WEEKDAY_LONG[weekdayForDateKey(dateKey)] ?? "";
   return `${weekday}, ${shortDateLabelForDateKey(dateKey)}`;
+}
+
+/**
+ * The deck's month abbreviations for the auto-approved row meta ("Sept 25",
+ * "Status pills"). "Sept" is not `timezone.ts`'s "Sep", so this is a fourth
+ * date shape with its own table (decided 2026-09-04: the deck wrote Sept and
+ * the deck governs). AP style without the periods — the one common
+ * convention that yields "Sept": months of five letters or fewer are spelled
+ * out, the rest cut to three, September to four.
+ */
+const MONTH_AP = [
+  "Jan",
+  "Feb",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "Aug",
+  "Sept",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/** "Sept 25" — the auto-approved row meta's date. No weekday, no year. */
+export function shortMonthDayLabelForDateKey(dateKey: string): string {
+  const [, m, d] = dateKey.split("-").map(Number);
+  return `${MONTH_AP[m - 1] ?? ""} ${d}`;
+}
+
+/**
+ * Approved by the lock rather than by the client. The row meta and Screen
+ * 5's auto state both key on this — and on nothing else, because
+ * `approved_by` is free text and the lock is its only writer of 'auto'.
+ */
+export function wasAutoApproved(
+  item: Pick<ContentItemRecord, "status" | "approved_by">
+): boolean {
+  return (
+    (item.status === "approved" || item.status === "published") &&
+    item.approved_by === CONTENT_AUTO_ACTOR
+  );
 }
 
 /**

@@ -12,7 +12,10 @@ import {
   helperStyle,
   labelStyle,
 } from "@/app/owner/clients/_components/formStyles";
-import { formatMonthLabel } from "@/app/owner/calendar/_lib/timezone";
+import {
+  addDaysToDateKey,
+  formatMonthLabel,
+} from "@/app/owner/calendar/_lib/timezone";
 import { dateKeyInTimezone } from "@/lib/date";
 import {
   createContentCycleAction,
@@ -39,6 +42,20 @@ interface FormValues {
 const DEFAULT_INCLUDED_ROUNDS = "1";
 
 /**
+ * How far out a NEW cycle's review deadline is pre-filled: three days from
+ * today (decided 2026-09-02). A DEFAULT, NEVER A CONSTRAINT — the field has
+ * no `min`, the actions check only the date's shape, and editing an existing
+ * cycle seeds from its stored value, so this never touches a month already
+ * created. Computed at open time (the re-seed effect below), not at module
+ * load, so a panel opened tomorrow does not offer yesterday's "three days".
+ */
+const DEFAULT_DEADLINE_DAYS = 3;
+
+function defaultDeadlineInputValue(): string {
+  return addDaysToDateKey(dateKeyInTimezone(new Date()), DEFAULT_DEADLINE_DAYS);
+}
+
+/**
  * The stored instant -> the `<input type="date">` value.
  *
  * Read through PORTAL_TIMEZONE, not off the raw Date. The deadline is stored
@@ -57,7 +74,7 @@ function valuesFor(cycle: CycleWithClient | null): FormValues {
     return {
       includedRounds: DEFAULT_INCLUDED_ROUNDS,
       extraRoundPrice: "",
-      revisionDeadline: "",
+      revisionDeadline: defaultDeadlineInputValue(),
     };
   }
   return {
@@ -178,8 +195,9 @@ export function CycleFormPanel({
               style={fieldStyle}
             />
             <p style={helperStyle}>
-              Reviews close at the end of this day. Required before the month
-              can be released. Changing it later is a single edit — it does not
+              Reviews close at the end of this day. A new cycle starts three
+              days out — change it freely. Required before the month can be
+              released. Changing it later is a single edit — it does not
               re-release the month or affect anything the client has already
               done.
             </p>

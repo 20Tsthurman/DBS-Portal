@@ -6,8 +6,10 @@ export const dynamic = "force-dynamic";
 /**
  * Daily Google Calendar sync. Same Bearer CRON_SECRET contract as
  * /api/cron/unread-reminders (Vercel cron sends the header; the schedule
- * lives in vercel.json — Hobby caps crons at daily, and the sync-on-view
- * trigger on /owner/calendar carries intraday freshness).
+ * lives in vercel.json — Vercel Hobby allows 100 cron jobs per project, each
+ * at most once a day with ±59-minute precision (docs updated 2026-07-15), so
+ * daily is the floor here and the sync-on-view trigger on /owner/calendar
+ * carries intraday freshness).
  */
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");

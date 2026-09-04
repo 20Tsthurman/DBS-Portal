@@ -39,24 +39,48 @@ export interface ReviewItem extends ContentItemRecord {
 const CLIENT_HIDDEN_ITEM_STATUS = "draft";
 
 /**
- * The one cycle currently out for review, or null.
+ * Which cycles the client can open: THE VISIBILITY SWITCH, in one place.
  *
- * `status = 'in_review'` IS the visibility switch — a 'drafting' cycle is
- * Kelsey still building (or a month she unreleased), and a 'locked' one is
- * closed. Ordered newest-first and capped at one: the schema allows a client
- * to have several months released at once, and the queue is a single-month
- * surface, so the most recent month wins rather than the page rendering an
- * ambiguous merge.
+ *   'in_review'  — out for review; the queue with its actions.
+ *   'locked'     — closed, and shown READ-ONLY (Screen 6's Deadline or
+ *                  Closed-early banner over the same list) for as long as its
+ *                  content month is the current Central month or later. Once
+ *                  that month is over it drops out here and the queue page
+ *                  falls through to Screen 7's recap card instead (decided
+ *                  2026-09-04). Reviews close September 25, the list stays
+ *                  up through October with its auto-approved rows, and on
+ *                  November 1 the client sees "October is all set" until
+ *                  November is released.
+ *   'drafting'   — never: Kelsey still building, or a month she unreleased.
+ *
+ * PostgREST filter syntax, for `.or()`. `currentMonthKey` is "YYYY-MM" in
+ * PORTAL_TIMEZONE and `content_cycles.month` is always the first of the
+ * month, so `>= YYYY-MM-01` is exactly "this month or later".
+ */
+function visibleCycleFilter(currentMonthKey: string): string {
+  return `status.eq.in_review,and(status.eq.locked,month.gte.${currentMonthKey}-01)`;
+}
+
+/**
+ * The one cycle the queue shows, or null.
+ *
+ * `visibleCycleFilter` is the switch: out for review, or locked and still
+ * this month. Ordered newest-first and capped at one: the schema allows a
+ * client to have several months released at once, and the queue is a
+ * single-month surface, so the most recent month wins rather than the page
+ * rendering an ambiguous merge — a November in review outranks a locked
+ * October, which is what a client expects to land on.
  */
 export async function fetchMyActiveCycle(
-  clientId: string
+  clientId: string,
+  currentMonthKey: string
 ): Promise<ContentCycleRecord | null> {
   const supabase = getSupabaseServiceClient();
   const { data, error } = await supabase
     .from("content_cycles")
     .select("*")
     .eq("client_id", clientId)
-    .eq("status", "in_review")
+    .or(visibleCycleFilter(currentMonthKey))
     .order("month", { ascending: false })
     .limit(1);
   if (error) throw new Error(error.message);
@@ -68,11 +92,13 @@ export async function fetchMyActiveCycle(
  * The most recently closed month, for the between-cycles recap card
  * (spec §5.9, copy deck Screen 7).
  *
- * 'locked' is written by the Phase 7 deadline sweep and by Kelsey's manual
- * lock, neither of which exists yet — so this correctly returns null for now
- * and the page falls through to the "nothing released yet" state. The recap
- * branch is built rather than deferred because it is the same query and the
- * alternative is a client landing on an empty page the moment Phase 7 ships.
+ * 'locked' is written by the deadline sweep and by Kelsey's Lock now (both
+ * Phase 7, through `lockCycle`). The card's "Reviews closed" date is the
+ * row's `locked_at`, not its deadline — the two differ on a manual lock.
+ *
+ * Not month-bounded, unlike `fetchMyActiveCycle`: the recap points at the
+ * last finished month however long ago it closed, and the queue page only
+ * asks for it once the visibility switch has returned nothing.
  */
 export async function fetchMyLastClosedCycle(
   clientId: string
@@ -127,12 +153,15 @@ export async function fetchMyReviewItems(
 
 /**
  * The cycle one of the client's items belongs to, but ONLY when that cycle is
- * currently out for review. Null otherwise.
+ * one the queue would show them (`visibleCycleFilter`: out for review, or
+ * locked and still this month). Null otherwise.
  *
  * Two gates, and both matter. `client_id` on the item read is ownership; the
  * cycle status is release state. A client owns their `drafting` items too, so
  * ownership alone would let a bookmarked URL open a post from a month Kelsey
- * is still building or has unreleased.
+ * is still building or has unreleased. The same month bound as the queue,
+ * so a bookmarked post from a locked month that has already dropped to the
+ * recap card 404s rather than opening a page the list no longer leads to.
  *
  * Null is returned identically for every failure — no such item, someone
  * else's item, an unreleased cycle — so a caller can only ever answer "not
@@ -140,7 +169,8 @@ export async function fetchMyReviewItems(
  */
 export async function fetchMyReviewableCycleForItem(
   clientId: string,
-  itemId: string
+  itemId: string,
+  currentMonthKey: string
 ): Promise<ContentCycleRecord | null> {
   if (!itemId) return null;
   const supabase = getSupabaseServiceClient();
@@ -160,7 +190,7 @@ export async function fetchMyReviewableCycleForItem(
     .select("*")
     .eq("id", item.cycle_id)
     .eq("client_id", clientId)
-    .eq("status", "in_review")
+    .or(visibleCycleFilter(currentMonthKey))
     .maybeSingle();
   if (cycleError) throw new Error(cycleError.message);
   return (cycleData as ContentCycleRecord | null) ?? null;

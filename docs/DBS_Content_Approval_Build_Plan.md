@@ -49,7 +49,7 @@ Calendar work sits at Phase 3 so Kelsey's building surface is finished before Ph
 | 4 | Release + client queue + Approve | 4 | Medium | **Yes** | |
 | 5 | Request-changes form + rounds | 3 | Medium | Yes |
 | 6 | Accept / deny / replace / re-release | 4 | Medium | Yes |
-| 7 | Deadline cron + auto-approve + lock | 2 | Low | Yes |
+| 7 | Deadline cron + auto-approve + lock | 2 | Low | Yes | **Complete** |
 | 8 | Billing accrual + invoice injection | 3 | **High** | Yes |
 
 Phases 0–3 ship to production invisibly. Nothing reaches a client until Phase 4. Phases 0–3, the polish pass, and the design pass are done; Phase 4 is the next build step.
@@ -560,6 +560,8 @@ otherwise; this is not the test infrastructure "Not in this plan" declines.
 
 ## Phase 7 — Deadline cron + auto-approve + lock
 
+**Status: complete.** Built 2026-09-04 in three approved steps (read-only audit; cron route and sweep; manual lock, the 3-day default and the client's closed-month states). Migration 018 applied and verified against prod 2026-09-04. Awaiting commit and deploy — the `vercel.json` entry takes effect on the next production deploy. The decisions below were settled in the Step 1 review; "What shipped" under slice 7.2 records the result.
+
 The safest new code in the feature. Pure pattern copy.
 
 ### Slice 7.1 — Cron route
@@ -567,16 +569,79 @@ The safest new code in the feature. Pure pattern copy.
 
 One new entry in `vercel.json` alongside the two existing daily jobs. `CRON_SECRET` already exists; Vercel injects the header automatically.
 
-Sweep: cycles past `revision_deadline` still in `in_review` → untouched items flip to approved with `approved_by = 'auto'`, cycle → `locked`.
+Sweep (settled 2026-09-02, Step 1 review): cycles at `in_review` whose `revision_deadline` is non-null and at or before `now()`. Inside each, **only items at `in_review` flip** to `approved` with `approved_by = 'auto'` and `approved_at` = the deadline instant, not the run time. Every `changes_requested` item is left alone in all three round states — denied is resolved (the "Kept as planned" derivation survives untouched), open and addressed are with Kelsey, and the Screen 5 auto copy ("this post hadn't been reviewed") would be false for either. Drafts are untouched. The cycle goes to `locked` regardless.
 
-Schedules are UTC, but `revision_deadline` is `timestamptz` compared against `now()`, so the sweep is correct regardless of run hour. The only tuning decision is how soon after a Central-time deadline the lock lands. **Unverified:** Vercel Hobby-plan cron may only guarantee daily granularity, which would rule out an hourly sweep without a plan change.
+Two conditional writes per cycle, **items first, then cycle**, each guarded on the status just read — release's ordering, for release's reason: a crash between them leaves approved items in an open cycle, which the next run completes; the reverse would strand `in_review` items in a locked cycle no future run selects. Cycles are processed independently; the summary reports locked, auto-approved, raced, and errored counts. The gap between the deadline and the sweep is left open on purpose: client actions check cycle status, not the deadline, so an approval in the window is what the sweep would do anyway, and a request becomes an open round the sweep leaves alone.
 
-**Idempotency matters** — the sweep must be safe if it runs while Kelsey is mid-edit.
+**Migration 018** (`018_cycle_lock_record.sql`) adds `content_cycles.locked_at` and `locked_by` (`'auto' | 'owner'`) with three CHECKs. The Screen 6 banner chooses Deadline vs Closed-early from `locked_by`; the Screen 7 recap date and the Screen 5 auto-state date read `locked_at`, not `revision_deadline`, which is wrong for an early lock.
+
+Schedules are UTC, but `revision_deadline` is `timestamptz` compared against `now()`, so the sweep is correct regardless of run hour. **Verified against Vercel's docs (updated 2026-07-15):** Hobby allows 100 cron jobs per project, each at most once a day with ±59-minute precision — not the two-job cap the google-sync comment once assumed. Schedule **`0 7 * * *`**: 2am CDT / 1am CST, after the 23:59 Central deadline in both, so the lock lands one to three hours after the deadline. One hour earlier would put the CST floor at one minute, and a run that fires before the deadline costs a full day.
+
+**Idempotency matters** — the sweep must be safe if it runs while Kelsey is mid-edit. Item edits write caption, date, platform; accept and deny write rounds and assets; the sweep writes item status and cycle status only. Re-release is the only other writer of item status, and its gate requires a future deadline while the sweep requires a past one.
+
+**Client surface after lock:** a locked cycle renders the Screen 6 read-only queue (banner in place of the count line, rows with their pills, no deadline card) while its content month is the current Central month or later, then yields to Screen 7's recap. `fetchMyActiveCycle` and `fetchMyReviewableCycleForItem` widen to admit `locked`; client actions stay refused on it. The deck's "Approved automatically · Sept 25" row meta is a new date format ("Sept", not the existing "Sep"); it lives in `app/client/review/_lib/format.ts` with a local month table, per that module's precedent.
 
 ### Slice 7.2 — Manual lock
-Kelsey's Lock-now override (spec §4.6), for when a client confirms they've finished early.
+Kelsey's Lock-now override (spec §4.6), for when a client confirms they've finished early. Behind a `ConfirmDialog` — irreversible, and it closes the client out. Calls the sweep helper with `locked_by = 'owner'` and `locked_at = now()`. **Lock now stamps `approved_by = 'auto'` on the posts Kelsey closed manually** (approved 2026-09-04), so the client's row meta reads "Approved automatically" dated to the lock. Accepted as honest — the client did not approve them — and the Screen 6 banner already distinguishes the two paths via `locked_by`. Leaving them at `in_review` inside a locked cycle would strand them permanently.
 
-**Blocked on the default deadline length** — needed for the cycle-creation default, not for the sweep logic.
+**Default deadline: 3 days from cycle creation** (decided 2026-09-02), pre-filled in the cycle editor via `valuesFor(null)`, freely editable. A default, never a constraint — no `min` on the input, no server-side floor.
+
+What shipped, and the shape it took:
+
+- **Migration 018** (`supabase/migrations/018_cycle_lock_record.sql`) —
+  `content_cycles.locked_at` and `locked_by` (`'auto' | 'owner'`) with three
+  CHECKs: the actor set, `locked_by` requires `locked_at`, and a locked row
+  requires `locked_at`. Applied and verified against prod 2026-09-04 (seven
+  constraints on the table by conrelid, all validated). Types in
+  `lib/supabase.ts`, with `CONTENT_AUTO_ACTOR` as the one literal both tables
+  share.
+- **One lock, two callers** — `lockCycle` in
+  `app/owner/content/_lib/cycleLock.ts`, behind both the sweep and Lock now.
+  Items first (`in_review` → `approved`, `approved_by = 'auto'`,
+  `approved_at` = the lock instant), then the cycle (`locked` plus the
+  record), each write guarded on the status just read. Every
+  `changes_requested` item is left alone in all three round states — denied
+  is resolved, open and addressed are with Kelsey — and drafts are untouched.
+  `cycleLock.test.ts` pins the payloads, filters and order against a
+  recording fake.
+- **The sweep** — `runDeadlineSweep`, same file: cycles at `in_review` with a
+  non-null deadline at or before now, each locked independently, the
+  auto-approvals dated to the deadline instant rather than the run time. The
+  cycle write also requires the deadline still to be past, so an extension
+  landing in the window leaves the month open and counts as raced. No email
+  on lock.
+- **Cron route** — `app/api/cron/content-deadlines/route.ts`, the reminders
+  route's guard verbatim, one summary log line per run. `vercel.json` entry
+  `0 7 * * *`: 2am CDT / 1am CST, so the lock lands one to three hours after
+  the 23:59 Central deadline on Hobby's ±59-minute precision.
+- **Lock now** — `lockContentCycleAction`, on the board beside Unrelease for
+  an `in_review` month, behind a danger `ConfirmDialog`. `locked_by =
+  'owner'`, `locked_at` = the press; unreviewed posts flip with
+  `approved_by = 'auto'` (approved 2026-09-04). The cycle bar reads "Reviews
+  closed <date>", with "(locked early)" for a manual one.
+- **3-day default** — `CycleFormPanel` pre-fills a new cycle's deadline three
+  days from today in Central time, computed when the panel opens; no `min`,
+  no server floor; edit mode seeds from the stored value.
+- **Client reads** — `visibleCycleFilter` in
+  `app/client/review/_lib/queries.ts` is the visibility switch for both the
+  queue and the item page: `in_review`, or `locked` while the content month is
+  the current Central month or later. Past that, the queue falls to Screen 7's
+  recap, whose "Reviews closed" date now reads `locked_at`, and a bookmarked
+  post 404s. The client actions were untouched and still refuse anything but
+  `in_review`.
+- **Screen 6** — `CycleClosedBanner`: Deadline vs Closed-early chosen by
+  `locked_by`, over the read-only list with no instruction line, deadline
+  card or count line. `deadlineBody` in `copy.ts` is one function over the two
+  counts, every deck row asserted verbatim in `copy.test.ts`. Closed early's
+  action links to Messages.
+- **Screen 5 auto state** — `AutoApprovedState`, dated to `locked_at`, with
+  no Next post · All posts pair (the deck lists none). The row meta "Approved
+  automatically · Sept 25" renders under the Approved pill from
+  `wasAutoApproved` and the AP-style month table in `_lib/format.ts` (Jan,
+  Feb, March, April, May, June, July, Aug, Sept, Oct, Nov, Dec), pinned in
+  `format.test.ts`.
+- **Deck rows added 2026-09-04**: the one-approved-none-auto and none-counted
+  Deadline bodies, matching what `deadlineBody` renders.
 
 **Done when:** a test cycle with a past deadline auto-locks on the next cron run.
 
@@ -618,7 +683,7 @@ Then: `createInvoiceAction` / `updateInvoiceAction` (`_actions.ts:141–216, 230
 | Storage bucket | Phase 1 | **Decided** — new `content-assets` bucket |
 | Owner nav label | Phase 1 (route path) | **Decided** — "Content", route `/owner/content` |
 | Client nav label | — | **Decided** — "Review & Approve", route `/client/review` |
-| Default deadline length | **The client contract, signed before the first real release (end of Phase 4)**; also the Phase 7 cycle-creation default | Not decided |
+| Default deadline length | **The client contract, signed before the first real release (end of Phase 4)**; also the Phase 7 cycle-creation default | **Decided** — 3 days, editable per cycle |
 | `extra_round_price` | **The client contract, signed before the first real release (end of Phase 4)**; also Phase 8 | Not set |
 | Round-2+ framing and wording | Phase 8 | **Decided** — `docs/DBS_Content_Approval_Copy_Deck.md` (Screen 9) |
 | Contract language | **Before any client sees Phase 4** | Not done |
@@ -698,6 +763,50 @@ distinguishes a denied item from an untouched one.** Whether the sweep skips
 the item entirely or flips it while the client surface keeps deriving the
 declined rendering from the round is Phase 7's call to make — but the
 derivation rule above is already live on the client side and must survive it.
+
+**Settled in Phase 7 (2026-09-02): the sweep skips.** Only `in_review` items
+flip; every `changes_requested` item is left alone whatever its latest round
+says, so the derivation rule survives with no change on the client side.
+
+### A released cycle whose deadline was cleared never locks
+
+The cycle editor stays open on a released (`in_review`) cycle, and the edit
+path does not require `revision_deadline` — only the release gate does. Clear
+the deadline after release and the cycle stays `in_review` forever: the Phase
+7 sweep selects on `revision_deadline IS NOT NULL AND revision_deadline <=
+now()`, so it never matches, and nothing else closes the month. The client
+keeps an open review queue with no deadline card.
+
+**Not fixed in Phase 7.** Kelsey-side, and Lock now (slice 7.2) closes such a
+cycle by hand. The real fix is a status-aware required-field rule in the
+cycle editor — an edit to Phase 1's form, not to sweep logic.
+
+### Drafts added after release are stranded by the lock
+
+New post stays available on an `in_review` cycle, and a new item is born
+`draft`. The sweep flips only `in_review` items, so a draft rides through the
+lock untouched, and release refuses a `locked` cycle, so the draft can never
+reach the client. It is not lost — Kelsey can still see and edit it — but its
+only way out of the cycle is delete.
+
+**Not fixed in Phase 7.** The candidate fixes (hide New post once a cycle is
+released, or refuse the lock while drafts exist) both belong to the owner
+board, not the sweep, and the second would let a forgotten draft block the
+deadline.
+
+### A manually locked month explains its unreviewed posts as the plan's doing
+
+On a month Kelsey closed with Lock now, a post the client never reviewed
+flips to approved with `approved_by = 'auto'` (approved 2026-09-04), and its
+Screen 5 state is the deck's Auto body — "Reviews for October ended on
+Sunday, September 20, and this post hadn't been reviewed — so it was approved
+automatically, the way your content plan works." True of the mechanism, but
+it attributes an early close to the client's plan rather than to Kelsey.
+
+**Accepted for now.** The Screen 6 banner two lines up already says she
+closed reviews early, so the client has the context before they open the
+post. A Screen 5 early-close variant is the fix if it ever reads wrong in
+front of a real client; the deck has no such row today.
 
 ### Escape closes the ConfirmDialog and the SlidePanel together
 With a delete `ConfirmDialog` open on top of a `SlidePanel`, one Escape press

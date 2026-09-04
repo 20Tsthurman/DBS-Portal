@@ -20,7 +20,11 @@ export interface RecapSummary {
   /** "YYYY-MM" of the closed cycle. */
   monthKey: string;
   postCount: number;
-  /** The cycle's `revision_deadline`, or null if it somehow closed without one. */
+  /**
+   * The day reviews actually closed — the cycle's `locked_at` (migration
+   * 018), which is the deadline for a sweep close and the day Kelsey pressed
+   * Lock now for an early one. Null only against a row with neither.
+   */
   closedAt: string | null;
 }
 

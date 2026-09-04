@@ -160,9 +160,24 @@ because nothing is coming.*
 | Working — footer | Forgot something? Send Kelsey a message | Appears here only — locked posts don't repeat it |
 | Deadline — title | Your October content is set | |
 | Deadline — body | Reviews ended Friday, September 25. You approved 9 posts, and 3 you hadn't reviewed were approved automatically, the way your content plan works. Everything goes out on schedule. | |
+| Deadline — body, one approved + one auto | Reviews ended Friday, September 25. You approved 1 post, and 1 you hadn't reviewed was approved automatically, the way your content plan works. Everything goes out on schedule. | Added 2026-09-02, not on the canvas. Singular and plural forms of the mixed variant follow the same mechanical inflection as the rows added 2026-08-30 |
+| Deadline — body, none auto | Reviews ended Friday, September 25. You approved all 12 posts, and everything goes out on schedule. | Added 2026-09-02, not on the canvas. The client finished before the deadline; the sweep only locked |
+| Deadline — body, none approved | Reviews ended Friday, September 25. The 12 posts you hadn't reviewed were approved automatically, the way your content plan works. Everything goes out on schedule. | Added 2026-09-02, not on the canvas. The client never opened the month |
+| Deadline — body, none approved, one post | Reviews ended Friday, September 25. The post you hadn't reviewed was approved automatically, the way your content plan works. It goes out as planned. | Added 2026-09-02, not on the canvas |
+| Deadline — body, one approved, none auto | Reviews ended Friday, September 25. You approved your post, and it goes out as planned. | Added 2026-09-04, not on the canvas. Inflected the way the deck inflects its own singulars ("You approved your post", Screen 1; "It goes out as planned", the one-post row above) — "You approved all 1 posts" is broken software to this audience |
+| Deadline — body, none counted | Reviews ended Friday, September 25. Everything goes out on schedule. | Added 2026-09-04, not on the canvas. Every post still With Kelsey or kept as planned at the close — nothing for either count, so the two deck sentences that need none |
 | Closed early — title | Reviews are closed for October | |
 | Closed early — body | Kelsey closed reviews so your month can be scheduled on time. Everything you approved or sent notes on is in. | |
 | Closed early — action | Message Kelsey | |
+
+*Deadline body rule (added 2026-09-02): the canvas body and the four variants
+above are one sentence shape with two counts as inputs — build them from one
+function, not five hardcoded strings. "Approved" counts the posts the client
+approved; "hadn't reviewed" counts the posts the deadline approved
+automatically. Posts still With Kelsey at the deadline are counted by neither:
+the sentence is about what the client did and what the deadline did, and a
+post Kelsey still owes work on is neither. "Reviews ended" is the day reviews
+actually closed, which for a deadline close is the deadline day.*
 
 ## Screen 7 — No active cycle
 

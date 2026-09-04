@@ -17,6 +17,7 @@ import {
   deleteContentCycleAction,
   deleteContentItemAction,
   releaseContentCycleAction,
+  lockContentCycleAction,
   rereleaseContentCycleAction,
   unreleaseContentCycleAction,
 } from "../_actions";
@@ -104,6 +105,7 @@ export function ContentBoard({
   const [confirmRelease, setConfirmRelease] = useState(false);
   const [confirmUnrelease, setConfirmUnrelease] = useState(false);
   const [confirmRerelease, setConfirmRerelease] = useState(false);
+  const [confirmLock, setConfirmLock] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -189,8 +191,29 @@ export function ContentBoard({
     router.refresh();
   };
 
+  const handleConfirmLock = async () => {
+    if (!cycle) return;
+    setError(null);
+    setBusy(true);
+    const result = await lockContentCycleAction(cycle.id);
+    setBusy(false);
+    setConfirmLock(false);
+    if (!result.ok) {
+      setError(result.error ?? "Could not lock this month");
+      return;
+    }
+    router.refresh();
+  };
+
   const deadlineLabel = cycle?.revision_deadline
     ? fullDateLabelForDateKey(dateKeyInTimezone(new Date(cycle.revision_deadline)))
+    : null;
+  // The day reviews actually closed (migration 018) — the deadline for a
+  // sweep close, earlier for a Lock now. Shown in the deadline's slot once
+  // the month is locked, since "Reviews close <past date>" would be a lie
+  // about a month she closed by hand.
+  const lockedLabel = cycle?.locked_at
+    ? fullDateLabelForDateKey(dateKeyInTimezone(new Date(cycle.locked_at)))
     : null;
   const releaseBlockedReason =
     releaseGate && !releaseGate.ok ? releaseGate.reason : null;
@@ -232,9 +255,13 @@ export function ContentBoard({
                     : `Extra round $${cycle.extra_round_price.toFixed(2)}`}
                 </span>
                 <span>
-                  {deadlineLabel
-                    ? `Reviews close ${deadlineLabel}`
-                    : "No review deadline set"}
+                  {cycle.status === "locked" && lockedLabel
+                    ? `Reviews closed ${lockedLabel}${
+                        cycle.locked_by === "owner" ? " (locked early)" : ""
+                      }`
+                    : deadlineLabel
+                      ? `Reviews close ${deadlineLabel}`
+                      : "No review deadline set"}
                 </span>
               </div>
             ) : (
@@ -283,6 +310,21 @@ export function ContentBoard({
                     style={secondaryActionStyle}
                   >
                     Unrelease
+                  </button>
+                )}
+                {cycle.status === "in_review" && (
+                  // Lock now (spec §4.6) — the override for a client who has
+                  // said they are finished. A plain secondary control, not a
+                  // danger-coloured one: it destroys nothing, and the confirm
+                  // dialog carries the "can't be undone" weight. The sweep is
+                  // the primary mechanism; this is the exception.
+                  <button
+                    type="button"
+                    onClick={() => setConfirmLock(true)}
+                    disabled={busy}
+                    style={secondaryActionStyle}
+                  >
+                    Lock now
                   </button>
                 )}
                 <Button
@@ -490,6 +532,32 @@ export function ContentBoard({
         }
         confirmLabel="Re-release"
         variant="success"
+        busy={busy}
+      />
+
+      <ConfirmDialog
+        open={confirmLock}
+        onCancel={() => {
+          if (busy) return;
+          setConfirmLock(false);
+        }}
+        onConfirm={handleConfirmLock}
+        title="Lock this month now?"
+        body={
+          <>
+            Reviews close for {clientName || "this client"}&apos;s{" "}
+            {formatMonthLabel(monthKey)} right away.{" "}
+            <strong>
+              Anything they haven&apos;t reviewed is approved automatically
+            </strong>
+            , anything they sent notes on stays with you, and they can&apos;t
+            approve or request changes after this. This can&apos;t be undone —
+            there is no unlock. Use it when the client has told you they&apos;re
+            finished.
+          </>
+        }
+        confirmLabel="Lock now"
+        variant="danger"
         busy={busy}
       />
     </div>

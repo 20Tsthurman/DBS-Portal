@@ -416,6 +416,35 @@ export const UPDATED_NOTE_LABEL = "A note from Kelsey";
 // request carries no charge, so the sentence would be untrue in front of the
 // client. Phase 8 adds it alongside Screen 9.
 
+/** Screen 5, "Auto — title". */
+export const AUTO_TITLE = "Approved automatically";
+
+/**
+ * Screen 5, "Auto — body". `endedLabel` is "Friday, September 25" — the day
+ * reviews actually closed, read from the cycle's `locked_at`: the deadline
+ * day for the sweep, the day Kelsey pressed Lock now for a manual close
+ * (approved 2026-09-04: a post the client never reviewed is the lock's doing
+ * either way). `goesOutLabel` is bare ("October 27"): a plan, like the
+ * approved state's send date.
+ */
+export function autoBody(
+  monthName: string,
+  endedLabel: string,
+  goesOutLabel: string
+): string {
+  return `Reviews for ${monthName} ended on ${endedLabel}, and this post hadn't been reviewed — so it was approved automatically, the way your content plan works. It goes out ${goesOutLabel} as planned.`;
+}
+
+/**
+ * Screen 5, "Auto — footer", split at the link the way `WORKING_FOOTER` is.
+ * The deck lists no Next post · All posts pair for this state, so none
+ * renders; the page's back link is the way out.
+ */
+export const AUTO_FOOTER = {
+  beforeLink: "Questions? ",
+  linkText: "Send Kelsey a message",
+} as const;
+
 // --- Screen 6: cycle states ---------------------------------------------------
 
 /** Screen 6, "Working — title". */
@@ -442,6 +471,73 @@ export const WORKING_FOOTER = {
   linkText: "Send Kelsey a message",
 } as const;
 
+/** Screen 6, "Deadline — title". The month closed at its deadline. */
+export function deadlineTitle(monthName: string): string {
+  return `Your ${monthName} content is set`;
+}
+
+/**
+ * Screen 6, "Deadline — body": the canvas sentence and its four variants
+ * (added 2026-09-02) are ONE SHAPE WITH TWO COUNTS, built here rather than
+ * kept as five strings — the deck's rule for this row.
+ *
+ *   approvedCount  posts the client approved themselves
+ *   autoCount      posts the deadline approved for them (`approved_by = 'auto'`)
+ *
+ * Posts still With Kelsey at the deadline are counted by NEITHER: the
+ * sentence is about what the client did and what the deadline did, and a
+ * post Kelsey still owes work on is neither. Denied requests are likewise
+ * uncounted. `endedLabel` is the day reviews actually closed.
+ *
+ * Two branches were built ahead of their deck rows and got them 2026-09-04:
+ *   - one post, approved by the client, nothing auto: inflected the way the
+ *     deck inflects its own singulars ("You approved your post", Screen 1;
+ *     "It goes out as planned", the one-post auto row), because "You
+ *     approved all 1 posts" is broken software to this audience.
+ *   - nothing counted at all (every post with Kelsey or denied): the two
+ *     deck sentences that need no count.
+ */
+export function deadlineBody(input: {
+  endedLabel: string;
+  approvedCount: number;
+  autoCount: number;
+}): string {
+  const { endedLabel, approvedCount, autoCount } = input;
+  const lead = `Reviews ended ${endedLabel}.`;
+
+  if (approvedCount > 0 && autoCount > 0) {
+    const approved = approvedCount === 1 ? "1 post" : `${approvedCount} posts`;
+    const auto =
+      autoCount === 1
+        ? "1 you hadn't reviewed was"
+        : `${autoCount} you hadn't reviewed were`;
+    return `${lead} You approved ${approved}, and ${auto} approved automatically, the way your content plan works. Everything goes out on schedule.`;
+  }
+  if (approvedCount > 0) {
+    return approvedCount === 1
+      ? `${lead} You approved your post, and it goes out as planned.`
+      : `${lead} You approved all ${approvedCount} posts, and everything goes out on schedule.`;
+  }
+  if (autoCount > 0) {
+    return autoCount === 1
+      ? `${lead} The post you hadn't reviewed was approved automatically, the way your content plan works. It goes out as planned.`
+      : `${lead} The ${autoCount} posts you hadn't reviewed were approved automatically, the way your content plan works. Everything goes out on schedule.`;
+  }
+  return `${lead} Everything goes out on schedule.`;
+}
+
+/** Screen 6, "Closed early — title". Kelsey locked before the deadline. */
+export function closedEarlyTitle(monthName: string): string {
+  return `Reviews are closed for ${monthName}`;
+}
+
+/** Screen 6, "Closed early — body". No date in it, by the deck. */
+export const CLOSED_EARLY_BODY =
+  "Kelsey closed reviews so your month can be scheduled on time. Everything you approved or sent notes on is in.";
+
+/** Screen 6, "Closed early — action". A link to Messages. */
+export const CLOSED_EARLY_ACTION = "Message Kelsey";
+
 // --- Status pills ------------------------------------------------------------
 
 export const PILL_NEEDS_REVIEW = "Needs your review";
@@ -453,6 +549,15 @@ export const PILL_KEPT_AS_PLANNED = "Kept as planned";
 /** "Round 2" — the forest chip, shown from round 2 on. */
 export function roundChip(round: number): string {
   return `Round ${round}`;
+}
+
+/**
+ * "Approved automatically · Sept 25" — the row meta under the Approved pill
+ * on a post the lock approved. `dateLabel` is the deck's own date shape for
+ * this row (see `shortMonthDayLabelForDateKey`), dated to `approved_at`.
+ */
+export function autoApprovedMeta(dateLabel: string): string {
+  return `Approved automatically · ${dateLabel}`;
 }
 
 // --- Screen 7: no active cycle -----------------------------------------------
@@ -479,12 +584,14 @@ export function betweenMonthsBody(
 export const RECAP_EYEBROW = "Last month";
 
 /**
- * Recap meta. `closedLabel` is "September 25" — no weekday, no year.
+ * Recap meta. `closedLabel` is "September 25" — no weekday, no year — the
+ * day reviews actually closed (the cycle's `locked_at`; migration 018).
  *
  * A null label drops the whole "Reviews closed ..." clause rather than
- * printing it with a gap where the date goes. Only reachable if a cycle was
- * locked without a deadline, which the release gate makes very unlikely — but
- * "Reviews closed" trailing into nothing reads as broken software.
+ * printing it with a gap where the date goes. Only reachable against a locked
+ * row with neither a lock record nor a deadline, which 018's CHECKs rule out
+ * for anything written since — but "Reviews closed" trailing into nothing
+ * reads as broken software.
  */
 export function recapMeta(
   postCount: number,

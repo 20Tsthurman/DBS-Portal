@@ -1,10 +1,12 @@
 import {
+  currentMonthKey,
   formatMonthLabel,
   monthNameForMonthKey,
   weekdayDateLabelForDateKey,
 } from "@/app/owner/calendar/_lib/timezone";
 import { dateKeyInTimezone } from "@/lib/date";
 import { requireCurrentClient } from "@/lib/currentClient";
+import { CycleClosedBanner } from "./_components/CycleClosedBanner";
 import { DeadlineCard } from "./_components/DeadlineCard";
 import { NoCycleState, type RecapSummary } from "./_components/NoCycleState";
 import { QueueSummary } from "./_components/QueueSummary";
@@ -18,13 +20,13 @@ import {
   fetchMyLastClosedCycle,
   fetchMyReviewItems,
 } from "./_lib/queries";
-import { needsClientReview } from "./_lib/format";
+import { needsClientReview, wasAutoApproved } from "./_lib/format";
 import { buildReviewThumbUrls } from "./_lib/thumbs";
 
 export const dynamic = "force-dynamic";
 
 /**
- * The client's review queue (spec §5.2, copy deck Screens 1 and 7).
+ * The client's review queue (spec §5.2, copy deck Screens 1, 6 and 7).
  *
  * THE QUEUE IS RESUMABLE BY CONSTRUCTION. There is no progress table and no
  * cursor: "where they left off" is just which items are still 'in_review'.
@@ -35,24 +37,32 @@ export const dynamic = "force-dynamic";
  * There is no global submit and no approve-all, here or anywhere. Per-item
  * action is the mechanism the whole design rests on (spec §5.4).
  *
+ * THREE SHAPES, one query deciding between them (`fetchMyActiveCycle`):
+ * a month in review is Screen 1; a month that closed and is still this
+ * month is Screen 6, the same list read-only under a banner saying how it
+ * closed; and nothing visible is Screen 7, with the last closed month's
+ * recap card. The month boundary between 6 and 7 was decided 2026-09-04 and
+ * lives in the query, not here.
+ *
  * Server component end to end, no client JS: everything on this page is text
  * and links.
  */
 export default async function ClientReviewPage() {
   const client = await requireCurrentClient();
-  const cycle = await fetchMyActiveCycle(client.id);
+  const cycle = await fetchMyActiveCycle(client.id, currentMonthKey());
 
   if (!cycle) {
     // Nothing out for review. Either this client has never had a month
     // released, or the last one closed — the recap card is what separates
-    // "nothing yet" from "between months" (spec §5.9).
+    // "nothing yet" from "between months" (spec §5.9). Its date is the day
+    // reviews actually closed, which is not the deadline on an early lock.
     const closed = await fetchMyLastClosedCycle(client.id);
     let recap: RecapSummary | null = null;
     if (closed) {
       recap = {
         monthKey: closed.month.slice(0, 7),
         postCount: await countMyCycleItems(client.id, closed.id),
-        closedAt: closed.revision_deadline,
+        closedAt: closed.locked_at ?? closed.revision_deadline,
       };
     }
     return (
@@ -68,6 +78,44 @@ export default async function ClientReviewPage() {
   const items = await fetchMyReviewItems(client.id, cycle.id);
   const thumbUrls = await buildReviewThumbUrls(items);
   const deniedIds = await fetchMyDeniedItemIds(items.map((item) => item.id));
+
+  if (cycle.status === "locked") {
+    // Screen 6, closed. No instruction line, no deadline card, no count —
+    // there is nothing left for the client to do, and the banner says what
+    // happened instead. The list stays, pills and all, because a client
+    // still wants to see what is going out; every row's action reads View.
+    //
+    // The banner's two counts follow the deck's rule (2026-09-02): what the
+    // client approved and what the lock approved, and nothing else — a post
+    // still with Kelsey, or one she kept as planned, is neither.
+    const endedAt = cycle.locked_at ?? cycle.revision_deadline;
+    const endedLabel = endedAt
+      ? weekdayDateLabelForDateKey(dateKeyInTimezone(new Date(endedAt)))
+      : null;
+    const settled = items.filter(
+      (item) => item.status === "approved" || item.status === "published"
+    );
+    const autoCount = settled.filter(wasAutoApproved).length;
+    const approvedCount = settled.length - autoCount;
+
+    return (
+      <section>
+        <Header
+          eyebrow={formatMonthLabel(monthKey)}
+          title={queueTitle(monthName)}
+          instruction={false}
+        />
+        <CycleClosedBanner
+          lockedBy={cycle.locked_by}
+          monthName={monthName}
+          endedLabel={endedLabel}
+          approvedCount={approvedCount}
+          autoCount={autoCount}
+        />
+        <ReviewQueue items={items} thumbUrls={thumbUrls} deniedIds={deniedIds} />
+      </section>
+    );
+  }
 
   const remaining = items.filter((item) =>
     needsClientReview(item.status)
@@ -129,20 +177,23 @@ export default async function ClientReviewPage() {
 /**
  * The page heading. The no-cycle states carry their own title inside the
  * panel, so this renders the generic nav label there instead of naming a month
- * that does not exist.
+ * that does not exist. A closed month keeps its title and drops the
+ * instruction line — "approve it, or ask for changes" is not on offer.
  */
 function Header({
   eyebrow,
   title,
+  instruction = true,
 }: {
   eyebrow: string | null;
   title: string | null;
+  instruction?: boolean;
 }) {
   return (
     <header style={{ marginBottom: 24 }}>
       {eyebrow && <p className="eyebrow mb-3">{eyebrow}</p>}
       <h1 className="page-title">{title ?? NAV_LABEL}</h1>
-      {title && (
+      {title && instruction && (
         <p style={{ marginTop: 8, fontSize: 14, color: "var(--text-body)" }}>
           {QUEUE_INSTRUCTION}
         </p>

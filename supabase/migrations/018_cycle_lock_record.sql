@@ -1,0 +1,169 @@
+-- 018_cycle_lock_record.sql
+-- Content & Approval feature, Phase 7: deadline cron, auto-approve, manual
+-- lock. See docs/DBS_Content_Approval_Feature.md §3.9 and §4.6, and the
+-- Phase 7 section of docs/DBS_Content_Approval_Build_Plan.md.
+--
+-- PURELY ADDITIVE: two new nullable columns on content_cycles and three new
+-- CHECKs. No table is created or dropped, no existing column is modified, no
+-- data is written. Safe to run top-to-bottom in the Supabase SQL Editor, and
+-- safe to re-run.
+--
+-- Conventions match 015/016/017: text + CHECK (no PG enums), no triggers and
+-- no functions, DROP CONSTRAINT IF EXISTS + ADD CONSTRAINT idempotency, ADD
+-- COLUMN IF NOT EXISTS. RLS is already enabled (no policies) on content_cycles
+-- by 015; no new tables here, so no RLS block. No new index: the sweep selects
+-- on status and revision_deadline over a table that holds one row per client
+-- per month, and every client read goes through content_cycles_client_id_idx.
+--
+-- All three constraints validate cleanly against existing rows: no live row
+-- has a locked_by, because the column did not exist before this file, and no
+-- live row is at status 'locked' (pre-flight below, clean on 2026-09-04).
+--
+-- BEFORE RUNNING — one read-only look (writes nothing):
+--
+--      select id, client_id, month, status, revision_deadline
+--      from content_cycles
+--      where status = 'locked';
+--
+-- EXPECT ZERO ROWS. No code path writes status='locked' before Phase 7 (the
+-- docblock on fetchMyLastClosedCycle in app/client/review/_lib/queries.ts
+-- records that), so any row here was set by hand — a Phase 4/5 test of the
+-- recap card, most likely. Such a row would FAIL the last CHECK in this file
+-- (content_cycles_locked_record_check: a locked cycle must carry locked_at),
+-- leaving the file half-applied — columns and the first two CHECKs in, the
+-- third out. Nothing else in the file breaks, and re-running after the row is
+-- backfilled or deleted completes it. Ran against prod on 2026-09-04: zero
+-- rows.
+
+-- ----------------------------------------------------------------------------
+-- content_cycles.locked_at — the instant reviews closed to the client.
+-- content_cycles.locked_by — how they closed: 'auto' (the deadline sweep) or
+--                            'owner' (Kelsey's Lock now, spec §4.6).
+--
+-- WHY A RECORD AT ALL. 'locked' is one status with two causes, and three
+-- client-facing strings (copy deck, Screens 5–7) need to know which:
+--
+--   Screen 6 banner  -> "Your October content is set / Reviews ended Friday,
+--                       September 25 ..." for a deadline close; "Reviews are
+--                       closed for October / Kelsey closed reviews so your
+--                       month can be scheduled on time" for an early one.
+--                       Chosen by locked_by.
+--   Screen 7 recap   -> "12 posts · Reviews closed September 25". The day
+--                       reviews ACTUALLY closed. Read from locked_at.
+--   Screen 5 auto    -> "Reviews for October ended on Friday, September 25".
+--                       Read from locked_at.
+--
+-- Before this file the only date on the row was revision_deadline, which is
+-- right for a deadline close and wrong for an early one: a cycle Kelsey locked
+-- on the 20th would recap as "Reviews closed September 25".
+--
+-- WHY NOT DERIVE IT. "Closed early" as `status = 'locked' AND now() <
+-- revision_deadline` is true on the day Kelsey locks and false the morning
+-- after the deadline passes — a banner that changes its story overnight, and
+-- a recap date that is never right for the early case. The how and the when
+-- are facts about an event; they get recorded when the event happens.
+--
+-- WHY NOT TWO STATUSES ('locked_auto' / 'locked_owner'). Every read of
+-- status = 'locked' — fetchMyLastClosedCycle, cycleStatusLabelFor, the release
+-- and re-release gates, the client visibility switch — would widen to admit
+-- both, for a distinction none of them cares about. Lock state is the status;
+-- the cause is metadata on it.
+--
+-- WHAT locked_at HOLDS. For the sweep, the cycle's revision_deadline instant —
+-- NOT the run time. The cron fires between 1am and 3am Central the morning
+-- after (schedule 0 7 * * * UTC, on Hobby's ±59-minute daily precision), and
+-- every deck string dates the close to the deadline day; stamping the run time
+-- would render "Reviews ended Saturday, September 26" for a Friday deadline.
+-- For Lock now, the instant Kelsey confirmed. In both cases it is written in
+-- the same UPDATE that flips status to 'locked', conditioned on
+-- status = 'in_review', so the record and the state land together or not at
+-- all.
+--
+-- locked_by 'auto' is the same literal the sweep writes into
+-- content_items.approved_by — one word for one actor across both tables.
+-- 'owner' is the app's own name for Kelsey's role (requireOwner), not her
+-- name, so the record does not go stale if the business changes hands.
+--
+-- Both nullable: null is the normal state for every drafting and in_review
+-- cycle. Nothing ever clears them — there is no unlock in the spec, and a
+-- locked cycle stays locked.
+-- ----------------------------------------------------------------------------
+alter table content_cycles add column if not exists locked_at timestamptz;
+alter table content_cycles add column if not exists locked_by text;
+
+-- The cause is one of exactly two actors. Text + CHECK, not an enum, per house
+-- convention — a third actor later is a one-line CHECK widen, the same shape
+-- 017 used to add 'denied' to revision_rounds.status.
+alter table content_cycles drop constraint if exists content_cycles_locked_by_check;
+alter table content_cycles add constraint content_cycles_locked_by_check
+  check (locked_by is null or locked_by in ('auto', 'owner'));
+
+-- A how without a when is not a record. locked_by requires locked_at, so a
+-- code path that names the actor without stamping the instant fails loudly
+-- here instead of shipping a recap card with nothing after "Reviews closed".
+-- The inverse (locked_at without locked_by) is deliberately allowed: a bare
+-- timestamp is still a true fact, both Phase 7 writers stamp the pair in one
+-- UPDATE anyway, and the pre-flight query above is what catches a hand-set
+-- row.
+alter table content_cycles drop constraint if exists content_cycles_locked_by_scope_check;
+alter table content_cycles add constraint content_cycles_locked_by_scope_check
+  check (locked_by is null or locked_at is not null);
+
+-- Every locked cycle carries its record. This is the constraint that makes
+-- the lock record structural rather than a convention: a code path that flips
+-- status to 'locked' without stamping locked_at in the same UPDATE fails
+-- loudly here. It is safe to add only if no locked row predates the columns —
+-- the pre-flight query above came back clean against prod on 2026-09-04,
+-- which is why it is here.
+alter table content_cycles drop constraint if exists content_cycles_locked_record_check;
+alter table content_cycles add constraint content_cycles_locked_record_check
+  check (status <> 'locked' or locked_at is not null);
+
+-- ============================================================================
+-- VERIFY — run after the migration; nothing below writes anything.
+--
+-- 1. Both new columns exist, nullable, with the right types (EXPECT EXACTLY
+--    THESE 2 ROWS):
+--
+--      select column_name, data_type, is_nullable
+--      from information_schema.columns
+--      where table_schema = 'public'
+--        and table_name = 'content_cycles'
+--        and column_name in ('locked_at', 'locked_by')
+--      order by column_name;
+--
+--        locked_at | timestamp with time zone | YES
+--        locked_by | text                     | YES
+--
+-- 2. Every constraint on content_cycles, listed BY TABLE (conrelid), not by
+--    name — a name-only lookup cannot tell a constraint that was never added
+--    from one that lives on some other table, and a DROP IF EXISTS against a
+--    misspelled name no-ops without a word. EXPECT EXACTLY THESE 7 ROWS, in
+--    this order, every one with convalidated = true:
+--
+--      select conname, contype, convalidated, pg_get_constraintdef(oid) as def
+--      from pg_constraint
+--      where conrelid = 'public.content_cycles'::regclass
+--        and contype in ('p', 'u', 'f', 'c')
+--      order by conname;
+--
+--        content_cycles_client_id_fkey        f  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+--        content_cycles_client_month_unique   u  UNIQUE (client_id, month)
+--        content_cycles_locked_by_check       c  CHECK (locked_by IS NULL OR locked_by = ANY (ARRAY['auto', 'owner']))
+--        content_cycles_locked_by_scope_check c  CHECK (locked_by IS NULL OR locked_at IS NOT NULL)
+--        content_cycles_locked_record_check   c  CHECK (status <> 'locked' OR locked_at IS NOT NULL)
+--        content_cycles_pkey                  p  PRIMARY KEY (id)
+--        content_cycles_status_check          c  CHECK (status = ANY (ARRAY['drafting', 'in_review', 'locked']))
+--
+--    Postgres reprints the CHECK definitions with its own parentheses and
+--    ::text casts; the shape is what matters. The contype filter drops the
+--    not-null rows Postgres 18 adds to pg_constraint (contype 'n'); on 15/17
+--    it changes nothing. An 8th row, or a 6th, is the finding — say which.
+--
+-- 3. No row carries a lock record yet (EXPECT ZERO ROWS — nothing in this
+--    file writes one, and no code writes one until Phase 7 ships):
+--
+--      select id, status, locked_at, locked_by
+--      from content_cycles
+--      where locked_at is not null or locked_by is not null;
+-- ============================================================================

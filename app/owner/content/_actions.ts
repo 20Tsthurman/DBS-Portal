@@ -55,6 +55,7 @@ import {
   fetchReplacementState,
   type ReplacementState,
 } from "@/app/owner/content/_lib/replacementState";
+import { lockCycle } from "@/app/owner/content/_lib/cycleLock";
 import type { ActionResult } from "@/lib/actions";
 
 const CONTENT_PATH = "/owner/content";
@@ -840,6 +841,70 @@ export async function unreleaseContentCycleAction(
 
   revalidatePath(CONTENT_PATH);
   return { ok: true };
+}
+
+/**
+ * Kelsey's Lock now (spec §4.6): close a released month before its deadline,
+ * for when a client has said they are finished.
+ *
+ * THE SAME UNIT OF WORK AS THE DEADLINE SWEEP — `lockCycle`, with
+ * `locked_by = 'owner'` and the moment she confirmed as the instant. So the
+ * posts the client never got to flip to approved with `approved_by = 'auto'`
+ * here too (approved 2026-09-04): the client did not approve them, leaving
+ * them at 'in_review' inside a locked month would strand them permanently,
+ * and the client's Screen 6 banner already tells the two closes apart by
+ * `locked_by`. Changes still with her stay with her; she can accept or deny
+ * them after the lock, she just cannot re-release.
+ *
+ * IRREVERSIBLE. There is no unlock in the spec and none here; the board's
+ * confirm dialog says so before the press. Guarded on 'in_review' twice —
+ * once on the row this action read, once inside the conditional UPDATE — so
+ * a press that lands after the sweep, or after an unrelease, matches no row
+ * and is reported rather than re-applied.
+ *
+ * No email. The spec sends none on a lock, and the release email already
+ * carries the auto-approve sentence.
+ */
+export async function lockContentCycleAction(
+  cycleId: string
+): Promise<ActionResult<{ autoApprovedCount: number }>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const cycleCheck = await loadCycle(cycleId);
+  if (!cycleCheck.ok) return { ok: false, error: cycleCheck.error };
+  const { cycle } = cycleCheck;
+
+  if (cycle.status === "locked") {
+    return { ok: false, error: "This month is already locked." };
+  }
+  if (cycle.status !== "in_review") {
+    return { ok: false, error: "This month has not been released." };
+  }
+
+  let result;
+  try {
+    result = await lockCycle(getSupabaseServiceClient(), {
+      cycle,
+      lockedAt: new Date().toISOString(),
+      lockedBy: "owner",
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Could not lock this month",
+    };
+  }
+  if (result.outcome === "raced") {
+    return {
+      ok: false,
+      error:
+        "This month is no longer open for review — refresh to see where it stands.",
+    };
+  }
+
+  revalidatePath(CONTENT_PATH);
+  return { ok: true, data: { autoApprovedCount: result.autoApproved } };
 }
 
 /** Owner-facing. The gate's idle state and the lost-race case say the same thing. */
