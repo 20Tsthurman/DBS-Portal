@@ -33,7 +33,9 @@ export async function fetchMyShootsInRange(
 /**
  * Fetch the signed-in client's upcoming shoots (requested + confirmed),
  * starting at the current instant. Ordered by scheduled_at ascending.
- * Cancelled and completed shoots are excluded.
+ * Cancelled, declined and completed shoots are excluded — nothing is
+ * booked for any of them, so none belongs under "Upcoming". Declines get
+ * their own notice (`fetchMyRecentDeclines`).
  */
 export async function fetchMyUpcomingShoots(): Promise<ShootRecord[]> {
   const client = await requireCurrentClient();
@@ -45,6 +47,45 @@ export async function fetchMyUpcomingShoots(): Promise<ShootRecord[]> {
     .eq("client_id", client.id)
     .in("status", ["requested", "confirmed"])
     .gte("scheduled_at", new Date().toISOString())
+    .order("scheduled_at", { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return (data ?? []) as ShootRecord[];
+}
+
+/** How long a declined request keeps its spot in the notice above the calendar. */
+const DECLINE_NOTICE_DAYS = 14;
+
+/**
+ * Fetch the declined requests worth telling the client about right now.
+ *
+ * Two windows, OR'd, because either one alone leaves a hole:
+ *
+ *   - `scheduled_at` still in the future — the date they asked for hasn't
+ *     passed, so they may still want to rebook near it. This covers a
+ *     request declined months ago for a date next week.
+ *   - declined within the last `DECLINE_NOTICE_DAYS` — the answer is fresh
+ *     news even if the date has come and gone. This covers a request for
+ *     tomorrow that Kelsey declined today and the client reads next week.
+ *
+ * Outside both, the decline is old news; it stays visible on the calendar
+ * grid and via `?shoot=<id>`, it just stops leading the page.
+ */
+export async function fetchMyRecentDeclines(): Promise<ShootRecord[]> {
+  const client = await requireCurrentClient();
+  const supabase = getSupabaseServiceClient();
+
+  const nowIso = new Date().toISOString();
+  const cutoffIso = new Date(
+    Date.now() - DECLINE_NOTICE_DAYS * 24 * 60 * 60 * 1000
+  ).toISOString();
+
+  const { data, error } = await supabase
+    .from("shoots")
+    .select("*")
+    .eq("client_id", client.id)
+    .eq("status", "declined")
+    .or(`scheduled_at.gte.${nowIso},declined_at.gte.${cutoffIso}`)
     .order("scheduled_at", { ascending: true });
 
   if (error) throw new Error(error.message);

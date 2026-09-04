@@ -454,6 +454,10 @@ export function ShootFormPanel({
               <option value="requested">Requested</option>
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
+              {/* Edit only. Declining is an answer to a request, so there is
+                  nothing to decline on a shoot being created — createShoot
+                  rejects it too, this just keeps it off the menu. */}
+              {isEdit ? <option value="declined">Declined</option> : null}
             </select>
           </div>
 

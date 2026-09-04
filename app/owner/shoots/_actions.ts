@@ -20,7 +20,11 @@ const VALID_STATUSES: ShootStatus[] = [
   "confirmed",
   "completed",
   "cancelled",
+  "declined",
 ];
+
+/** Cap on Kelsey's optional decline note; matches the counter in the dialog. */
+const MAX_DECLINE_REASON = 500;
 
 const VALID_KINDS: ShootKind[] = ["shoot", "meeting"];
 const VALID_MEETING_TYPES: MeetingType[] = ["zoom", "phone", "in_person"];
@@ -48,6 +52,10 @@ function isValidIso(value: string): boolean {
 function revalidateShootPaths(clientId: string | null): void {
   revalidatePath("/owner/shoots");
   revalidatePath("/owner/calendar");
+  // The client's booking page reads the same rows. It renders force-dynamic,
+  // so this is belt-and-braces rather than load-bearing — but a confirm or a
+  // decline is exactly the change a client must not see a stale version of.
+  revalidatePath("/client/book");
   if (clientId) {
     revalidatePath(`/owner/clients/${clientId}`);
   }
@@ -65,6 +73,18 @@ export async function createShoot(
   }
   if (input.status && !VALID_STATUSES.includes(input.status)) {
     return { ok: false, error: "Invalid status" };
+  }
+  // 'declined' is a valid status but not a creatable one. A decline is an
+  // ANSWER to a client's request, so it only exists as a transition off
+  // 'requested' — a shoot Kelsey books herself has no request to answer, and
+  // a row created straight at 'declined' would show the client a refusal for
+  // something they never asked for. declineShootRequest is the only door in.
+  if (input.status === "declined") {
+    return {
+      ok: false,
+      error:
+        "A shoot can't be created as declined. Decline a client's request from the pending requests list instead.",
+    };
   }
 
   const kind: ShootKind = input.kind ?? "shoot";
@@ -153,38 +173,67 @@ export async function updateShoot(
 
   const supabase = getSupabaseServiceClient();
 
-  // When either kind or meetingType is in the patch we need to re-validate
-  // the pair (a meeting must have a type, a shoot must not). Easiest is to
-  // fetch the current row, merge updates, then validate the resulting pair.
+  // Two rules need the row's CURRENT values, so fetch it once when the patch
+  // touches either: the kind/meeting_type pair (a meeting must have a type, a
+  // shoot must not) and the decline columns (which only 'declined' rows may
+  // carry — migration 020's CHECK).
   let kindPatch: ShootKind | undefined;
   let meetingTypePatch: MeetingType | null | undefined;
-  if (updates.kind !== undefined || updates.meetingType !== undefined) {
+  let declineFieldsPatch: Record<string, unknown> = {};
+  if (
+    updates.kind !== undefined ||
+    updates.meetingType !== undefined ||
+    updates.status !== undefined
+  ) {
     const { data: current, error: lookupError } = await supabase
       .from("shoots")
-      .select("kind, meeting_type")
+      .select("kind, meeting_type, status")
       .eq("id", shootId)
       .maybeSingle();
     if (lookupError) return { ok: false, error: lookupError.message };
     if (!current) return { ok: false, error: "Shoot not found" };
-    const currentRow = current as { kind: ShootKind; meeting_type: MeetingType | null };
+    const currentRow = current as {
+      kind: ShootKind;
+      meeting_type: MeetingType | null;
+      status: ShootStatus;
+    };
 
-    const nextKind: ShootKind = updates.kind ?? currentRow.kind;
-    const nextMeetingType: MeetingType | null =
-      updates.meetingType !== undefined
-        ? updates.meetingType
-        : currentRow.meeting_type;
+    if (updates.kind !== undefined || updates.meetingType !== undefined) {
+      const nextKind: ShootKind = updates.kind ?? currentRow.kind;
+      const nextMeetingType: MeetingType | null =
+        updates.meetingType !== undefined
+          ? updates.meetingType
+          : currentRow.meeting_type;
 
-    if (nextKind === "meeting") {
-      if (!nextMeetingType) {
-        return { ok: false, error: "Meeting type is required for meetings." };
+      if (nextKind === "meeting") {
+        if (!nextMeetingType) {
+          return { ok: false, error: "Meeting type is required for meetings." };
+        }
+        kindPatch = "meeting";
+        meetingTypePatch = nextMeetingType;
+      } else {
+        kindPatch = "shoot";
+        // Defense: strip meeting_type when downgrading to a shoot, even if the
+        // caller didn't explicitly null it.
+        meetingTypePatch = null;
       }
-      kindPatch = "meeting";
-      meetingTypePatch = nextMeetingType;
-    } else {
-      kindPatch = "shoot";
-      // Defense: strip meeting_type when downgrading to a shoot, even if the
-      // caller didn't explicitly null it.
-      meetingTypePatch = null;
+    }
+
+    // Keep declined_at/decline_reason pinned to the status. Declining through
+    // this generic path (the edit panel's status dropdown) stamps the time but
+    // carries no note — declineShootRequest is the surface that collects one.
+    //
+    // Any status OTHER than 'declined' clears both columns UNCONDITIONALLY —
+    // it does not first check that the row we read was 'declined'. That read
+    // is a separate round trip from the write, so gating the clear on it means
+    // a row that turned 'declined' in between gets a non-declined status
+    // written over live decline columns: migration 020's CHECK rejects the
+    // update, and the stale note would otherwise have survived. Writing the
+    // nulls every time costs nothing and cannot be raced.
+    if (updates.status === "declined" && currentRow.status !== "declined") {
+      declineFieldsPatch = { declined_at: new Date().toISOString() };
+    } else if (updates.status !== undefined && updates.status !== "declined") {
+      declineFieldsPatch = { declined_at: null, decline_reason: null };
     }
   }
 
@@ -204,6 +253,7 @@ export async function updateShoot(
   if (updates.status !== undefined) patch.status = updates.status;
   if (kindPatch !== undefined) patch.kind = kindPatch;
   if (meetingTypePatch !== undefined) patch.meeting_type = meetingTypePatch;
+  Object.assign(patch, declineFieldsPatch);
 
   const { data, error } = await supabase
     .from("shoots")
@@ -234,6 +284,94 @@ export async function cancelShoot(
   shootId: string
 ): Promise<ActionResult<ShootRecord>> {
   return updateShoot(shootId, { status: "cancelled" });
+}
+
+/**
+ * Turn down a client's pending shoot request, with an optional note the
+ * client will read.
+ *
+ * Separate from `cancelShoot` on purpose. Both end the shoot, but only this
+ * one is an ANSWER: 'declined' is what tells the client's booking page to
+ * show the request with Kelsey's reply attached instead of hiding it as a
+ * self-cancellation. Routing a decline through `cancelShoot` is the bug
+ * migration 020 exists to fix, so the two must not be collapsed back
+ * together.
+ *
+ * Only a shoot still at 'requested' can be declined — declining a confirmed
+ * shoot is a cancellation, and the client deserves the word that matches.
+ */
+export async function declineShootRequest(
+  shootId: string,
+  reason?: string | null
+): Promise<ActionResult<ShootRecord>> {
+  const guard = await requireOwner();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  if (!shootId) return { ok: false, error: "Missing shoot id" };
+
+  const trimmed = reason?.trim() || null;
+  if (trimmed && trimmed.length > MAX_DECLINE_REASON) {
+    return {
+      ok: false,
+      error: `Note is too long (${MAX_DECLINE_REASON} characters max).`,
+    };
+  }
+
+  const supabase = getSupabaseServiceClient();
+  const { data: existing, error: lookupError } = await supabase
+    .from("shoots")
+    .select("status")
+    .eq("id", shootId)
+    .maybeSingle();
+  if (lookupError) return { ok: false, error: lookupError.message };
+  const current = existing as Pick<ShootRecord, "status"> | null;
+  if (!current) return { ok: false, error: "Shoot not found" };
+  if (current.status !== "requested") {
+    return {
+      ok: false,
+      error:
+        current.status === "declined"
+          ? "This request was already declined."
+          : "Only a pending request can be declined.",
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("shoots")
+    .update({
+      status: "declined",
+      decline_reason: trimmed,
+      declined_at: new Date().toISOString(),
+    })
+    .eq("id", shootId)
+    // Re-assert the precondition in the WHERE clause so two overlapping
+    // decisions can't both land — if Kelsey confirmed it in another tab
+    // between the read above and this write, this matches nothing.
+    .eq("status", "requested")
+    .select("*")
+    // maybeSingle, not single: a zero-row result here is the EXPECTED outcome
+    // of losing that race, not a fault. .single() turns it into a PostgREST
+    // error ("JSON object requested, multiple (or no) rows returned") that
+    // would surface to Kelsey as gibberish; maybeSingle hands back data null
+    // with no error, so the stale case gets its own sentence below.
+    .maybeSingle();
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  if (!data) {
+    return {
+      ok: false,
+      error: "This request was already answered. Refresh to see where it stands.",
+    };
+  }
+
+  const declined = data as ShootRecord;
+  // A requested shoot was never mirrored to Google, but push anyway: the
+  // rule is status-driven and this cleans up any stray event. Non-fatal.
+  await syncShootToGoogleNonFatal(declined);
+  revalidateShootPaths(declined.client_id);
+  return { ok: true, data: declined };
 }
 
 export async function completeShoot(

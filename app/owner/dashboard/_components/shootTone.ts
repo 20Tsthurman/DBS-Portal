@@ -10,9 +10,9 @@ import type { ShootStatus } from "@/lib/supabase";
  * (action needed) is the noisy one and confirmed (settled) is the calm one.
  * Kept local to dashboard components to avoid disturbing the shoots list.
  *
- * Completed/cancelled shouldn't appear in either widget — the queries filter
- * them out — but we map them defensively so a future regression doesn't
- * crash on an unknown tone.
+ * Completed/cancelled/declined shouldn't appear in either widget — the
+ * queries filter them out — but we map them defensively so a future
+ * regression doesn't crash on an unknown tone.
  */
 export type DashboardShootTone = "success" | "warning" | "neutral" | "danger";
 
@@ -25,6 +25,7 @@ export function shootTone(status: ShootStatus): DashboardShootTone {
     case "completed":
       return "neutral";
     case "cancelled":
+    case "declined":
       return "danger";
   }
 }

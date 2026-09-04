@@ -1,9 +1,19 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useId, useState, type CSSProperties, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { cancelShoot, confirmShoot } from "@/app/owner/shoots/_actions";
+import {
+  applyFocus,
+  clearFocus,
+  fieldStyle,
+  helperStyle,
+  labelStyle,
+} from "@/app/owner/clients/_components/formStyles";
+import {
+  confirmShoot,
+  declineShootRequest,
+} from "@/app/owner/shoots/_actions";
 
 interface PendingRequestActionsProps {
   shootId: string;
@@ -21,6 +31,9 @@ interface PendingRequestActionsProps {
 
 type PendingAction = "confirm" | "decline";
 
+/** Mirrors MAX_DECLINE_REASON in app/owner/shoots/_actions.ts. */
+const MAX_REASON = 500;
+
 export function PendingRequestActions({
   shootId,
   clientName,
@@ -30,8 +43,14 @@ export function PendingRequestActions({
 }: PendingRequestActionsProps) {
   const router = useRouter();
   const [pending, setPending] = useState<PendingAction | null>(null);
+  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const closeDialog = () => {
+    setPending(null);
+    setReason("");
+  };
 
   const runAction = async () => {
     if (!pending) return;
@@ -40,25 +59,21 @@ export function PendingRequestActions({
     const result =
       pending === "confirm"
         ? await confirmShoot(shootId)
-        : await cancelShoot(shootId);
+        : await declineShootRequest(shootId, reason);
     setBusy(false);
 
     if (!result.ok) {
       setError(
         result.error ?? `Failed to ${pending} shoot.`
       );
-      setPending(null);
+      closeDialog();
       return;
     }
 
-    setPending(null);
+    closeDialog();
     router.refresh();
     onSuccess?.();
   };
-
-  const dialogProps = pending
-    ? buildDialogProps(pending, clientName, whenLabel)
-    : null;
 
   const confirmStyle = size === "md" ? confirmBtnMd : confirmBtnSm;
   const declineStyle = size === "md" ? declineBtnMd : declineBtnSm;
@@ -96,52 +111,111 @@ export function PendingRequestActions({
         {error && <p style={errorStyle}>{error}</p>}
       </div>
 
-      {dialogProps && (
+      {pending === "confirm" && (
         <ConfirmDialog
           open
           onCancel={() => {
             if (busy) return;
-            setPending(null);
+            closeDialog();
           }}
           onConfirm={runAction}
           busy={busy}
-          {...dialogProps}
+          title="Confirm shoot request?"
+          body={
+            <>
+              {clientName} requested a shoot on <strong>{whenLabel}</strong>.
+              They&apos;ll see it as confirmed on their calendar.
+            </>
+          }
+          confirmLabel="Confirm shoot"
+          variant="success"
+        />
+      )}
+
+      {pending === "decline" && (
+        <ConfirmDialog
+          open
+          onCancel={() => {
+            if (busy) return;
+            closeDialog();
+          }}
+          onConfirm={runAction}
+          busy={busy}
+          title="Decline shoot request?"
+          body={
+            <DeclineBody
+              clientName={clientName}
+              whenLabel={whenLabel}
+              reason={reason}
+              onReasonChange={setReason}
+              disabled={busy}
+            />
+          }
+          confirmLabel="Decline request"
+          cancelLabel="Never mind"
+          variant="danger"
         />
       )}
     </>
   );
 }
 
-function buildDialogProps(
-  action: PendingAction,
-  clientName: string,
-  whenLabel: string
-) {
-  if (action === "confirm") {
-    return {
-      title: "Confirm shoot request?",
-      body: (
-        <>
-          {clientName} requested a shoot on{" "}
-          <strong>{whenLabel}</strong>. They&apos;ll see it as confirmed on
-          their calendar.
-        </>
-      ),
-      confirmLabel: "Confirm shoot",
-      variant: "success" as const,
-    };
-  }
-  return {
-    title: "Decline shoot request?",
-    body: (
-      <>
+interface DeclineBodyProps {
+  clientName: string;
+  whenLabel: string;
+  reason: string;
+  onReasonChange: (next: string) => void;
+  disabled: boolean;
+}
+
+/**
+ * The decline dialog carries a note field because a decline the client can
+ * see with no explanation ("Kelsey said no, no idea why") is barely better
+ * than the silent disappearance this replaced. Optional, though — a decline
+ * with no note still reads as an answer on the client's side.
+ */
+function DeclineBody({
+  clientName,
+  whenLabel,
+  reason,
+  onReasonChange,
+  disabled,
+}: DeclineBodyProps): ReactNode {
+  const fieldId = useId();
+  const remaining = MAX_REASON - reason.length;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <p style={{ margin: 0 }}>
         {clientName}&apos;s request for <strong>{whenLabel}</strong> will be
-        cancelled. They&apos;ll see the cancellation on their calendar.
-      </>
-    ),
-    confirmLabel: "Decline request",
-    variant: "danger" as const,
-  };
+        declined. They&apos;ll see it marked declined on their calendar,
+        along with anything you write below.
+      </p>
+
+      <div>
+        <label htmlFor={fieldId} style={labelStyle}>
+          Note to {clientName} <span style={optionalStyle}>(optional)</span>
+        </label>
+        <textarea
+          id={fieldId}
+          rows={3}
+          maxLength={MAX_REASON}
+          value={reason}
+          disabled={disabled}
+          onChange={(e) => onReasonChange(e.target.value)}
+          onFocus={applyFocus}
+          onBlur={clearFocus}
+          placeholder="Booked that morning — Thursday afternoon is wide open."
+          style={{ ...fieldStyle, resize: "vertical", lineHeight: 1.5 }}
+        />
+        <p style={helperStyle}>
+          {reason.trim()
+            ? `${remaining} character${remaining === 1 ? "" : "s"} left`
+            : "Leave blank to decline without a note."}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 const buttonBase: CSSProperties = {
@@ -197,4 +271,10 @@ const errorStyle: CSSProperties = {
   color: "var(--status-danger)",
   fontSize: 11,
   margin: 0,
+};
+
+const optionalStyle: CSSProperties = {
+  textTransform: "none",
+  letterSpacing: "normal",
+  fontWeight: 400,
 };

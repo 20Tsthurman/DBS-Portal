@@ -41,10 +41,12 @@ export function ClientShootPill({ shoot, baseHref }: ClientShootPillProps) {
   const v = visualsForEvent(event);
   const startLabel = formatShortTimeInTimezone(startsAt);
   const pending = shoot.status === "requested";
+  const declined = shoot.status === "declined";
   const struck =
     v.textTexture === "strikethrough" ||
     shoot.status === "completed" ||
-    shoot.status === "cancelled";
+    shoot.status === "cancelled" ||
+    declined;
 
   const pillStyle: CSSProperties = {
     position: "relative",
@@ -81,6 +83,14 @@ export function ClientShootPill({ shoot, baseHref }: ClientShootPillProps) {
       {pending && (
         <span style={{ marginLeft: 4, fontStyle: "italic", opacity: 0.85 }}>
           (pending)
+        </span>
+      )}
+      {/* A declined request stays on the grid, struck through and labelled.
+          Hiding it is what made a decline look like a request that never
+          sent — the whole point of migration 020. */}
+      {declined && (
+        <span style={{ marginLeft: 4, fontStyle: "italic", opacity: 0.85 }}>
+          (declined)
         </span>
       )}
     </Link>

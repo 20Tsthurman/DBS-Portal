@@ -12,6 +12,7 @@ import {
   cancelShoot,
   completeShoot,
   confirmShoot,
+  declineShootRequest,
   deleteShoot,
 } from "../_actions";
 
@@ -92,6 +93,15 @@ export function ShootRowActions({ shoot, clients }: ShootRowActionsProps) {
     onConfirm: () => runStatusAction(confirmShoot),
     onComplete: () => runStatusAction(completeShoot),
     onCancel: () => runStatusAction(cancelShoot, `Cancel this ${kindNoun}?`),
+    // Declining a still-pending request is an ANSWER to the client, not a
+    // cancellation — it has to write 'declined' so their booking page can
+    // say so. This menu takes no note; the calendar's pending-requests bar
+    // and the edit panel are the surfaces that offer one.
+    onDecline: () =>
+      runStatusAction(
+        (id) => declineShootRequest(id),
+        `Decline this ${kindNoun} request? The client will see it marked declined. To add a note, decline it from the calendar instead.`
+      ),
     onDelete: handleDelete,
   });
 
@@ -179,6 +189,7 @@ function buildMenuItems(
     onConfirm: () => void;
     onComplete: () => void;
     onCancel: () => void;
+    onDecline: () => void;
     onDelete: () => void;
   }
 ): MenuItem[] {
@@ -189,8 +200,8 @@ function buildMenuItems(
   if (status === "requested") {
     items.push({ label: "Confirm", onClick: handlers.onConfirm });
     items.push({
-      label: "Cancel",
-      onClick: handlers.onCancel,
+      label: "Decline",
+      onClick: handlers.onDecline,
       danger: true,
     });
   } else if (status === "confirmed") {

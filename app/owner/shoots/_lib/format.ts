@@ -15,6 +15,7 @@ export function shootStatusTone(status: ShootStatus): ShootStatusTone {
     case "completed":
       return "success";
     case "cancelled":
+    case "declined":
       return "danger";
   }
 }

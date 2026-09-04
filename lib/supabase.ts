@@ -5,7 +5,19 @@ export type ClientStatus = "active" | "onboarding" | "inactive" | "lead";
 export type PackageTier = "starter" | "growth" | "premium";
 export type ProjectPhase = "onboarding" | "strategy" | "content" | "reporting";
 export type ProjectStatus = "active" | "paused" | "completed";
-export type ShootStatus = "requested" | "confirmed" | "completed" | "cancelled";
+/**
+ * `'declined'` = Kelsey turned down a client's request; `'cancelled'` = the
+ * shoot was called off some other way (the client withdrew their own pending
+ * request, or a confirmed shoot was cancelled). The split exists so the
+ * client's booking page can explain a decline instead of silently dropping
+ * the row — see migration 020.
+ */
+export type ShootStatus =
+  | "requested"
+  | "confirmed"
+  | "completed"
+  | "cancelled"
+  | "declined";
 export type ShootKind = "shoot" | "meeting";
 export type MeetingType = "zoom" | "phone" | "in_person";
 export type TimeLogCategory =
@@ -166,6 +178,10 @@ export interface ShootRecord {
   kind: ShootKind;
   meeting_type: MeetingType | null;
   created_at: string;
+  /** Kelsey's optional note to the client. Non-null only when status = 'declined'. */
+  decline_reason: string | null;
+  /** When the request was declined. Non-null only when status = 'declined'. */
+  declined_at: string | null;
   /** Google event id after a Stage 3 push; NULL = not (yet) in Google. */
   google_event_id: string | null;
   /** Which Google calendar the event was pushed to (patch/delete target). */

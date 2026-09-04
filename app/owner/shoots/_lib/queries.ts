@@ -33,7 +33,7 @@ export async function fetchUpcomingShoots(
   return attachClientNames(supabase, (data ?? []) as ShootRecord[]);
 }
 
-/** Fetch past shoots (scheduled_at < now or status completed/cancelled) with client name attached, descending. */
+/** Fetch past shoots (scheduled_at < now or status completed/cancelled/declined) with client name attached, descending. */
 export async function fetchPastShoots(
   limit?: number
 ): Promise<ShootWithClientName[]> {
@@ -43,7 +43,7 @@ export async function fetchPastShoots(
   let query = supabase
     .from("shoots")
     .select("*")
-    .or(`scheduled_at.lt.${nowIso},status.in.(completed,cancelled)`)
+    .or(`scheduled_at.lt.${nowIso},status.in.(completed,cancelled,declined)`)
     .order("scheduled_at", { ascending: false });
 
   if (typeof limit === "number") {

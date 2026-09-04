@@ -43,6 +43,7 @@ export function visualsForEvent(event: CalendarEvent): EventVisuals {
             textTexture: "strikethrough",
           };
         case "cancelled":
+        case "declined":
           return {
             background: "rgba(168, 120, 138, 0.10)",
             borderLeft: "3px solid var(--text-muted)",
@@ -86,6 +87,7 @@ export function visualsForEvent(event: CalendarEvent): EventVisuals {
             textTexture: "strikethrough",
           };
         case "cancelled":
+        case "declined":
           return {
             background: "rgba(120, 130, 168, 0.10)",
             borderLeft: "3px solid var(--text-muted)",

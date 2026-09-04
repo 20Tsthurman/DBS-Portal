@@ -19,6 +19,8 @@ function labelFor(status: ShootStatus): string {
       return "Completed";
     case "cancelled":
       return "Cancelled";
+    case "declined":
+      return "Not available";
   }
 }
 
@@ -30,6 +32,8 @@ function styleFor(status: ShootStatus): CSSProperties {
       return completedBadge;
     case "cancelled":
       return cancelledBadge;
+    case "declined":
+      return declinedBadge;
     case "requested":
     default:
       return requestedBadge;
@@ -74,4 +78,14 @@ const cancelledBadge: CSSProperties = {
   backgroundColor: "transparent",
   color: "var(--status-danger)",
   border: "1px dashed var(--status-danger)",
+};
+
+// Solid where `cancelled` is dashed: a decline is a settled answer from
+// Kelsey, not a request left hanging. The label says "Not available" rather
+// than "Declined" — the slot is what was turned down, not the client.
+const declinedBadge: CSSProperties = {
+  ...badgeBase,
+  backgroundColor: "rgba(122, 48, 64, 0.10)",
+  color: "var(--status-danger)",
+  border: "1px solid var(--status-danger)",
 };

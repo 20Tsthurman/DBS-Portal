@@ -12,6 +12,8 @@ import { CancelRequestButton } from "./CancelRequestButton";
 interface MyShootDetailPanelProps {
   shoot: ShootRecord;
   closeHref: string;
+  /** Request-form URL, offered as the next step on a declined request. */
+  requestHref: string;
 }
 
 const PANEL_WIDTH = 320;
@@ -19,6 +21,7 @@ const PANEL_WIDTH = 320;
 export function MyShootDetailPanel({
   shoot,
   closeHref,
+  requestHref,
 }: MyShootDetailPanelProps) {
   const startsAt = new Date(shoot.scheduled_at);
   const durationHours = shoot.duration_hours ?? 1;
@@ -39,6 +42,8 @@ export function MyShootDetailPanel({
     isMeeting && shoot.meeting_type === "zoom" ? "Meeting link" : "Location";
   const showLocationField =
     !(isMeeting && shoot.meeting_type === "phone");
+  const declined = shoot.status === "declined";
+  const declineNote = shoot.decline_reason?.trim() || null;
 
   return (
     <>
@@ -109,6 +114,10 @@ export function MyShootDetailPanel({
           <div>
             <StatusBadge status={shoot.status} />
           </div>
+          {/* Kelsey's answer comes before the details. Everything below it is
+              the slot that DIDN'T happen, and reading the date first only to
+              discover at the bottom that it fell through is the wrong order. */}
+          {declined && <DeclineExplainer note={declineNote} isMeeting={isMeeting} />}
           {formatLabel && <Field label="Format" value={formatLabel} />}
           <Field label="Date" value={dateLabel} />
           <Field label="Time" value={timeLabel} />
@@ -132,12 +141,18 @@ export function MyShootDetailPanel({
             borderTop: "1px solid var(--border)",
           }}
         >
-          {shoot.status === "requested" ? (
+          {shoot.status === "requested" && (
             <CancelRequestButton
               shootId={shoot.id}
               closeHref={closeHref}
             />
-          ) : (
+          )}
+          {declined && (
+            <Link href={requestHref} style={requestAgainStyle}>
+              Request another time
+            </Link>
+          )}
+          {shoot.status !== "requested" && !declined && (
             <p
               style={{
                 color: "var(--text-muted)",
@@ -152,6 +167,38 @@ export function MyShootDetailPanel({
         </footer>
       </aside>
     </>
+  );
+}
+
+interface DeclineExplainerProps {
+  note: string | null;
+  isMeeting: boolean;
+}
+
+/**
+ * What a declined request says on the client's side. The first line is the
+ * part that was missing entirely before migration 020 — that a person made a
+ * decision, and that nothing is on the books for this time.
+ */
+function DeclineExplainer({ note, isMeeting }: DeclineExplainerProps) {
+  const noun = isMeeting ? "meeting" : "shoot";
+  return (
+    <div style={declineBoxStyle}>
+      <p style={declineLeadStyle}>
+        Kelsey wasn&apos;t able to take this {noun}. Nothing is booked for
+        this time.
+      </p>
+      {note ? (
+        <p style={declineNoteStyle}>
+          <span style={declineNoteWhoStyle}>Kelsey:</span> {note}
+        </p>
+      ) : (
+        <p style={declineNoNoteStyle}>
+          She didn&apos;t leave a note — message her if you&apos;d like to
+          find a time together.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -220,6 +267,58 @@ function meetingTypeFriendly(t: MeetingType): string {
       return "In-person";
   }
 }
+
+const declineBoxStyle: CSSProperties = {
+  padding: "12px 14px",
+  border: "1px solid var(--border)",
+  borderLeft: "3px solid var(--status-danger)",
+  backgroundColor: "rgba(122, 48, 64, 0.06)",
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+};
+
+const declineLeadStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 14,
+  lineHeight: 1.5,
+  color: "var(--text-primary)",
+};
+
+const declineNoteStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 14,
+  lineHeight: 1.6,
+  color: "var(--text-body)",
+  whiteSpace: "pre-wrap",
+};
+
+const declineNoteWhoStyle: CSSProperties = {
+  fontWeight: 600,
+  color: "var(--text-primary)",
+};
+
+const declineNoNoteStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 13,
+  fontStyle: "italic",
+  color: "var(--text-muted)",
+};
+
+const requestAgainStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "100%",
+  padding: "10px 16px",
+  backgroundColor: "var(--accent)",
+  color: "#FFFFFF",
+  fontSize: 12,
+  fontWeight: 600,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  textDecoration: "none",
+};
 
 const iconCloseStyle: CSSProperties = {
   width: 32,

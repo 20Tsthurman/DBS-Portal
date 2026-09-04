@@ -34,6 +34,8 @@ export type EventStatus =
   | "confirmed"
   | "completed"
   | "cancelled"
+  /** Kelsey turned down a client's request. Renders like `cancelled`. */
+  | "declined"
   /** Time blocks have no status column; they all carry this. */
   | "scheduled";
 

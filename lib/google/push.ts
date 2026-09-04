@@ -27,8 +27,8 @@ import { hasWriteScope } from "./oauth";
  * round-trips back in.
  *
  * The push rule, by shoot status:
- *   confirmed / completed → the event should exist (insert or patch)
- *   requested / cancelled → the event should NOT exist (delete if pushed)
+ *   confirmed / completed              → the event should exist (insert or patch)
+ *   requested / cancelled / declined   → the event should NOT exist (delete if pushed)
  * Client-requested shoots therefore appear in Google at the moment Kelsey
  * confirms them.
  *
@@ -85,7 +85,7 @@ async function syncShootToGoogle(shoot: ShootRecord): Promise<void> {
   const api = getCalendarApi(auth);
 
   if (!shouldExistInGoogle(shoot)) {
-    // requested / cancelled — remove the mirror if one exists.
+    // requested / cancelled / declined — remove the mirror if one exists.
     if (shoot.google_event_id) {
       await deleteEvent(
         api,

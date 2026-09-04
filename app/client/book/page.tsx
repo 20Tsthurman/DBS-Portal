@@ -6,6 +6,7 @@ import {
 } from "@/app/owner/calendar/_lib/timezone";
 import { requireCurrentClient } from "@/lib/currentClient";
 import {
+  fetchMyRecentDeclines,
   fetchMyShoot,
   fetchMyShootsInRange,
   fetchMyUpcomingShoots,
@@ -16,6 +17,7 @@ import { RequestShootCTA } from "./_components/RequestShootCTA";
 import { UpcomingShootCard } from "./_components/UpcomingShootCard";
 import { RequestNewShootCard } from "./_components/RequestNewShootCard";
 import { BookingFeatureCards } from "./_components/BookingFeatureCards";
+import { DeclinedRequestsNotice } from "./_components/DeclinedRequestsNotice";
 import { RequestShootFormPanel } from "./_components/RequestShootFormPanel";
 import { MyShootDetailPanel } from "./_components/MyShootDetailPanel";
 
@@ -68,17 +70,25 @@ export default async function ClientBookPage({
     ? fetchMyShoot(shootId)
     : Promise.resolve(null);
 
-  const [client, myShoots, upcomingShoots, viewedShoot] = await Promise.all([
-    requireCurrentClient(),
-    fetchMyShootsInRange(gridStartUtc, gridEndUtc),
-    fetchMyUpcomingShoots(),
-    shootPromise,
-  ]);
+  const [client, myShoots, upcomingShoots, recentDeclines, viewedShoot] =
+    await Promise.all([
+      requireCurrentClient(),
+      fetchMyShootsInRange(gridStartUtc, gridEndUtc),
+      fetchMyUpcomingShoots(),
+      fetchMyRecentDeclines(),
+      shootPromise,
+    ]);
 
   // Display filter only: cancelled shoots stay in the DB and remain visible
   // on the owner calendar + directly via `?shoot=<id>` URLs. They're hidden
   // here because a struck-through pill for a shoot the client cancelled is
   // confusing.
+  //
+  // 'declined' is deliberately NOT filtered. It's Kelsey's answer to a
+  // question the client asked, and hiding it was the bug: the request simply
+  // vanished, reading as "it never went through" rather than "she can't make
+  // that time". It renders struck through and labelled, and the notice above
+  // the calendar carries her note.
   const visibleShoots = myShoots.filter((s) => s.status !== "cancelled");
 
   // The URL contract permits both `?request=1&shoot=<id>` simultaneously.
@@ -102,6 +112,12 @@ export default async function ClientBookPage({
           Request a shoot anytime, or check the status of upcoming sessions below.
         </p>
       </header>
+
+      <DeclinedRequestsNotice
+        shoots={recentDeclines}
+        requestHref={requestHref}
+        baseHref={baseHref}
+      />
 
       <RequestShootCTA href={requestHref} />
 
@@ -134,7 +150,11 @@ export default async function ClientBookPage({
       )}
 
       {showDetail && viewedShoot && (
-        <MyShootDetailPanel shoot={viewedShoot} closeHref={closeHref} />
+        <MyShootDetailPanel
+          shoot={viewedShoot}
+          closeHref={closeHref}
+          requestHref={requestHref}
+        />
       )}
     </section>
   );
