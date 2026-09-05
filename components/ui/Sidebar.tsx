@@ -143,7 +143,9 @@ export function Sidebar({ eyebrow, navSections }: SidebarProps) {
                     borderLeft: isActive
                       ? "3px solid var(--accent)"
                       : "3px solid transparent",
-                    paddingLeft: isActive ? "calc(1.5rem - 3px)" : "1.5rem",
+                    // 3px of the 24px column inset is the left rule, transparent
+                    // when inactive, so labels sit at x 24 in both states.
+                    paddingLeft: "calc(1.5rem - 3px)",
                     fontWeight: isActive ? 600 : 400,
                   }}
                 >

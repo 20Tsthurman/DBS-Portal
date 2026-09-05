@@ -5,8 +5,9 @@
    the tour passes to driver.js. That is not decoration: it lifts each rule to
    two-class specificity against driver.css's own single-class rules, so this
    file wins no matter which stylesheet Next.js emits first. Nothing here
-   needs `!important` except the overlay, which driver.js paints with an
-   inline style (see the bottom of this file).
+   needs `!important` except two rules at the bottom of this file that fight
+   inline styles: the overlay fill, which driver.js sets on the <path>, and
+   the highlighted sidebar link's label colour, which Sidebar.tsx sets inline.
 
    Colours are palette tokens from app/globals.css only. Fonts are the two
    next/font variables declared on <html> in app/layout.tsx, which the popover
@@ -157,4 +158,33 @@
 
 .driver-overlay path {
   fill: var(--sidebar-bg) !important;
+}
+
+/* --- Highlighted sidebar link ---------------------------------------------
+   The scrim is the sidebar's own colour, so over the sidebar the spotlight
+   cutout has no visible edge: #1B3827 at 70% over #1B3827 is #1B3827. A nav
+   link brings no edge of its own either (transparent background, no border),
+   so the anchor has to draw the rectangle itself.
+
+   driver.js adds `driver-active-element` to the anchor for the life of its
+   step and strips it on transition, so this cleans itself up. Scoped to
+   `[data-tour]` links inside the sidebar's <aside>: the two dashboard cards
+   already carry a border and must not pick up a mauve frame.
+
+   `outline-offset: -1px` is load-bearing. The default offset draws the ring
+   OUTSIDE the box, which with stagePadding 0 is under the scrim. An outline,
+   not a border: the link's border-left is inline and 3px wide, and an inset
+   box-shadow is stripped by globals.css.
+
+   The label colour is inline on the <Link> in Sidebar.tsx, so lifting it
+   needs !important. Inside the cutout the label keeps its resting 55% white,
+   which is the sidebar's "not the current page" treatment; framed in mauve
+   it reads as an inactive item being pointed at. White is the lit state, and
+   pairs with the frame the way the current-page item pairs white text with
+   its mauve rule.                                                            */
+
+aside a[data-tour].driver-active-element {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  color: #ffffff !important;
 }
