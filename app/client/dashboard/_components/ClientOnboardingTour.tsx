@@ -87,6 +87,14 @@ export function ClientOnboardingTour({ show }: ClientOnboardingTourProps) {
       // system and a rounded rectangle.
       stageRadius: 0,
 
+      // Zero so the sidebar-link steps' spotlight box sits flush against
+      // the anchor — clientOnboardingTour.css's `outline-offset: -1px` on
+      // `.driver-active-element` depends on that gap being zero. The two
+      // dashboard-card steps (clientOnboardingTourSteps.ts) don't need the
+      // outline trick — they already carry their own border — so they swap
+      // in driver.js's own default padding for their own lifetime instead.
+      stagePadding: 0,
+
       // Four of the five desktop steps highlight a link. Without this, a
       // client who clicks the thing being pointed at navigates away, the
       // tour dies with no row written, and it re-fires on their next visit.

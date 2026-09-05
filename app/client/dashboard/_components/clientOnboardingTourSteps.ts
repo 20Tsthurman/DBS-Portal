@@ -39,6 +39,13 @@ const ANCHORS = {
  */
 export const DESKTOP_MEDIA_QUERY = "(min-width: 1024px)";
 
+/**
+ * driver.js's own default `stagePadding`. The tour runs at 0 (see
+ * ClientOnboardingTour.tsx) so the sidebar-link steps' outline sits flush;
+ * the two dashboard-card steps below restore this for their own lifetime.
+ */
+const CARD_STAGE_PADDING = 10;
+
 // ----------------------------------------------------------------------------
 // Copy — every string the tour can render, in one place.
 // ----------------------------------------------------------------------------
@@ -81,6 +88,16 @@ function dashboardSteps(): DriveStep[] {
   return [
     {
       element: ANCHORS.phaseTracker,
+      // Spreads the current config both ways — a bare `setConfig({
+      // stagePadding })` replaces the whole config with driver.js's
+      // defaults plus that one key, silently resetting stageRadius to 5
+      // and rounding the spotlight.
+      onHighlightStarted: (_element, _step, { driver: instance }) => {
+        instance.setConfig({ ...instance.getConfig(), stagePadding: CARD_STAGE_PADDING });
+      },
+      onDeselected: (_element, _step, { driver: instance }) => {
+        instance.setConfig({ ...instance.getConfig(), stagePadding: 0 });
+      },
       popover: {
         title: CLIENT_ONBOARDING_TOUR_COPY.phaseTracker.title,
         description: CLIENT_ONBOARDING_TOUR_COPY.phaseTracker.body,
@@ -90,6 +107,15 @@ function dashboardSteps(): DriveStep[] {
     },
     {
       element: ANCHORS.nextShoot,
+      // Identical to the phaseTracker step above rather than shared through
+      // a helper — the two are meant to read as one pattern, not a
+      // one-line call whose shape you have to go look up.
+      onHighlightStarted: (_element, _step, { driver: instance }) => {
+        instance.setConfig({ ...instance.getConfig(), stagePadding: CARD_STAGE_PADDING });
+      },
+      onDeselected: (_element, _step, { driver: instance }) => {
+        instance.setConfig({ ...instance.getConfig(), stagePadding: 0 });
+      },
       popover: {
         title: CLIENT_ONBOARDING_TOUR_COPY.nextShoot.title,
         description: CLIENT_ONBOARDING_TOUR_COPY.nextShoot.body,
