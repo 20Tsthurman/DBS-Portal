@@ -7,6 +7,7 @@ import type {
   ClientStatus,
   ClientType,
   PackageRecord,
+  ProjectPhase,
 } from "@/lib/supabase";
 import { SlidePanel } from "./SlidePanel";
 import {
@@ -20,8 +21,9 @@ import {
 } from "./formStyles";
 import {
   createClientAction,
-  updateProjectPricingAction,
+  updateProjectSettingsAction,
 } from "../_actions";
+import { PROJECT_PHASE_OPTIONS } from "../_lib/format";
 import { normalizePhone } from "@/lib/phone";
 
 export interface ClientInitialValues {
@@ -42,6 +44,13 @@ export interface ClientInitialValues {
   invitedAt?: string | null;
   monthlyPriceOverride?: number | null;
   monthlyHoursOverride?: number | null;
+  /**
+   * The client's current project phase — what their own dashboard renders in
+   * its phase tracker. Optional: a client with no projects row has never been
+   * moved anywhere, which is the same fact as 'onboarding' (the detail page
+   * resolves it that way, matching app/client/dashboard/page.tsx).
+   */
+  currentPhase?: ProjectPhase;
 }
 
 interface ClientFormPanelProps {
@@ -67,6 +76,7 @@ const emptyValues: ClientInitialValues = {
   invitedAt: null,
   monthlyPriceOverride: null,
   monthlyHoursOverride: null,
+  currentPhase: "onboarding",
 };
 
 type SubmitMode = "create" | "edit";
@@ -257,13 +267,14 @@ export function ClientFormPanel({
           return;
         }
 
-        const pricingRes = await updateProjectPricingAction({
+        const projectRes = await updateProjectSettingsAction({
           clientId: values.id,
           monthlyPriceOverride: priceOverride,
           monthlyHoursOverride: hoursOverride,
+          currentPhase: values.currentPhase ?? "onboarding",
         });
-        if (!pricingRes.ok) {
-          setError(pricingRes.error ?? "Failed to save custom pricing.");
+        if (!projectRes.ok) {
+          setError(projectRes.error ?? "Failed to save project settings.");
           return;
         }
       }
@@ -518,6 +529,36 @@ export function ClientFormPanel({
                   <option value="inactive">Inactive</option>
                 )}
               </select>
+            </div>
+          )}
+
+          {mode === "edit" && (
+            <div>
+              <label htmlFor="client-phase" style={labelStyle}>
+                Project Phase
+              </label>
+              <select
+                id="client-phase"
+                value={values.currentPhase ?? "onboarding"}
+                onChange={(e) =>
+                  setValues((v) => ({
+                    ...v,
+                    currentPhase: e.target.value as ProjectPhase,
+                  }))
+                }
+                onFocus={applyFocus}
+                onBlur={clearFocus}
+                style={fieldStyle}
+              >
+                {PROJECT_PHASE_OPTIONS.map((phase) => (
+                  <option key={phase.value} value={phase.value}>
+                    {phase.label}
+                  </option>
+                ))}
+              </select>
+              <p style={helperStyle}>
+                Shown to the client on their dashboard.
+              </p>
             </div>
           )}
 

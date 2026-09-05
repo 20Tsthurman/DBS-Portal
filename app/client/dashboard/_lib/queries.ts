@@ -3,6 +3,10 @@ import {
   type MessageRecord,
   type ProjectRecord,
 } from "@/lib/supabase";
+import {
+  CLIENT_ONBOARDING_TOUR_KEY,
+  CLIENT_ONBOARDING_TOUR_VERSION,
+} from "@/lib/tours";
 
 /**
  * The single most recent message in the signed-in client's thread,
@@ -50,4 +54,33 @@ export async function fetchMyProject(
     .maybeSingle();
   if (error) throw new Error(error.message);
   return (data as ProjectRecord | null) ?? null;
+}
+
+/**
+ * Has this person already finished with the client onboarding tour?
+ *
+ * The gate for Tour 1. An exact three-column match on
+ * (clerk_user_id, tour_key, version), which migration 021 covers with a
+ * UNIQUE — and therefore with the only index this read needs.
+ *
+ * The ROW is the answer; `outcome` is never consulted. A client who skipped
+ * the tour has decided not to see it, exactly as firmly as one who finished
+ * it, and re-firing it at them would be the portal arguing.
+ *
+ * Called from the dashboard page AFTER `requireCurrentClient()` resolves, so
+ * it never runs on the path where a client has no linked `clients` row yet.
+ */
+export async function fetchClientOnboardingTourSeen(
+  clerkUserId: string
+): Promise<boolean> {
+  const supabase = getSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from("tour_completions")
+    .select("id")
+    .eq("clerk_user_id", clerkUserId)
+    .eq("tour_key", CLIENT_ONBOARDING_TOUR_KEY)
+    .eq("version", CLIENT_ONBOARDING_TOUR_VERSION)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data !== null;
 }

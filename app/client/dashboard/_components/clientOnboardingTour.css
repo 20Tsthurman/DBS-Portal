@@ -1,0 +1,160 @@
+/* ---------------------------------------------------------------------------
+   driver.js skin — Digital Bloom Socials.
+
+   Every popover rule is scoped under `.dbs-tour-popover`, the `popoverClass`
+   the tour passes to driver.js. That is not decoration: it lifts each rule to
+   two-class specificity against driver.css's own single-class rules, so this
+   file wins no matter which stylesheet Next.js emits first. Nothing here
+   needs `!important` except the overlay, which driver.js paints with an
+   inline style (see the bottom of this file).
+
+   Colours are palette tokens from app/globals.css only. Fonts are the two
+   next/font variables declared on <html> in app/layout.tsx, which the popover
+   inherits — driver.js appends it to <body>.
+
+   Sharp corners and the absence of shadows are NOT set here: globals.css
+   already forces `border-radius: 0` and `box-shadow: none` on every element
+   with `!important`, which strips driver.css's `border-radius: 5px` and
+   `box-shadow: 0 1px 10px #0006` for free.
+--------------------------------------------------------------------------- */
+
+.driver-popover.dbs-tour-popover {
+  /* driver.css declares `all: unset` and then a hardcoded Helvetica stack, so
+     the popover does not inherit the body font and this has to be restated. */
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text-body);
+  padding: 20px;
+  /* driver.css caps at 300px; the body copy reads better one step wider. */
+  max-width: 320px;
+}
+
+.dbs-tour-popover .driver-popover-title {
+  font-family: var(--font-playfair), serif;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  /* Reserves the top-right corner for "Skip tour", which is absolutely
+     positioned out of flow and would otherwise sit on top of a wrapped
+     title such as "Your content, before it posts". */
+  padding-right: 76px;
+}
+
+.dbs-tour-popover .driver-popover-description {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-body);
+}
+
+/* driver.css spaces title-to-description with a 5px rule of equal specificity
+   to a plain descendant selector, so out-ranking it takes the same shape. */
+.dbs-tour-popover .driver-popover-title[style*="block"] + .driver-popover-description {
+  margin-top: 8px;
+}
+
+.dbs-tour-popover .driver-popover-footer {
+  margin-top: 20px;
+}
+
+/* --- Next / Back / Done ---------------------------------------------------
+   Matches the portal's button idiom: uppercase, tracked out, square, with a
+   brightness shift on hover (the same treatment as .client-cta-button).      */
+
+.dbs-tour-popover .driver-popover-footer-btn {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 9px 16px;
+  line-height: 1.2;
+  border: 1px solid var(--border);
+  background-color: transparent;
+  color: var(--text-body);
+  transition: filter 120ms ease-out, background-color 120ms ease-out;
+  /* Belt and braces. driver.js 1.8.0 opens this rule with `all: unset`, which
+     already zeroes the `text-shadow: 0 1px 0 #fff` that older builds set on
+     footer buttons; restating it keeps the skin correct if that changes. */
+  text-shadow: none;
+}
+
+.dbs-tour-popover .driver-popover-footer-btn:hover,
+.dbs-tour-popover .driver-popover-footer-btn:focus {
+  background-color: transparent;
+  filter: brightness(0.92);
+}
+
+.dbs-tour-popover .driver-popover-next-btn {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.dbs-tour-popover .driver-popover-next-btn:hover,
+.dbs-tour-popover .driver-popover-next-btn:focus {
+  background-color: var(--accent);
+  filter: brightness(0.92);
+}
+
+.dbs-tour-popover .driver-popover-navigation-btns button + button {
+  margin-left: 8px;
+}
+
+/* --- Skip tour ------------------------------------------------------------
+   driver.js sizes this for a single "×" glyph (32x28, centred). It carries a
+   word now, so the box has to size to its text.                              */
+
+.dbs-tour-popover .driver-popover-close-btn {
+  width: auto;
+  height: auto;
+  top: 20px;
+  right: 20px;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.dbs-tour-popover .driver-popover-close-btn:hover,
+.dbs-tour-popover .driver-popover-close-btn:focus {
+  color: var(--text-primary);
+}
+
+/* --- Arrow ----------------------------------------------------------------
+   A CSS triangle built from borders. Each side class leaves exactly one
+   border colour visible, hardcoded to driver.js's white popover, so all four
+   have to be repainted in the popover's own background.                      */
+
+.dbs-tour-popover .driver-popover-arrow-side-top {
+  border-top-color: var(--surface-raised);
+}
+.dbs-tour-popover .driver-popover-arrow-side-bottom {
+  border-bottom-color: var(--surface-raised);
+}
+.dbs-tour-popover .driver-popover-arrow-side-left {
+  border-left-color: var(--surface-raised);
+}
+.dbs-tour-popover .driver-popover-arrow-side-right {
+  border-right-color: var(--surface-raised);
+}
+
+/* --- Overlay --------------------------------------------------------------
+   Outside the popover, so `popoverClass` cannot reach it and the specificity
+   trick above does not apply. driver.js assigns the fill as an INLINE style
+   on the <path> (`path.style.fill = config.overlayColor`), which no ordinary
+   stylesheet rule can outrank — hence `!important`.
+
+   The tour also passes `overlayColor: "var(--sidebar-bg)"`, which resolves on
+   its own in every browser that supports custom properties in inline styles.
+   Both routes name the same token; this one is the guarantee.                */
+
+.driver-overlay path {
+  fill: var(--sidebar-bg) !important;
+}

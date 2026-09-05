@@ -9,6 +9,15 @@ export interface SidebarNavItem {
   label: string;
   href: string;
   badge?: number;
+  /**
+   * Opt-in `data-tour` anchor for a guided tour, e.g. "nav-review".
+   *
+   * This component is SHARED with the owner layout, so the attribute is never
+   * hardcoded here — only the client nav in app/client/layout.tsx populates
+   * it. Left undefined, React omits the attribute entirely and Kelsey's
+   * sidebar renders exactly the markup it did before tours existed.
+   */
+  tourId?: string;
 }
 
 export interface SidebarNavSection {
@@ -124,6 +133,7 @@ export function Sidebar({ eyebrow, navSections }: SidebarProps) {
                 <Link
                   key={item.href}
                   href={item.href}
+                  data-tour={item.tourId}
                   className="flex items-center justify-between gap-3 px-6 py-2.5 text-sm transition-colors"
                   style={{
                     color: isActive ? "#FFFFFF" : "rgba(255,255,255,0.55)",

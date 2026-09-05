@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import type { ProjectPhase } from "@/lib/supabase";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { fetchActivePackages, fetchClientDetail } from "../_lib/queries";
 import {
@@ -7,6 +8,7 @@ import {
   clientStatusTone,
   formatCurrency,
   formatDate,
+  projectPhaseLabel,
 } from "../_lib/format";
 import { TypePill } from "../_components/TypePill";
 import { ClientContactInfo } from "./_components/ClientContactInfo";
@@ -117,7 +119,13 @@ export default async function OwnerClientDetailPage({ params }: PageProps) {
   ];
 
   const effectivePrice = effectiveMonthlyPrice(project, pkg);
+  // Never null. A client with no projects row has not been moved anywhere,
+  // which is the same fact as 'onboarding' — resolved here exactly the way
+  // the client's own dashboard resolves it (app/client/dashboard/page.tsx),
+  // so this line and their phase tracker can never disagree.
+  const currentPhase: ProjectPhase = project?.current_phase ?? "onboarding";
   const metaParts = [
+    `Phase: ${projectPhaseLabel(currentPhase)}`,
     pkg?.name ?? null,
     project?.start_date ? formatDate(project.start_date) : null,
     effectivePrice !== null ? `${formatCurrency(effectivePrice)}/mo` : null,
@@ -196,6 +204,7 @@ export default async function OwnerClientDetailPage({ params }: PageProps) {
               invitedAt: client.invited_at,
               monthlyPriceOverride: project?.monthly_price_override ?? null,
               monthlyHoursOverride: project?.monthly_hours_override ?? null,
+              currentPhase,
             }}
           />
         </div>

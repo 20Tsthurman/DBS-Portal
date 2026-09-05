@@ -1,4 +1,8 @@
-import type { ClientStatus, ClientType } from "@/lib/supabase";
+import type {
+  ClientStatus,
+  ClientType,
+  ProjectPhase,
+} from "@/lib/supabase";
 
 export function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
@@ -102,4 +106,29 @@ export function clientStatusTone(status: ClientStatus): StatusTone {
     case "lead":
       return "warning";
   }
+}
+
+/**
+ * The four project phases in order, with the labels the client sees.
+ *
+ * Deliberately duplicated from the `PHASES` array in
+ * app/client/dashboard/_components/PhaseTracker.tsx rather than imported:
+ * that array is not exported, and reaching into a client-dashboard component
+ * from the owner surface would couple the two surfaces for four strings. The
+ * labels are a locked decision — if they ever change, change both places.
+ */
+export const PROJECT_PHASE_OPTIONS = [
+  { value: "onboarding", label: "Onboarding" },
+  { value: "strategy", label: "Strategy" },
+  { value: "content", label: "Content" },
+  { value: "reporting", label: "Reporting" },
+] as const satisfies ReadonlyArray<{ value: ProjectPhase; label: string }>;
+
+export function projectPhaseLabel(phase: ProjectPhase): string {
+  // The CHECK constraint on projects.current_phase makes a miss unreachable;
+  // the fallback matches how the client dashboard resolves an absent value.
+  return (
+    PROJECT_PHASE_OPTIONS.find((option) => option.value === phase)?.label ??
+    "Onboarding"
+  );
 }

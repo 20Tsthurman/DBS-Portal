@@ -4,10 +4,15 @@ import type { ProjectPhase } from "@/lib/supabase";
 import { fetchMyUpcomingShoots } from "@/app/client/book/_lib/queries";
 import { fetchMyInvoices } from "@/app/client/invoices/_lib/queries";
 import { fetchMyFiles } from "@/app/client/files/_lib/queries";
-import { fetchMyLastMessage, fetchMyProject } from "./_lib/queries";
+import {
+  fetchClientOnboardingTourSeen,
+  fetchMyLastMessage,
+  fetchMyProject,
+} from "./_lib/queries";
 import { PhaseTracker } from "./_components/PhaseTracker";
 import { NextShoot } from "./_components/NextShoot";
 import { ActivityFeed } from "./_components/ActivityFeed";
+import { ClientOnboardingTour } from "./_components/ClientOnboardingTour";
 
 export const dynamic = "force-dynamic";
 
@@ -16,13 +21,28 @@ export default async function ClientDashboardPage() {
 
   // fetchMyUpcomingShoots scopes by the signed-in client itself; the others
   // take client.id directly. All run concurrently.
-  const [upcomingShoots, invoices, files, lastMessage, project] =
+  //
+  // The tour gate rides along here rather than in a useEffect on the client.
+  // Two reasons it has to be server-side, and in this position specifically:
+  // it is downstream of the `requireCurrentClient()` await above, so a client
+  // whose Clerk webhook has not linked their `clients` row yet takes the
+  // throw → app/client/error.tsx path and never renders the tour at all; and
+  // resolving it before paint means the tour either starts or doesn't, with
+  // no flash of a spotlight over a dashboard the client has already read.
+  const [upcomingShoots, invoices, files, lastMessage, project, tourSeen] =
     await Promise.all([
       fetchMyUpcomingShoots(),
       fetchMyInvoices(client.id),
       fetchMyFiles(client.id),
       fetchMyLastMessage(client.id),
       fetchMyProject(client.id),
+      // clerk_user_id is non-null in practice — this row was found BY that
+      // column — but it is nullable in the schema. Treat an absent id as
+      // "already seen": there is no id to write a completion row against, so
+      // firing the tour would only produce one that can never be recorded.
+      client.clerk_user_id
+        ? fetchClientOnboardingTourSeen(client.clerk_user_id)
+        : Promise.resolve(true),
     ]);
 
   const firstName = client.name.trim().split(/\s+/)[0] || client.name;
@@ -55,7 +75,11 @@ export default async function ClientDashboardPage() {
           <PhaseTracker phase={phase} completed={projectCompleted} />
         </section>
 
-        <section>
+        {/* The tour anchors on this <section>, not inside NextShoot, so the
+            step highlights the heading with the card and reads identically
+            whether or not a shoot is scheduled — NextShoot returns a card or
+            an empty state, and one anchor beats two. */}
+        <section data-tour="next-shoot">
           <h2 style={sectionTitleStyle}>Next Shoot</h2>
           <NextShoot shoot={nextShoot} />
         </section>
@@ -69,6 +93,8 @@ export default async function ClientDashboardPage() {
           />
         </section>
       </div>
+
+      <ClientOnboardingTour show={!tourSeen} />
     </section>
   );
 }

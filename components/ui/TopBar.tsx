@@ -14,6 +14,15 @@ interface TopBarProps {
    * passes the persistent <TimerPill/> here; the client layout omits it.
    */
   rightSlot?: ReactNode;
+  /**
+   * Opt-in `data-tour` anchor for the hamburger button, e.g. "mobile-menu".
+   *
+   * Same reasoning as `SidebarNavItem.tourId`: this component is SHARED with
+   * the owner layout, so nothing is hardcoded on the button. Only the client
+   * layout passes a value, and when it is undefined React omits the attribute
+   * and the owner top bar is unchanged.
+   */
+  menuButtonTourId?: string;
 }
 
 function resolveTitle(
@@ -29,7 +38,12 @@ function resolveTitle(
   return match?.label ?? fallbackTitle;
 }
 
-export function TopBar({ navSections, fallbackTitle, rightSlot }: TopBarProps) {
+export function TopBar({
+  navSections,
+  fallbackTitle,
+  rightSlot,
+  menuButtonTourId,
+}: TopBarProps) {
   const pathname = usePathname();
   const title = resolveTitle(pathname, navSections, fallbackTitle);
   const { open } = useMobileNav();
@@ -47,6 +61,7 @@ export function TopBar({ navSections, fallbackTitle, rightSlot }: TopBarProps) {
           type="button"
           onClick={open}
           aria-label="Open navigation menu"
+          data-tour={menuButtonTourId}
           className="flex items-center justify-center lg:hidden"
           style={{
             width: 44,

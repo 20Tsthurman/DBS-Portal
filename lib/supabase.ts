@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { TourKey, TourOutcome } from "@/lib/tours";
 
 export type ClientType = "brand" | "bride";
 export type ClientStatus = "active" | "onboarding" | "inactive" | "lead";
@@ -612,6 +613,25 @@ export interface RevisionNoteRecord {
   created_at: string;
 }
 
+/**
+ * One person's completion of one build of one guided tour. Added in
+ * migration 021. The row's EXISTENCE is the completion — nothing is ever
+ * updated, and the gate never reads `outcome`.
+ *
+ * Keyed on the Clerk user id rather than clients.id so owner-side tours can
+ * reuse the table (Kelsey has no clients row). There is deliberately no
+ * foreign key; see the migration for why.
+ */
+export interface TourCompletionRecord {
+  id: string;
+  clerk_user_id: string;
+  tour_key: TourKey;
+  version: number;
+  outcome: TourOutcome;
+  /** Named for the end of the tour, not for one of its two outcomes. */
+  ended_at: string;
+}
+
 type Relationships = readonly {
   foreignKeyName: string;
   columns: string[];
@@ -663,6 +683,9 @@ export type Database = {
         RevisionRoundRecord & Record<string, unknown>
       >;
       revision_notes: TableShape<RevisionNoteRecord & Record<string, unknown>>;
+      tour_completions: TableShape<
+        TourCompletionRecord & Record<string, unknown>
+      >;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

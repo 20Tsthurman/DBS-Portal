@@ -7,6 +7,7 @@ import {
   type ClientRecord,
   type ClientStatus,
   type ClientType,
+  type ProjectPhase,
   type ProjectRecord,
   type TimeLogCategory,
   type TimeLogRecord,
@@ -146,6 +147,12 @@ const VALID_CLIENT_STATUSES: ClientStatus[] = [
   "onboarding",
   "inactive",
   "lead",
+];
+const VALID_PROJECT_PHASES: ProjectPhase[] = [
+  "onboarding",
+  "strategy",
+  "content",
+  "reporting",
 ];
 
 export interface CreateClientInput {
@@ -391,26 +398,33 @@ export async function togglePinClient(
 }
 
 // ---------------------------------------------------------------------------
-// updateProjectPricingAction
+// updateProjectSettingsAction
 //
-// Persists per-client price/hours overrides onto the client's most recent
-// projects row. NULL = inherit the package default. Mirrors the lookup
-// pattern in `updateNotesAction` above (same most-recent-by-start_date pick).
+// Persists the projects-row fields the Edit Client panel owns onto the
+// client's most recent projects row: the price/hours overrides (NULL =
+// inherit the package default) and current_phase, which is what the client's
+// own dashboard renders in its phase tracker. Mirrors the lookup pattern in
+// `updateNotesAction` above (same most-recent-by-start_date pick).
+//
 // If the client has no projects row yet, one is inserted with the same
-// onboarding defaults the invite path uses (current_phase='onboarding',
-// status='active', no package_id) so the overrides land somewhere.
+// defaults the invite path uses (status='active', no package_id), carrying
+// the submitted phase. Only a never-invited draft client can reach that
+// branch — /api/invite always ensures a projects row exists before portal
+// access does (app/api/invite/route.ts:392-397), so anyone who can actually
+// see the phase tracker already has a row to update.
 //
 // The clients PATCH route (app/api/clients/[id]/route.ts) intentionally
 // stays scoped to the clients table — projects writes route through here.
 // ---------------------------------------------------------------------------
-export interface UpdateProjectPricingInput {
+export interface UpdateProjectSettingsInput {
   clientId: string;
   monthlyPriceOverride: number | null;
   monthlyHoursOverride: number | null;
+  currentPhase: ProjectPhase;
 }
 
-export async function updateProjectPricingAction(
-  input: UpdateProjectPricingInput
+export async function updateProjectSettingsAction(
+  input: UpdateProjectSettingsInput
 ): Promise<ActionResult> {
   const guard = await requireOwner();
   if (!guard.ok) return { ok: false, error: guard.error };
@@ -438,6 +452,12 @@ export async function updateProjectPricingAction(
       };
     }
   }
+  if (!VALID_PROJECT_PHASES.includes(input.currentPhase)) {
+    return {
+      ok: false,
+      error: "Phase must be onboarding, strategy, content, or reporting",
+    };
+  }
 
   const supabase = getSupabaseServiceClient();
 
@@ -453,7 +473,7 @@ export async function updateProjectPricingAction(
   if (!existingRow) {
     const { error: insertError } = await supabase.from("projects").insert({
       client_id: input.clientId,
-      current_phase: "onboarding",
+      current_phase: input.currentPhase,
       status: "active",
       monthly_price_override: input.monthlyPriceOverride,
       monthly_hours_override: input.monthlyHoursOverride,
@@ -464,6 +484,7 @@ export async function updateProjectPricingAction(
     const { error: updateError } = await supabase
       .from("projects")
       .update({
+        current_phase: input.currentPhase,
         monthly_price_override: input.monthlyPriceOverride,
         monthly_hours_override: input.monthlyHoursOverride,
       })
